@@ -16,7 +16,7 @@ public:
     void init();
 
     // Заливка всього екрану кольором
-    void clear(uint16_t color);
+    void clear(uint16_t color = TFT_BLACK);
 
     // Малювання тексту в позиції (x, y)
     void drawText(int x, int y, const char* text, uint16_t color);
@@ -24,10 +24,19 @@ public:
     // Малювання тексту по центру екрана
     void drawCenteredText(const char* text, uint16_t color, uint8_t fontSize = 4);
 
+    // Виводить накопичений у спрайті кадр на реальний екран.
+    // Викликати після того, як усе малювання кадру завершено.
+    void flush();
+
     // Ширина/висота активної області екрану (з урахуванням rotation)
     int width() const;
     int height() const;
 
 private:
-    TFT_eSPI& tft_;
+    TFT_eSPI&   tft_;
+    TFT_eSprite sprite_; // вся робота з екраном (drawText/clear/...) йде через спрайт,
+                         // на реальний дисплей кадр потрапляє лише через flush()
+ 
+    int width_  = 0;
+    int height_ = 0;
 };

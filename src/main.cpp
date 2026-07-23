@@ -67,12 +67,15 @@ void setup() {
     display.drawCenteredText("Hello, ESP32!", TFT_YELLOW, 4);
 
     Serial.println("setup done.");
+    display.flush();
 }
 
 void loop() {
+    display.clear();
     // нічого не робимо — напис вже намальовано в setup()
     display.drawCenteredText("Hello, ESP32!", currentColor, 4);
     Serial.printf("color %04X\n", currentColor);
     currentColor = get_next_color(currentColor);
+    display.flush();
     delay(1000);
 }

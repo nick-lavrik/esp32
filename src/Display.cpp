@@ -6,39 +6,48 @@
 //   env:esp32-4848s040    -> src/TftInstance_4848S040.cpp
 // Тут ми лише беремо на нього посилання.
 
-Display::Display() : tft_(tft) {}
+Display::Display() : tft_(tft), sprite_(&tft_) {}
 
 void Display::init() {
-    Serial.println("Display::init()"); delay(100);
     tft_.init();
-    Serial.println("tft.init() ok"); delay(100);
     tft_.setRotation(TFT_ROTATION);
-    Serial.println("tft.setRoration() ok"); delay(100);
-    tft_.fillScreen(TFT_BLACK);
-    Serial.println("tft.fillScreen() ok"); delay(100);
+
+    width_  = tft_.width();
+    height_ = tft_.height();
+
+    // Спрайт на весь розмір екрана — вся подальша робота йде через нього.
+    sprite_.setColorDepth(16);
+    sprite_.createSprite(width_, height_);
+    sprite_.fillSprite(TFT_BLACK);
+
+    flush(); // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
 }
 
 void Display::clear(uint16_t color) {
-    tft_.fillScreen(color);
+    sprite_.fillSprite(color);
 }
 
 void Display::drawText(int x, int y, const char* text, uint16_t color) {
-    tft_.setTextColor(color);
-    tft_.drawString(text, x, y);
+    sprite_.setTextColor(color);
+    sprite_.drawString(text, x, y);
 }
 
 void Display::drawCenteredText(const char* text, uint16_t color, uint8_t fontSize) {
-    tft_.setTextColor(color, TFT_BLACK);
-    tft_.setTextSize(fontSize);
-    tft_.setTextDatum(MC_DATUM); // Middle-Center — спільний для TFT_eSPI і LovyanGFX
-    tft_.drawString(text, width() / 2, height() / 2);
-    tft_.setTextDatum(TL_DATUM); // повертаємо датум за замовчуванням
+    sprite_.setTextColor(color, TFT_BLACK);
+    sprite_.setTextSize(fontSize);
+    sprite_.setTextDatum(MC_DATUM); // Middle-Center — спільний для TFT_eSPI і LovyanGFX
+    sprite_.drawString(text, width() / 2, height() / 2);
+    sprite_.setTextDatum(TL_DATUM); // повертаємо датум за замовчуванням
+}
+
+void Display::flush() {
+    sprite_.pushSprite(0, 0);
 }
 
 int Display::width() const {
-    return tft_.width();
+    return width_;
 }
-
+ 
 int Display::height() const {
-    return tft_.height();
+    return height_;
 }
