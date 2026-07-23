@@ -1,4 +1,5 @@
 // Display.cpp
+#include <stdarg.h> // Обов'язково для роботи з трикрапкою (...)
 #include "Display.h"
 
 // Глобальний об'єкт "tft" створюється рівно в одному файлі на середовище:
@@ -16,8 +17,15 @@ void Display::init() {
     height_ = tft_.height();
 
     // Спрайт на весь розмір екрана — вся подальша робота йде через нього.
-    sprite_.setColorDepth(16);
+    sprite_.setColorDepth(SPRITE_COLOR_DEPTH); // 16
+    sprite_.setSwapBytes(true);
     sprite_.createSprite(width_, height_);
+    void* buf = sprite_.createSprite(width_, height_);
+    if (buf == nullptr) {
+        Serial.println("[Display] ПОМИЛКА: createSprite() не зміг виділити пам'ять!");
+        Serial.printf("[Display] Потрібно: %d байт, вільно (heap): %u байт\n", width_ * height_ * 2, ESP.getFreeHeap());
+    }
+
     sprite_.fillSprite(TFT_BLACK);
 
     flush(); // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
@@ -33,11 +41,19 @@ void Display::drawText(int x, int y, const char* text, uint16_t color) {
 }
 
 void Display::drawCenteredText(const char* text, uint16_t color, uint8_t fontSize) {
-    sprite_.setTextColor(color, TFT_BLACK);
+    sprite_.setTextColor(color, TFT_TRANSPARENT);
     sprite_.setTextSize(fontSize);
     sprite_.setTextDatum(MC_DATUM); // Middle-Center — спільний для TFT_eSPI і LovyanGFX
     sprite_.drawString(text, width() / 2, height() / 2);
     sprite_.setTextDatum(TL_DATUM); // повертаємо датум за замовчуванням
+}
+
+void Display::setCursor(int32_t x, int32_t y) {
+    sprite_.setCursor(x, y);
+}
+
+void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
+    sprite_.pushImage(x, y, w, h, data);
 }
 
 void Display::flush() {

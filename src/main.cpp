@@ -13,6 +13,10 @@ Display display;
 //#include <TFT_eSPI.h>
 //TFT_eSPI tft = TFT_eSPI();
 
+#include "BackgroundImages.h"
+
+size_t currentBackgroundImageIndex = 0;
+
 const uint16_t my_colors[] = {
     TFT_RED,
     TFT_GREEN,
@@ -48,7 +52,6 @@ void setup() {
 
     Serial.begin(115200);
     Serial.println("Hello, ESP32!");
-    delay(50);
 
     #ifdef BOARD_4848S040
     pinMode(TFT_BL, OUTPUT);
@@ -61,21 +64,52 @@ void setup() {
     #endif
 
     display.init();
-    Serial.println("display.init() ok"); delay(100);
     display.clear(TFT_BLACK);
-    Serial.println("display.clear() ok"); delay(100);
     display.drawCenteredText("Hello, ESP32!", TFT_YELLOW, 4);
 
-    Serial.println("setup done.");
     display.flush();
 }
 
+const uint32_t loopFrameRate() {
+    // --- Метрики "здоров'я" системи ---
+    static uint32_t loopCounter = 0;
+    static uint32_t loopsPerSecond = 0;
+    static uint32_t lastLoopCheckMs = 0;
+
+    loopCounter++;
+
+    uint32_t now = millis();
+
+    // Підрахунок швидкості циклів loop() за секунду
+    if (now - lastLoopCheckMs >= 1000) {
+      loopsPerSecond = loopCounter;
+      loopCounter = 0;
+      lastLoopCheckMs = now;
+    }
+
+    return loopsPerSecond;
+}
+
 void loop() {
+
     display.clear();
+    currentBackgroundImageIndex = nextBackgroundIndex(currentBackgroundImageIndex);
+    // display.pushImage(0, 0, display.width(), display.height(), backgroundImages[currentBackgroundImageIndex]);
+    display.pushImage((uint32_t) (display.width() - 320) / 2, (uint32_t) (display.height() - 240) / 2, 320, 240, backgroundImages[currentBackgroundImageIndex]);
+
     // нічого не робимо — напис вже намальовано в setup()
-    display.drawCenteredText("Hello, ESP32!", currentColor, 4);
-    Serial.printf("color %04X\n", currentColor);
+    // display.drawCenteredText("Hello, ESP32!", currentColor, 4);
+    display.setTextColor(currentColor);
+    display.setTextSize(4);
+    
+    display.setCursor((display.width() - display.textWidth("Hello, ESP321")) / 2, (display.height() - display.fontHeight()) / 2);
+    display.printf("Hello, ESP32!");
     currentColor = get_next_color(currentColor);
+
+    display.setCursor(10, 32);
+    display.setTextSize(2);
+    display.printf("frame rate: %d/s", loopFrameRate());
+
     display.flush();
     delay(1000);
 }
