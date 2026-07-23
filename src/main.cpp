@@ -70,9 +70,75 @@ void setupDisplay() {
     // display.drawCenteredText("Hello, ESP32!", TFT_YELLOW, 4);
 }
 
+#include "TouchController.h"
+#include "TouchEvents.h"
+
+TouchController touchController;
+
+static TouchScreenConfig makeMapperConfig() {
+    TouchScreenConfig c;
+    // Приклад: контролер видає сирі 0..4095, екран фізично 320x240,
+    // а сама панель ще й повернута (типова ситуація для дешевих SPI TFT).
+    // c.rawMinX = 200;  c.rawMaxX = 3900; // підбирається калібруванням
+    // c.rawMinY = 200;  c.rawMaxY = 3900;
+
+    #ifdef BOARD_ST7789
+    c.screenWidth  = 320;
+    c.screenHeight = 240;
+
+    c.invertY = true;   // якщо вертикаль перевернута
+    c.invertX = true;   // якщо горизонталь перевернута
+    c.swapXY = false;  // якщо екран повернутий на 90/270 градусів
+    #endif
+
+    #ifdef BOARD_4848S040
+    c.screenWidth  = 480;
+    c.screenHeight = 480;
+    #endif
+
+    return c;
+}
+
+TouchScreenConfig touchScreenConfig = makeMapperConfig();
+TouchPointMapper mapper(touchScreenConfig);
+TouchEvents touch(touchScreenConfig);
+
+void onTouchLog(TouchPoint p)                              { Serial.printf("Touch: %d, %d\n", p.x, p.y); }
+void onHoldHandler(TouchPoint p, unsigned long ms)         { Serial.printf("Hold at %d,%d for %lu ms\n", p.x, p.y, ms); }
+void onDblClickHandler(TouchPoint p)                       { Serial.printf("Double click: %d, %d\n", p.x, p.y); }
+
+void onSwipeLeftHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe LEFT"); }
+void onSwipeRightHandler(TouchPoint start, TouchPoint end) { Serial.println("Swipe RIGHT"); }
+void onSwipeUpHandler(TouchPoint start, TouchPoint end)    { Serial.println("Swipe UP"); }
+void onSwipeDownHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe DOWN"); }
+
+void onSwipeFromBottomHandler(TouchPoint start, TouchPoint end) { Serial.println("Swipe FROM BOTTOM (напр., відкрити меню)"); }
+void onSwipeFromTopHandler(TouchPoint start, TouchPoint end)    { Serial.println("Swipe FROM TOP (напр., шторка сповіщень)"); }
+void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end)   { Serial.println("Swipe FROM LEFT (напр., назад)"); }
+void onSwipeFromRightHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe FROM RIGHT (напр., бокова панель)"); }
+
+void setupTouchScreen() {
+    #ifdef BOARD_ST7789
+    touch.setTouchPointMapper(&mapper);
+    #endif
+    touchController.setup(&touch);
+    touchController.events().onTouch(onTouchLog);
+    touchController.events().onHold(onHoldHandler);
+    touchController.events().onDblClick(onDblClickHandler);
+    touchController.events().onSwipeLeft(onSwipeLeftHandler);
+    touchController.events().onSwipeRight(onSwipeRightHandler);
+    touchController.events().onSwipeUp(onSwipeUpHandler);
+    touchController.events().onSwipeDown(onSwipeDownHandler);
+    touchController.events().onSwipeFromBottom(onSwipeFromBottomHandler);
+    touchController.events().onSwipeFromTop(onSwipeFromTopHandler);
+    touchController.events().onSwipeFromLeft(onSwipeFromLeftHandler);
+    touchController.events().onSwipeFromRight(onSwipeFromRightHandler);
+}
+
 void setup() {
     setupSerial();
     setupDisplay();
+    setupTouchScreen();
     setupWiFi();
     setupNtpService();
     display.flush();
@@ -136,13 +202,23 @@ void drawSystemInfo() {
   // img.printf("Light: %d%%", lightPercent);
 }
 
+void drawPoints() {
+    display.drawRect(0, 0, 1, 1, TFT_WHITE);
+    display.drawRect(display.width()-1, 0, 1, 1, TFT_WHITE);
+    display.drawRect(display.width()-1, display.height() - 1, 1, 1, TFT_WHITE);
+    display.drawRect(0, display.height() - 1, 1, 1, TFT_WHITE);
+}
+
 void loop() {
+
     doPing();
 
     display.clear();
+    touchController.update();
 
     drawBackgroundImage();
     drawSystemInfo();
+    drawPoints();
     drawTime();
 
     display.flush();

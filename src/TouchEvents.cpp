@@ -1,7 +1,8 @@
+#include "TouchScreenConfig.h"
 #include "TouchEvents.h"
 #include <math.h>
 
-TouchEvents::TouchEvents(const TouchEventsConfig &config) : _config(config) {}
+TouchEvents::TouchEvents(const TouchScreenConfig &config) : _config(config) {}
 
 // ---- Підписка ----
 int TouchEvents::onTouch(TouchCallback cb)           { return _onTouch.add(cb); }
@@ -28,6 +29,25 @@ void TouchEvents::offSwipeFromBottom(int handle) { _onSwipeFromBottom.remove(han
 void TouchEvents::offSwipeFromTop(int handle)    { _onSwipeFromTop.remove(handle); }
 void TouchEvents::offSwipeFromLeft(int handle)   { _onSwipeFromLeft.remove(handle); }
 void TouchEvents::offSwipeFromRight(int handle)  { _onSwipeFromRight.remove(handle); }
+
+/* void drawTouchPoint(bool touched, TouchPoint p) {
+  static uint32_t lastDump = millis();
+  if (ts.touched()) {
+    TS_Point p = ts.getPoint();
+    static int minX = 4095, maxX = 0, minY = 4095, maxY = 0;
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+    // Serial.printf("raw(x=%4d y=%4d) | screen(x=%4d y=%4d) | bounds: X[%4d-%4d] Y[%4d-%4d]\n", p.x, p.y, mapTouchX(p.x), mapTouchY(p.y), minX, maxX, minY, maxY);
+    TouchPoint p2 = mapper.map(p.x, p.y);
+
+    img.drawCircle(p2.x, p2.y, 3, TFT_RED);
+    img.fillCircle(p2.x, p2.y, 2, TFT_YELLOW);
+    Serial.printf("raw(x=%4d y=%4d) | screen(x=%4d y=%4d) | map(x=%4d y=%4d) | bounds: X[%4d-%4d] Y[%4d-%4d]\n", p.x, p.y, mapTouchX(p.x), mapTouchY(p.y), p2.x, p2.y, minX, maxX, minY, maxY);
+    lastDump = millis();
+  }
+} */
 
 void TouchEvents::update(bool touched, TouchPoint point) {
     unsigned long now = millis();

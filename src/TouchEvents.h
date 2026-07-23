@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#include "TouchEventsConfig.h"
+#include "TouchScreenConfig.h"
 #include "CallbackList.h"
 #include "TouchPointMapper.h"
 #include "TouchPoint.h"
@@ -13,6 +13,8 @@
 
 class TouchEvents {
 public:
+    char dummy[32] = "initial";
+
     // Максимум одночасних колбеків на один івент. За потреби - збільш тут.
     static const int MAX_CALLBACKS = 4;
 
@@ -20,7 +22,7 @@ public:
     typedef void (*HoldCallback)(TouchPoint point, unsigned long holdDurationMs);
     typedef void (*SwipeCallback)(TouchPoint start, TouchPoint end);
 
-    explicit TouchEvents(const TouchEventsConfig &config = TouchEventsConfig());
+    explicit TouchEvents(const TouchScreenConfig &config = TouchScreenConfig());
 
     // ---- Підписка (кожна повертає handle для подальшої відписки) ----
     int onTouch(TouchCallback cb);
@@ -63,6 +65,8 @@ public:
             auto p = ts.getPoint();
             TouchPoint raw{p.x, p.y};
             TouchPoint point = _mapper ? _mapper->map(raw) : raw;
+            Serial.printf("touch raw{x: %d y:%d} screen{x: %d y: %d}\n", raw.x, raw.y, point.x, point.y);
+
             update(true, point);
         } else {
             update(false, TouchPoint{});
@@ -74,7 +78,7 @@ private:
 
     void fireSwipe(int dx, int dy);
 
-    TouchEventsConfig _config;
+    TouchScreenConfig _config;
     TouchPointMapper *_mapper = nullptr;
 
     // Стан жесту

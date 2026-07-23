@@ -39,6 +39,8 @@ public:
     size_t   fontHeight() { return sprite_.fontHeight(); }
     void     setTextColor(uint16_t color) { sprite_.setTextColor(color); }
     void     setTextColor(uint16_t color, uint16_t bg) { sprite_.setTextColor(color, bg); }
+
+    void     drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) { sprite_.drawRect(x, y, w, h, color); }
     uint16_t drawString(const char *text, int32_t x, int32_t y) { return sprite_.drawString(text, x, y); }
 
     int16_t textWidth(const char *string) { return sprite_.textWidth(string); }
