@@ -1,0 +1,54 @@
+#include <TFT_eSPI.h>
+
+#include "led.h"
+
+// --- RGB LED ---
+#define LED_R 22
+#define LED_G 16
+#define LED_B 17
+
+struct RainbowColor {
+  bool r, g, b;
+  const char* name;
+};
+
+// Послідовність кольорів "веселки", доступних при бінарному керуванні каналами
+static const RainbowColor rainbow[] = {
+  {true,  false, false, "Red"    },
+  {true,  true,  false, "Yellow" },
+  {false, true,  false, "Green"  },
+  {false, true,  true,  "Cyan"   },
+  {false, false, true,  "Blue"   },
+  {true,  false, true,  "Magenta"},
+};
+
+static const size_t rainbowLen = sizeof(rainbow) / sizeof(rainbow[0]);
+static size_t currentIndex = 0;
+static unsigned long lastChangeMs = 0;
+const unsigned long colorDelayMs = 500; // затримка між кольорами
+
+void loopLedGradient() {
+  static unsigned long lastChangeMs = millis();
+  if (millis() - lastChangeMs >= colorDelayMs) {
+    lastChangeMs = millis();
+
+    const RainbowColor& c = rainbow[currentIndex];
+    setLed(c.r, c.g, c.b);
+
+    currentIndex = (currentIndex + 1) % rainbowLen;
+  }
+}
+
+void setupLed() {
+  pinMode(LED_R, OUTPUT);
+  pinMode(LED_G, OUTPUT);
+  pinMode(LED_B, OUTPUT);
+
+  setLed(false, false, false);
+}
+
+void setLed(bool r, bool g, bool b) {
+  digitalWrite(LED_R, r ? LOW : HIGH);
+  digitalWrite(LED_G, g ? LOW : HIGH);
+  digitalWrite(LED_B, b ? LOW : HIGH);
+}

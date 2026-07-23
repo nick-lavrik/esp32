@@ -1,0 +1,113 @@
+#include "TouchEvents.h"
+#include <math.h>
+
+TouchEvents::TouchEvents(const TouchEventsConfig &config) : _config(config) {}
+
+// ---- Підписка ----
+int TouchEvents::onTouch(TouchCallback cb)           { return _onTouch.add(cb); }
+int TouchEvents::onHold(HoldCallback cb)             { return _onHold.add(cb); }
+int TouchEvents::onDblClick(TouchCallback cb)        { return _onDblClick.add(cb); }
+int TouchEvents::onSwipeLeft(SwipeCallback cb)       { return _onSwipeLeft.add(cb); }
+int TouchEvents::onSwipeRight(SwipeCallback cb)      { return _onSwipeRight.add(cb); }
+int TouchEvents::onSwipeUp(SwipeCallback cb)         { return _onSwipeUp.add(cb); }
+int TouchEvents::onSwipeDown(SwipeCallback cb)       { return _onSwipeDown.add(cb); }
+int TouchEvents::onSwipeFromBottom(SwipeCallback cb) { return _onSwipeFromBottom.add(cb); }
+int TouchEvents::onSwipeFromTop(SwipeCallback cb)    { return _onSwipeFromTop.add(cb); }
+int TouchEvents::onSwipeFromLeft(SwipeCallback cb)   { return _onSwipeFromLeft.add(cb); }
+int TouchEvents::onSwipeFromRight(SwipeCallback cb)  { return _onSwipeFromRight.add(cb); }
+
+// ---- Відписка ----
+void TouchEvents::offTouch(int handle)           { _onTouch.remove(handle); }
+void TouchEvents::offHold(int handle)            { _onHold.remove(handle); }
+void TouchEvents::offDblClick(int handle)        { _onDblClick.remove(handle); }
+void TouchEvents::offSwipeLeft(int handle)       { _onSwipeLeft.remove(handle); }
+void TouchEvents::offSwipeRight(int handle)      { _onSwipeRight.remove(handle); }
+void TouchEvents::offSwipeUp(int handle)         { _onSwipeUp.remove(handle); }
+void TouchEvents::offSwipeDown(int handle)       { _onSwipeDown.remove(handle); }
+void TouchEvents::offSwipeFromBottom(int handle) { _onSwipeFromBottom.remove(handle); }
+void TouchEvents::offSwipeFromTop(int handle)    { _onSwipeFromTop.remove(handle); }
+void TouchEvents::offSwipeFromLeft(int handle)   { _onSwipeFromLeft.remove(handle); }
+void TouchEvents::offSwipeFromRight(int handle)  { _onSwipeFromRight.remove(handle); }
+
+void TouchEvents::update(bool touched, TouchPoint point) {
+    unsigned long now = millis();
+
+    if (touched) {
+        if (_state == IDLE) {
+            // Початок нового дотику
+            _start = point;
+            _startTime = now;
+            _last = point;
+            _state = PRESSED;
+            _holdFired = false;
+        } else {
+            _last = point;
+
+            if (!_holdFired && (now - _startTime) >= _config.holdThresholdMs) {
+                _onHold.invoke(point, now - _startTime);
+                _holdFired = true;
+                _state = HOLDING;
+            }
+        }
+        return;
+    }
+
+    // Палець відпущено
+    if (_state == PRESSED || _state == HOLDING) {
+        unsigned long duration = now - _startTime;
+        int dx = _last.x - _start.x;
+        int dy = _last.y - _start.y;
+        int distance = (int)sqrt((double)(dx * dx + dy * dy));
+
+        if (!_holdFired) {
+            if (distance >= _config.swipeMinDistancePx && duration <= _config.swipeMaxDurationMs) {
+                fireSwipe(dx, dy);
+            } else {
+                // Це тап
+                _onTouch.invoke(_start);
+
+                if ((now - _lastTapTime) <= _config.dblClickIntervalMs) {
+                    _onDblClick.invoke(_start);
+                    _lastTapTime = 0; // щоб третій тап не «доклацнув» подвійний
+                } else {
+                    _lastTapTime = now;
+                }
+            }
+        }
+        _state = IDLE;
+    }
+}
+
+void TouchEvents::fireSwipe(int dx, int dy) {
+    bool horizontal = abs(dx) > abs(dy);
+
+    if (horizontal) {
+        if (dx > 0) {
+            // рух вправо: старт біля лівого краю -> "свайп від лівого краю"
+            if (_start.x <= _config.edgeZonePx)
+                _onSwipeFromLeft.invoke(_start, _last);
+            else
+                _onSwipeRight.invoke(_start, _last);
+        } else {
+            // рух вліво: старт біля правого краю -> "свайп від правого краю"
+            if (_start.x >= _config.screenWidth - _config.edgeZonePx)
+                _onSwipeFromRight.invoke(_start, _last);
+            else
+                _onSwipeLeft.invoke(_start, _last);
+        }
+    } else {
+        if (dy < 0) {
+            // рух вгору: старт біля низу -> "свайп від низу"
+            if (_start.y >= _config.screenHeight - _config.edgeZonePx)
+                _onSwipeFromBottom.invoke(_start, _last);
+            else
+                _onSwipeUp.invoke(_start, _last);
+        } else {
+            // рух вниз: старт біля верху -> "свайп від верху"
+            if (_start.y <= _config.edgeZonePx)
+                _onSwipeFromTop.invoke(_start, _last);
+            else
+                _onSwipeDown.invoke(_start, _last);
+        }
+    }
+}
