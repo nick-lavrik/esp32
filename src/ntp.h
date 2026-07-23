@@ -32,10 +32,10 @@ void drawTime() {
   // img.fillRect(200, 5, 120, 20, BG_COLOR);
   display.setTextSize(2);
   // img.setTextColor(TEXT_MAIN, BG_COLOR);
-  display.setTextColor(TFT_WHITE);
+  display.setTextColor(TFT_LIGHTGREY);
 
   display.setCursor(max(0, display.width() - 10 - display.textWidth(timeStr)), 8);
   display.print(timeStr);
 
-  Serial.printf("%s\n", timeStr);
+  // Serial.printf("%s\n", timeStr);
 }

@@ -1,37 +1,40 @@
 #include <WiFi.h>
-#include <TFT_eSPI.h>
-
+#include "Display.h"
 
 // --- WiFi / NTP ---
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
+extern Display display;
 
-void setupWiFi(TFT_eSPI tft) {
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(10, 10);
-  tft.println("Connecting WiFi...");
-
+void setupWiFi() {
+  display.clear();
+  display.setTextColor(TFT_WHITE);
+  display.setTextSize(2);
+  display.setCursor(10, 10);
+  display.print("Connecting WiFi..");
+  display.flush();
+  
   WiFi.begin(ssid, password);
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+    display.print("."); display.flush();
     delay(500);
     attempts++;
   }
 
   // tft.fillScreen(BG_COLOR);
   if (WiFi.status() == WL_CONNECTED) {
-    tft.setCursor(10, 10 + 3 + tft.fontHeight());
-    tft.println("WiFi connected!");
-    Serial.println("WiFi connected (esp32-st7729), IP: " + WiFi.localIP().toString());
+    display.setCursor(10, 10 + 3 + display.fontHeight());
+    display.println("WiFi connected!");
+    display.flush();
+    Serial.println("WiFi connected, IP: " + WiFi.localIP().toString());
     // setLed(false, true, false);
-
   } else {
-    tft.setTextColor(TFT_RED);
-    tft.setCursor(10, 10 + 3 + tft.fontHeight());
-    tft.println("WiFi FAILED");
+    display.setTextColor(TFT_RED);
+    display.setCursor(10, 10 + 3 + display.fontHeight());
+    display.println("WiFi FAILED");
+    display.flush();
     // setLed(true, false, false);
     delay(1000);
   }

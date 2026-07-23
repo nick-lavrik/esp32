@@ -8,14 +8,14 @@
 #include <Arduino.h>
 #include "Display.h"
 #include <SPI.h>
+#include "wifi.h"
+#include "ntp.h"
 
 Display display;
 //#include <TFT_eSPI.h>
 //TFT_eSPI tft = TFT_eSPI();
 
 #include "BackgroundImages.h"
-
-size_t currentBackgroundImageIndex = 0;
 
 const uint16_t my_colors[] = {
     TFT_RED,
@@ -48,11 +48,12 @@ uint16_t get_next_color(uint16_t current_color) {
     return my_colors[0];
 }
 
-void setup() {
-
+void setupSerial() {
     Serial.begin(115200);
     Serial.println("Hello, ESP32!");
+}
 
+void setupDisplay() {
     #ifdef BOARD_4848S040
     pinMode(TFT_BL, OUTPUT);
     analogWrite(TFT_BL, 80);
@@ -65,8 +66,14 @@ void setup() {
 
     display.init();
     display.clear(TFT_BLACK);
-    display.drawCenteredText("Hello, ESP32!", TFT_YELLOW, 4);
+    // display.drawCenteredText("Hello, ESP32!", TFT_YELLOW, 4);
+}
 
+void setup() {
+    setupSerial();
+    setupDisplay();
+    setupWiFi();
+    setupNtpService();
     display.flush();
 }
 
@@ -90,26 +97,51 @@ const uint32_t loopFrameRate() {
     return loopsPerSecond;
 }
 
+
+void drawSystemInfo() {
+  // img.fillRect(0, 30, 320, 65, BG_COLOR);
+
+  uint32_t freeHeap = ESP.getFreeHeap();
+  uint32_t totalHeap = ESP.getHeapSize();
+  int heapPercent = (freeHeap * 100) / totalHeap;
+
+  uint32_t cpuFreq = ESP.getCpuFreqMHz();
+  uint32_t uptimeSec = millis() / 1000;
+
+  display.setTextSize(1);
+  // img.setTextColor(TEXT_MAIN, BG_COLOR);
+  display.setTextColor(TFT_DARKGREY);
+
+  display.setCursor(10, 10 + 0 * (5 +  display.fontHeight()));
+  display.printf("Uptime: %02d:%02d:%02d", uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
+
+  display.setCursor(10, 10 + 1 * (5 +  display.fontHeight()));
+  display.printf("CPU: %d MHz   Loop rate: %d/s", cpuFreq, loopFrameRate());
+
+  display.setCursor(10, 10 + 2 * (5 +  display.fontHeight()));
+  display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, heapPercent);
+
+  // Візуальний бар пам'яті
+  // int barX = 10, barY = 56, barW = 300, barH = 10;
+  // img.drawRect(barX, barY, barW, barH, GRID_COLOR);
+  // int fillW = (heapPercent * (barW - 2)) / 100;
+  // uint16_t barColor = heapPercent > 30 ? TFT_GREEN : (heapPercent > 15 ? TFT_YELLOW : TFT_RED);
+  // img.fillRect(barX + 1, barY + 1, fillW, barH - 2, barColor);
+
+  // int lightPercent = readLightPercent();
+  // img.setCursor(180, 70);
+  // img.printf("Light: %d%%", lightPercent);
+}
+
 void loop() {
+    Serial.printf("Free heap[1]: %d\n", ESP.getFreeHeap()); 
 
     display.clear();
-    currentBackgroundImageIndex = nextBackgroundIndex(currentBackgroundImageIndex);
-    // display.pushImage(0, 0, display.width(), display.height(), backgroundImages[currentBackgroundImageIndex]);
-    display.pushImage((uint32_t) (display.width() - 320) / 2, (uint32_t) (display.height() - 240) / 2, 320, 240, backgroundImages[currentBackgroundImageIndex]);
 
-    // нічого не робимо — напис вже намальовано в setup()
-    // display.drawCenteredText("Hello, ESP32!", currentColor, 4);
-    display.setTextColor(currentColor);
-    display.setTextSize(4);
-    
-    display.setCursor((display.width() - display.textWidth("Hello, ESP321")) / 2, (display.height() - display.fontHeight()) / 2);
-    display.printf("Hello, ESP32!");
-    currentColor = get_next_color(currentColor);
-
-    display.setCursor(10, 32);
-    display.setTextSize(2);
-    display.printf("frame rate: %d/s", loopFrameRate());
+    drawBackgroundImage();
+    drawTime();
+    drawSystemInfo();
 
     display.flush();
-    delay(1000);
+    delay(16);
 }

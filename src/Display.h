@@ -38,6 +38,7 @@ public:
 
     size_t   fontHeight() { return sprite_.fontHeight(); }
     void     setTextColor(uint16_t color) { sprite_.setTextColor(color); }
+    void     setTextColor(uint16_t color, uint16_t bg) { sprite_.setTextColor(color, bg); }
     uint16_t drawString(const char *text, int32_t x, int32_t y) { return sprite_.drawString(text, x, y); }
 
     int16_t textWidth(const char *string) { return sprite_.textWidth(string); }
@@ -62,7 +63,8 @@ public:
         return result;
     }
     void setTextSize(uint8_t size) { sprite_.setTextSize(size); }
-
+    size_t println(const char *string) { return sprite_.println(string); }
+    size_t print(const char *string) { return sprite_.print(string); }
     size_t printf(const char *format, ...) {
         va_list args;
         va_start(args, format);
