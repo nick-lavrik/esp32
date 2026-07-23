@@ -10,6 +10,7 @@
 #include <SPI.h>
 #include "wifi.h"
 #include "ntp.h"
+#include "ping.h"
 
 Display display;
 //#include <TFT_eSPI.h>
@@ -109,7 +110,6 @@ void drawSystemInfo() {
   uint32_t uptimeSec = millis() / 1000;
 
   display.setTextSize(1);
-  // img.setTextColor(TEXT_MAIN, BG_COLOR);
   display.setTextColor(TFT_DARKGREY);
 
   display.setCursor(10, 10 + 0 * (5 +  display.fontHeight()));
@@ -120,6 +120,9 @@ void drawSystemInfo() {
 
   display.setCursor(10, 10 + 2 * (5 +  display.fontHeight()));
   display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, heapPercent);
+
+  display.setCursor(10, 10 + 3 * (5 +  display.fontHeight()));
+  display.print(dumpPingStatsStr());
 
   // Візуальний бар пам'яті
   // int barX = 10, barY = 56, barW = 300, barH = 10;
@@ -134,13 +137,13 @@ void drawSystemInfo() {
 }
 
 void loop() {
-    Serial.printf("Free heap[1]: %d\n", ESP.getFreeHeap()); 
+    doPing();
 
     display.clear();
 
     drawBackgroundImage();
-    drawTime();
     drawSystemInfo();
+    drawTime();
 
     display.flush();
     delay(16);
