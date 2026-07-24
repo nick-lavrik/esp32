@@ -1,5 +1,7 @@
 #pragma once
 
+#if __has_include(<ESP_Mail_Client.h>)
+#define HAS_GMAIL_SENDER 1
 #include <Arduino.h>
 #include <ESP_Mail_Client.h>
 
@@ -30,3 +32,6 @@ private:
 
     static void smtpCallback(SMTP_Status status);
 };
+#else
+#define HAS_GMAIL_SENDER 0
+#endif

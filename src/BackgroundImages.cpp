@@ -4,9 +4,9 @@
 #include "Display.h"
 #include "JpegImage.h"
 
+#include "../assets/space-02.h"
 #ifdef BOARD_4848S040
 #include "../assets/space-01.h"
-#include "../assets/space-02.h"
 #include "../assets/space-03.h"
 #endif
 
@@ -17,8 +17,8 @@ void setBackgroundImage(JpegImage& image) {
 }
 
 const uint16_t* const backgroundImages[BACKGROUND_IMAGES_COUNT] PROGMEM = {
-    #ifdef BOARD_4848S040
     backgroundSpace02,
+    #ifdef BOARD_4848S040
     backgroundSpace01,
     backgroundSpace03,
     #endif
@@ -30,7 +30,11 @@ const uint16_t* getBackgroundImage() {
     uint32_t now = millis();
 
     if (_activeInstance != nullptr && _activeInstance->isLoaded()) {
-        return _activeInstance->buffer();
+        return static_cast<uint16_t *>(_activeInstance->buffer());
+    }
+
+    if (_activeInstance != nullptr) {
+        return nullptr;
     }
 
     if (BACKGROUND_IMAGES_COUNT == 0) {

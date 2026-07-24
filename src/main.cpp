@@ -8,11 +8,13 @@
 #include <Arduino.h>
 #include "Display.h"
 #include <SPI.h>
+#include <LittleFS.h>
 #include "wifi.h"
 #include "ntp.h"
 #include "ping.h"
 #include "GmailSender.h"
 #include "JpegImage.h"
+#include "HeapMonitor.h"
 
 Display display;
 
@@ -106,7 +108,9 @@ void setupTouchScreen() {
     touchController.events().onSwipeFromRight(onSwipeFromRightHandler);
 }
 
+#if HAS_GMAIL_SENDER
 GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
+#endif
 
 void setupLittleFS() {
 
@@ -137,6 +141,10 @@ void setupLittleFS() {
 JpegImage spaceImage;
 
 void dumpChipsetInfo() {
+    static uint32_t lastDumpMs = millis() - 5 * 60 * 1000 - 10;
+    if ((millis() - lastDumpMs) < 5 * 60 * 1000) return;
+    lastDumpMs = millis();
+
     Serial.println("\n===== ESP32 CHIP INFO =====");
 
     // --- Модель чипа ---
@@ -160,21 +168,30 @@ void dumpChipsetInfo() {
         Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
     }
 
+    /* Serial.println("\n==== ESP32 HEAP INFO =====");
+    heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
     Serial.println("============================");
 }
 
+HeapMonitor heapMonitor(60000); // друк кожні 60 сек
 
 void setup() {
     setupSerial();
+    heapMonitor.begin();
     dumpChipsetInfo();
     setupDisplay();
     setupLittleFS();
     setupTouchScreen();
     setupWiFi();
     setupNtpService();
-    mailer.begin();
-    spaceImage.loadFromLittleFS("/space-01.jpg");
+
+    #if SPRITE_COLOR_DEPTH == 16
+    spaceImage.loadFromLittleFS("/space-01.jpg", JpegColorDepth::RGB565);
     setBackgroundImage(spaceImage);
+    #elif SPRITE_COLOR_DEPTH == 8
+    //spaceImage.loadFromLittleFS("/space-03.jpg", JpegColorDepth::RGB332);
+    //setBackgroundImage(spaceImage);
+    #endif
 
     display.flush();
 }
@@ -253,22 +270,25 @@ void sendEmail() {
     once = true;
     display.drawText(10, 10 + 3 * (3 + display.fontHeight()), "SMTP sendmail", TFT_LIGHTGREY);
     display.flush();
-    mailer.sendEmail("nick.lavrik@gmail.com", "Hello, ESP32!", "hey, bro!");
+    #if HAS_GMAIL_SENDER
+    //mailer.sendEmail("nick.lavrik@gmail.com", PIO_PIOENV, "hhhh");
+    #endif
     display.drawText(10, 10 + 4 * (3 + display.fontHeight()), "SMTP sendmail (done)", TFT_LIGHTGREY);
     display.flush();
 }
 
 void loop() {
+    heapMonitor.update(); // неблокуюче, друкує тільки коли настав час
     doPing();
 
     display.clear();
     touchController.update();
-
+    dumpChipsetInfo();
     drawBackgroundImage();
     drawSystemInfo();
     drawPoints();
     drawTime();
-    // sendEmail();
+    sendEmail();
 
     display.flush();
     delay(16);

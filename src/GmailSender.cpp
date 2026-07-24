@@ -1,5 +1,6 @@
 #include "GmailSender.h"
 
+#if HAS_GMAIL_SENDER
 static const char* SMTP_HOST = "smtp.gmail.com";
 static const uint16_t SMTP_PORT = 465; // SSL
 // static const uint16_t SMTP_PORT = 587; // TLS
@@ -9,6 +10,10 @@ GmailSender::GmailSender(const char* senderEmail, const char* appPassword, const
 }
 
 void GmailSender::begin() {
+    static bool once = false;
+    if (once) return;
+    once = true;
+
     _smtp.debug(0); // 0 = без детального логу бібліотеки, 1 - з логом
     _smtp.callback(smtpCallback);
 }
@@ -18,6 +23,8 @@ void GmailSender::smtpCallback(SMTP_Status status) {
 }
 
 bool GmailSender::sendEmail(const char* recipientEmail, const char* subject, const char* message) {
+    begin();
+
     Session_Config config;
     config.server.host_name = SMTP_HOST;
     config.server.port = SMTP_PORT;
@@ -46,3 +53,4 @@ bool GmailSender::sendEmail(const char* recipientEmail, const char* subject, con
 
     return true;
 }
+#endif

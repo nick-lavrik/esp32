@@ -16,7 +16,7 @@ extern const uint16_t backgroundSpace03[76800];
 
 // Кількість фонових зображень
 #ifdef BOARD_ST7789
-constexpr size_t BACKGROUND_IMAGES_COUNT = 0;
+constexpr size_t BACKGROUND_IMAGES_COUNT = 1;
 #elifdef BOARD_4848S040
 constexpr size_t BACKGROUND_IMAGES_COUNT = 3;
 #endif

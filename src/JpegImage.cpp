@@ -7,7 +7,8 @@
 JpegImage *JpegImage::_activeInstance = nullptr;
 
 JpegImage::JpegImage()
-    : _buffer(nullptr), _width(0), _height(0), _loaded(false), _usedPsram(false)
+    : _buffer(nullptr), _width(0), _height(0),
+      _depth(JpegColorDepth::RGB565), _loaded(false), _usedPsram(false)
 {
 }
 
@@ -18,7 +19,8 @@ JpegImage::~JpegImage()
 
 void JpegImage::freeBuffer()
 {
-    if (_buffer != nullptr) {
+    if (_buffer != nullptr)
+    {
         heap_caps_free(_buffer);
         _buffer = nullptr;
     }
@@ -27,22 +29,23 @@ void JpegImage::freeBuffer()
     _height = 0;
 }
 
-// Допоміжна функція: спочатку намагаємось виділити пам'ять у PSRAM,
-// якщо не вдалось (немає PSRAM або немає місця) - падаємо на звичайну RAM
-static void *allocPreferPsram(size_t bytes, bool *usedPsram) {
+// Спочатку намагаємось у PSRAM (якщо є), інакше - у звичайну RAM
+static void *allocPreferPsram(size_t bytes, bool *usedPsram)
+{
     void *ptr = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (ptr != nullptr) {
+    if (ptr != nullptr)
+    {
         *usedPsram = true;
         return ptr;
     }
-
-    //Serial.println("[JpegImage] PSRAM недоступна або немає місця, використовую внутрішню RAM");
     *usedPsram = false;
     return heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
 }
 
-bool JpegImage::loadFromLittleFS(const char *path) {
+bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth)
+{
     freeBuffer();
+    _depth = depth;
 
     if (!LittleFS.exists(path))
     {
@@ -51,7 +54,8 @@ bool JpegImage::loadFromLittleFS(const char *path) {
     }
 
     File file = LittleFS.open(path, "r");
-    if (!file) {
+    if (!file)
+    {
         Serial.printf("[JpegImage] Не вдалось відкрити файл: %s\n", path);
         return false;
     }
@@ -59,8 +63,8 @@ bool JpegImage::loadFromLittleFS(const char *path) {
     size_t fileSize = file.size();
     bool jpegBufPsram = false;
     uint8_t *jpegData = (uint8_t *)allocPreferPsram(fileSize, &jpegBufPsram);
-
-    if (jpegData == nullptr) {
+    if (jpegData == nullptr)
+    {
         Serial.println("[JpegImage] Недостатньо пам'яті для читання jpg-файлу");
         file.close();
         return false;
@@ -69,7 +73,8 @@ bool JpegImage::loadFromLittleFS(const char *path) {
     size_t bytesRead = file.read(jpegData, fileSize);
     file.close();
 
-    if (bytesRead != fileSize) {
+    if (bytesRead != fileSize)
+    {
         Serial.println("[JpegImage] Розмір прочитаних даних не збігається з розміром файлу");
         heap_caps_free(jpegData);
         return false;
@@ -77,16 +82,22 @@ bool JpegImage::loadFromLittleFS(const char *path) {
 
     uint16_t jpegWidth = 0;
     uint16_t jpegHeight = 0;
-    if (TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, fileSize) != JDR_OK) {
+    if (TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, fileSize) != JDR_OK)
+    {
         Serial.println("[JpegImage] Не вдалось розпарсити заголовок jpg");
         heap_caps_free(jpegData);
         return false;
     }
 
-    size_t bufferBytes = (size_t)jpegWidth * jpegHeight * sizeof(uint16_t);
-    _buffer = (uint16_t *)allocPreferPsram(bufferBytes, &_usedPsram);
-    if (_buffer == nullptr) {
-        Serial.println("[JpegImage] Недостатньо пам'яті для декодованого зображення");
+    size_t bytesPerPixel = (depth == JpegColorDepth::RGB565) ? 2 : 1;
+    size_t bufferBytes = (size_t)jpegWidth * jpegHeight * bytesPerPixel;
+
+    Serial.printf("[JpegImage] \"%s\" %dx%d (%d bytes) - free (%d)\n", path, jpegWidth, jpegHeight, bufferBytes, heap_caps_get_free_size(MALLOC_CAP_8BIT));
+
+    _buffer = allocPreferPsram(bufferBytes, &_usedPsram);
+    if (_buffer == nullptr)
+    {
+        Serial.printf("[JpegImage] Недостатньо пам'яті для декодованого зображення (%d / %d)\n", bufferBytes, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) );
         heap_caps_free(jpegData);
         return false;
     }
@@ -95,7 +106,9 @@ bool JpegImage::loadFromLittleFS(const char *path) {
     _height = jpegHeight;
 
     TJpgDec.setJpgScale(1);
-    TJpgDec.setSwapBytes(true); // для прямої сумісності з TFT_eSPI/ST7789
+    // RGB565 -> потрібен swap байтів для коректного порядку на ST7789
+    // RGB332 -> конвертуємо самі з "чистого" RGB565, swap не потрібен
+    // TJpgDec.setSwapBytes(depth == JpegColorDepth::RGB565); // ми вже робимо swap в Display.cpp
     TJpgDec.setCallback(JpegImage::jpegOutputCallback);
 
     _activeInstance = this;
@@ -104,41 +117,62 @@ bool JpegImage::loadFromLittleFS(const char *path) {
 
     heap_caps_free(jpegData);
 
-    if (decodeResult != JDR_OK) {
+    if (decodeResult != JDR_OK)
+    {
         Serial.println("[JpegImage] Помилка декодування jpg");
         freeBuffer();
         return false;
     }
 
     _loaded = true;
-    Serial.printf("[JpegImage] Завантажено %dx%d, пам'ять: %s\n", _width, _height, _usedPsram ? "PSRAM" : "внутрішня RAM");
-
+    Serial.printf("[JpegImage] Завантажено %dx%d, глибина: %d біт, розмір буфера: %u байт, пам'ять: %s\n",
+                  _width, _height, (int)depth, (unsigned)bufferBytes,
+                  _usedPsram ? "PSRAM" : "внутрішня RAM");
     return true;
 }
 
-bool JpegImage::jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
-    if (_activeInstance == nullptr || _activeInstance->_buffer == nullptr) {
+bool JpegImage::jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap)
+{
+    JpegImage *self = _activeInstance;
+    if (self == nullptr || self->_buffer == nullptr)
+    {
         return false;
     }
 
-    if (y >= _activeInstance->_height) {
+    if (y >= self->_height)
+    {
         return true;
     }
 
-    for (uint16_t row = 0; row < h; row++) {
+    for (uint16_t row = 0; row < h; row++)
+    {
         uint16_t destY = y + row;
-        if (destY >= _activeInstance->_height) {
+        if (destY >= self->_height)
+        {
             break;
         }
 
         uint16_t copyWidth = w;
-        if (x + copyWidth > _activeInstance->_width) {
-            copyWidth = _activeInstance->_width - x;
+        if (x + copyWidth > self->_width)
+        {
+            copyWidth = self->_width - x;
         }
 
-        uint16_t *destRow = _activeInstance->_buffer + (destY * _activeInstance->_width) + x;
         uint16_t *srcRow = bitmap + (row * w);
-        memcpy(destRow, srcRow, copyWidth * sizeof(uint16_t));
+
+        if (self->_depth == JpegColorDepth::RGB565)
+        {
+            uint16_t *destRow = (uint16_t *)self->_buffer + (destY * self->_width) + x;
+            memcpy(destRow, srcRow, copyWidth * sizeof(uint16_t));
+        }
+        else // RGB332 - конвертуємо піксель за пікселем
+        {
+            uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->_width) + x;
+            for (uint16_t col = 0; col < copyWidth; col++)
+            {
+                destRow[col] = rgb565to332(srcRow[col]);
+            }
+        }
     }
 
     return true;
@@ -147,13 +181,30 @@ bool JpegImage::jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h,
 bool JpegImage::isLoaded() const { return _loaded; }
 uint16_t JpegImage::width() const { return _width; }
 uint16_t JpegImage::height() const { return _height; }
-uint16_t *JpegImage::buffer() const { return _buffer; }
+JpegColorDepth JpegImage::colorDepth() const { return _depth; }
 
-/* void JpegImage::pushTo(TFT_eSprite &sprite, int32_t x, int32_t y) const
+size_t JpegImage::bufferSizeBytes() const
 {
-    if (!_loaded || _buffer == nullptr)
+    size_t bpp = (_depth == JpegColorDepth::RGB565) ? 2 : 1;
+    return (size_t)_width * _height * bpp;
+}
+
+void *JpegImage::buffer() const { return _buffer; }
+
+const uint16_t *JpegImage::bufferRGB565() const
+{
+    if (_depth != JpegColorDepth::RGB565)
     {
-        return;
+        return nullptr;
     }
-    sprite.pushImage(x, y, _width, _height, _buffer);
-} */
+    return static_cast<const uint16_t *>(_buffer);
+}
+
+const uint8_t *JpegImage::bufferRGB332() const
+{
+    if (_depth != JpegColorDepth::RGB332)
+    {
+        return nullptr;
+    }
+    return static_cast<const uint8_t *>(_buffer);
+}
