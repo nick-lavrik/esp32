@@ -11,43 +11,12 @@
 #include "wifi.h"
 #include "ntp.h"
 #include "ping.h"
+#include "GmailSender.h"
+#include "JpegImage.h"
 
 Display display;
-//#include <TFT_eSPI.h>
-//TFT_eSPI tft = TFT_eSPI();
 
 #include "BackgroundImages.h"
-
-const uint16_t my_colors[] = {
-    TFT_RED,
-    TFT_GREEN,
-    TFT_BLUE,
-    TFT_WHITE
-};
-
-static uint16_t currentColor = TFT_RED;
-const int total_colors = sizeof(my_colors) / sizeof(my_colors[0]);
-
-/**
- * Функция возвращает следующий цвет из массива.
- * @param current_color Текущий цвет, который активен сейчас.
- * @return uint16_t Следующий цвет по кругу.
- */
-uint16_t get_next_color(uint16_t current_color) {
-    // 1. Ищем индекс текущего цвета в нашем массиве
-    for (int i = 0; i < total_colors; i++) {
-        if (my_colors[i] == current_color) {
-            // 2. Нашли! Вычисляем индекс следующего элемента.
-            // Оператор % (остаток от деления) сбросит индекс на 0, если дошли до конца.
-            int next_index = (i + 1) % total_colors;
-            return my_colors[next_index];
-        }
-    }
-    
-    // Если текущий цвет не найден в массиве (например, при первом запуске),
-    // возвращаем самый первый цвет по умолчанию (TFT_RED)
-    return my_colors[0];
-}
 
 void setupSerial() {
     Serial.begin(115200);
@@ -75,7 +44,7 @@ void setupDisplay() {
 
 TouchController touchController;
 
-static TouchScreenConfig makeMapperConfig() {
+static TouchScreenConfig makeTouchScreenConfig() {
     TouchScreenConfig c;
     // Приклад: контролер видає сирі 0..4095, екран фізично 320x240,
     // а сама панель ще й повернута (типова ситуація для дешевих SPI TFT).
@@ -99,7 +68,7 @@ static TouchScreenConfig makeMapperConfig() {
     return c;
 }
 
-TouchScreenConfig touchScreenConfig = makeMapperConfig();
+TouchScreenConfig touchScreenConfig = makeTouchScreenConfig();
 TouchPointMapper mapper(touchScreenConfig);
 TouchEvents touch(touchScreenConfig);
 
@@ -118,9 +87,11 @@ void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end)   { Serial.println
 void onSwipeFromRightHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe FROM RIGHT (напр., бокова панель)"); }
 
 void setupTouchScreen() {
+
     #ifdef BOARD_ST7789
     touch.setTouchPointMapper(&mapper);
     #endif
+
     touchController.setup(&touch);
     touchController.events().onTouch(onTouchLog);
     touchController.events().onHold(onHoldHandler);
@@ -135,12 +106,76 @@ void setupTouchScreen() {
     touchController.events().onSwipeFromRight(onSwipeFromRightHandler);
 }
 
+GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
+
+void setupLittleFS() {
+
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS mount failed!");
+  } else {
+    Serial.println("LittleFS mounted successfully (done)");
+  }
+
+  delay(50);
+
+  // --- Список усіх файлів ---
+  File root = LittleFS.open("/");
+  File file = root.openNextFile();
+  while (file) {
+    Serial.printf("File: %s, size: %d bytes\n", file.name(), file.size());
+    file = root.openNextFile();
+  }
+
+  size_t usedBytes = LittleFS.usedBytes();
+  size_t totalBytes = LittleFS.totalBytes();
+  double freePercent = ((totalBytes - usedBytes) * 100.00 / totalBytes);
+
+  // --- Скільки місця залишилось ---
+  Serial.printf("Used: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
+}
+
+JpegImage spaceImage;
+
+void dumpChipsetInfo() {
+    Serial.println("\n===== ESP32 CHIP INFO =====");
+
+    // --- Модель чипа ---
+    Serial.printf("Chip model: %s\n", ESP.getChipModel());
+    Serial.printf("Chip revision: %d\n", ESP.getChipRevision());
+    Serial.printf("CPU cores: %d\n", ESP.getChipCores());
+    Serial.printf("CPU freq: %d MHz\n", ESP.getCpuFreqMHz());
+
+    // --- Flash ---
+    Serial.printf("Flash size: %d bytes (%.2f MB)\n", ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1024.0 / 1024.0);
+    Serial.printf("Flash speed: %d Hz\n", ESP.getFlashChipSpeed());
+
+    // --- Внутрішня RAM (SRAM) ---
+    Serial.printf("Total heap: %d bytes\n", ESP.getHeapSize());
+    Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
+
+    // --- PSRAM ---
+    Serial.printf("PSRAM found: %s\n", psramFound() ? "YES" : "NO");
+    if (psramFound()) {
+        Serial.printf("Total PSRAM: %d bytes (%.2f MB)\n", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
+        Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
+    }
+
+    Serial.println("============================");
+}
+
+
 void setup() {
     setupSerial();
+    dumpChipsetInfo();
     setupDisplay();
+    setupLittleFS();
     setupTouchScreen();
     setupWiFi();
     setupNtpService();
+    mailer.begin();
+    spaceImage.loadFromLittleFS("/space-01.jpg");
+    setBackgroundImage(spaceImage);
+
     display.flush();
 }
 
@@ -209,8 +244,21 @@ void drawPoints() {
     display.drawRect(0, display.height() - 1, 1, 1, TFT_WHITE);
 }
 
-void loop() {
+void sendEmail() {
+    static bool once = false;
+    if (once) {
+        return;
+    }
 
+    once = true;
+    display.drawText(10, 10 + 3 * (3 + display.fontHeight()), "SMTP sendmail", TFT_LIGHTGREY);
+    display.flush();
+    mailer.sendEmail("nick.lavrik@gmail.com", "Hello, ESP32!", "hey, bro!");
+    display.drawText(10, 10 + 4 * (3 + display.fontHeight()), "SMTP sendmail (done)", TFT_LIGHTGREY);
+    display.flush();
+}
+
+void loop() {
     doPing();
 
     display.clear();
@@ -220,6 +268,7 @@ void loop() {
     drawSystemInfo();
     drawPoints();
     drawTime();
+    // sendEmail();
 
     display.flush();
     delay(16);

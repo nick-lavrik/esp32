@@ -2,16 +2,25 @@
 #include <Arduino.h>
 #include "BackgroundImages.h"
 #include "Display.h"
+#include "JpegImage.h"
 
+#ifdef BOARD_4848S040
 #include "../assets/space-01.h"
 #include "../assets/space-02.h"
 #include "../assets/space-03.h"
+#endif
+
+static JpegImage *_activeInstance = nullptr;
+
+void setBackgroundImage(JpegImage& image) {
+    _activeInstance = &image;
+}
 
 const uint16_t* const backgroundImages[BACKGROUND_IMAGES_COUNT] PROGMEM = {
-    backgroundSpace02,
     #ifdef BOARD_4848S040
-    backgroundSpace03,
+    backgroundSpace02,
     backgroundSpace01,
+    backgroundSpace03,
     #endif
 };
 
@@ -19,6 +28,10 @@ const uint16_t* getBackgroundImage() {
     static uint32_t lastUpdateMs = 0;
     static size_t currentIndex = 0;
     uint32_t now = millis();
+
+    if (_activeInstance != nullptr && _activeInstance->isLoaded()) {
+        return _activeInstance->buffer();
+    }
 
     if (BACKGROUND_IMAGES_COUNT == 0) {
         return nullptr;
@@ -34,7 +47,8 @@ const uint16_t* getBackgroundImage() {
 
 extern Display display;
 void drawBackgroundImage() {
-    if (BACKGROUND_IMAGES_COUNT > 0) {
-        display.pushImage((uint32_t) (display.width() - 320) / 2, (uint32_t) (display.height() - 240) / 2, 320, 240, getBackgroundImage());
+    const uint16_t* ptr = getBackgroundImage();
+    if (ptr != nullptr) {
+        display.pushImage((uint32_t) (display.width() - 320) / 2, (uint32_t) (display.height() - 240) / 2, 320, 240, ptr);
     }
 }

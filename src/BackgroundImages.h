@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "Display.h"
+#include "JpegImage.h"
 
 // Самі дані зображень (76800 = 240*320 пікселів, RGB565) визначені
 // в іншому місці проєкту — тут лише оголошуємо їх як зовнішні,
@@ -15,7 +16,7 @@ extern const uint16_t backgroundSpace03[76800];
 
 // Кількість фонових зображень
 #ifdef BOARD_ST7789
-constexpr size_t BACKGROUND_IMAGES_COUNT = 1;
+constexpr size_t BACKGROUND_IMAGES_COUNT = 0;
 #elifdef BOARD_4848S040
 constexpr size_t BACKGROUND_IMAGES_COUNT = 3;
 #endif
@@ -26,3 +27,4 @@ extern const uint16_t* const backgroundImages[BACKGROUND_IMAGES_COUNT];
 // Повертає поточне зображення, циклічно
 const uint16_t* getBackgroundImage();
 void drawBackgroundImage();
+void setBackgroundImage(JpegImage& image);
