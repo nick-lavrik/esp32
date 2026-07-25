@@ -1,5 +1,6 @@
 // Display.cpp
 #include <stdarg.h> // Обов'язково для роботи з трикрапкою (...)
+#include <Event.hpp>
 #include "Display.h"
 
 // Глобальний об'єкт "tft" створюється рівно в одному файлі на середовище:
@@ -7,11 +8,14 @@
 //   env:esp32-4848s040    -> src/TftInstance_4848S040.cpp
 // Тут ми лише беремо на нього посилання.
 
-Display::Display() : tft_(tft), sprite_(&tft_) {}
+Display::Display(IEventDispatcher* eventDispatcher) : tft_(tft), sprite_(&tft_), _eventDispatcher(eventDispatcher) {}
+
+void Display::setEventDispatcher(IEventDispatcher* eventDispatcher) {
+    _eventDispatcher = eventDispatcher;
+}
 
 void Display::init() {
     tft_.init();
-    Serial.println("tft.init() done.");
     tft_.setRotation(TFT_ROTATION);
 
     width_  = tft_.width();
@@ -78,8 +82,6 @@ void Display::brightness(uint8_t percent) {
     percent = percent < 0 ? 0 : percent;
     percent = percent > 100 ? 100 : percent;
 
-    brightness_ = percent;
-
     #if defined(BOARD_ST7789)
     analogWrite(TFT_BL, map(percent, 0, 100, 0, 255));
     #endif
@@ -87,6 +89,14 @@ void Display::brightness(uint8_t percent) {
     #if defined(BOARD_4848S040)
     tft_.setBrightness(map(percent, 0, 100, 15, 255)); // делегуємо в LGFX Light_PWM, пін вже сконфігурований у Setup_ST7701_4848S040.h
     #endif
+
+    if (brightness_ == percent) return;
+    if (_eventDispatcher != nullptr) {
+        Event e;
+        _eventDispatcher->dispatch(e, "display.brightness");
+    }
+
+    brightness_ = percent;
 }
 
 const uint32_t Display::loopFrameRate() {

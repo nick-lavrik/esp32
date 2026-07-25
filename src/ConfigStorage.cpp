@@ -12,6 +12,14 @@ void ConfigStorage::end() {
     prefs_.end();
 }
 
+void ConfigStorage::setBool(const char* key, const bool value) {
+    prefs_.putBool(key, value);
+}
+
+const bool ConfigStorage::getBool(const char* key, const bool defaultValue) {
+    return prefs_.getBool(key, defaultValue);
+}
+
 void ConfigStorage::setInt(const char* key, int32_t value) {
     prefs_.putInt(key, value);
 }

@@ -1,7 +1,7 @@
 // #include <TAMC_GT911.h>
 #include "GT911Touch.h"
-#include "TouchEvents.h"
-#include "TouchController.h"
+#include "TouchScreen/TouchEvents.h"
+#include "TouchScreen/TouchController.h"
 /*
 #define TOUCH_SDA 19
 #define TOUCH_SCL 45

@@ -1,4 +1,4 @@
-#include "EcoFlowSigner.h"
+#include "EcoFlowSigner.hpp"
 #include <mbedtls/md.h>
 
 String EcoFlowSigner::hmacSha256Hex(const String &secretKey, const String &message) {

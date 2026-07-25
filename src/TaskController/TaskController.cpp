@@ -1,4 +1,4 @@
-#include "TaskScheduler.h"
+#include "TaskController.hpp"
 
 #include <Arduino.h> // millis()
 #include <algorithm>
@@ -8,26 +8,26 @@
 #include "JobTask.h"
 #include "OnceAfterTask.h"
 
-TaskId TaskScheduler::addCronTask(uint32_t intervalMs, TaskCallback callback) {
+TaskId TaskController::addCronTask(uint32_t intervalMs, TaskCallback callback) {
     return addTask(std::make_unique<CronTask>(intervalMs, std::move(callback)));
 }
 
-TaskId TaskScheduler::addJob(uint32_t durationMs, TaskCallback callback, uint32_t intervalMs) {
+TaskId TaskController::addJob(uint32_t durationMs, TaskCallback callback, uint32_t intervalMs) {
     return addTask(std::make_unique<JobTask>(durationMs, std::move(callback), intervalMs));
 }
 
-TaskId TaskScheduler::runOnceAfterMs(uint32_t delayMs, TaskCallback callback) {
+TaskId TaskController::runOnceAfterMs(uint32_t delayMs, TaskCallback callback) {
     return addTask(std::make_unique<OnceAfterTask>(delayMs, std::move(callback)));
 }
 
-TaskId TaskScheduler::addTask(std::unique_ptr<ITask> task) {
+TaskId TaskController::addTask(std::unique_ptr<ITask> task) {
     const TaskId id = _nextId++;
     task->setId(id);
     _tasks.push_back(std::move(task));
     return id;
 }
 
-bool TaskScheduler::removeTask(TaskId id) {
+bool TaskController::removeTask(TaskId id) {
     for (auto& task : _tasks) {
         if (task->id() == id) {
             task->cancel();
@@ -37,7 +37,7 @@ bool TaskScheduler::removeTask(TaskId id) {
     return false;
 }
 
-void TaskScheduler::loop() {
+void TaskController::loop() {
     const uint32_t now = millis();
 
     // Важливо: якщо колбек завдання сам додає нові завдання в чергу
@@ -55,6 +55,6 @@ void TaskScheduler::loop() {
         _tasks.end());
 }
 
-size_t TaskScheduler::taskCount() const {
+size_t TaskController::taskCount() const {
     return _tasks.size();
 }

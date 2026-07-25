@@ -1,5 +1,5 @@
-#include "EcoFlowAuthClient.h"
-#include "EcoFlowSigner.h"
+#include "EcoFlowAuthClient.hpp"
+#include "EcoFlowSigner.hpp"
 
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>

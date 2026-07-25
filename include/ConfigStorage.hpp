@@ -42,6 +42,10 @@ public:
     bool begin(const char* namespaceName = "config", const char* partitionLabel = "nvs");
     void end();
 
+    // ---- bool ----
+    void setBool(const char* key, const bool value);
+    const bool getBool(const char* key, const bool defaultValue = 0);
+
     // ---- int ----
     void setInt(const char* key, int32_t value);
     int32_t getInt(const char* key, int32_t defaultValue = 0);

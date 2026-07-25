@@ -7,15 +7,15 @@
 #include "TaskCallback.h"
 
 // Черга завдань. Завдання можна додавати динамічно (в т.ч. з колбеків
-// інших завдань), TaskScheduler::loop() потрібно викликати регулярно
+// інших завдань), TaskController::loop() потрібно викликати регулярно
 // з loop() скетчу.
 //
 // Пам'ять: черга володіє завданнями через std::unique_ptr. Коли
 // завдання завершується або видаляється, unique_ptr автоматично
 // звільняє пам'ять - без ручного delete і без leaks.
-class TaskScheduler {
+class TaskController {
 public:
-    TaskScheduler() = default;
+    TaskController() = default;
 
     // Тип 1: аналог cron. Виконує callback кожні intervalMs,
     // живе, доки не буде видалене через removeTask(id).

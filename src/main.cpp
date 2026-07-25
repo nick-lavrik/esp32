@@ -40,20 +40,21 @@
 #include "ping.h"
 #include "GmailSender.hpp"
 #include "JpegImage.hpp"
-#include "TaskScheduler.h"
 #include "SerialCommandHandler.hpp"
 #include "SystemReset.hpp"
-#include "TouchController.h"
-#include "BackgroundImages.h"
+#include "BackgroundImages.hpp"
 #include "ConfigStorage.hpp"
-
-Display display;
-TaskScheduler scheduler;
+#include "TouchScreen/TouchController.h"
+#include "TaskController/TaskController.hpp"
+#include <EventDispatcher.hpp>
+#include <Event.hpp>
 
 void setupSerial() {
     Serial.begin(115200);
     delay(200);
-    Serial.println("Hello, ESP32!");
+    Serial.printf("\n\n-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*\n");
+    Serial.printf(" %s (%s)\n", ESP.getChipModel(), PIO_PIOENV );
+    Serial.printf("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*\n\n");
 }
 
 // --- Підсвітка + світловий сенсор ---
@@ -62,7 +63,7 @@ void setupSerial() {
 void setupDisplay() {
     display.init();
     display.autobrightness(true);
-    Serial.println("setupDisplay done.");
+    Serial.println("Display setup done.");
 }
 
 static TouchScreenConfig makeTouchScreenConfig() {
@@ -91,10 +92,15 @@ static TouchScreenConfig makeTouchScreenConfig() {
     return c;
 }
 
+EventDispatcher dispatcher;
+Display display(&dispatcher);
+TaskController scheduler;
 TouchController touchController;
 TouchScreenConfig touchScreenConfig = makeTouchScreenConfig();
 TouchPointMapper mapper(touchScreenConfig);
 TouchEvents touch(touchScreenConfig);
+ConfigStorage configStorage;
+JpegImage spaceImage;
 
 void onTouchLog(TouchPoint p)                              { Serial.printf("Touch: %d, %d\n", p.x, p.y); }
 void onHoldHandler(TouchPoint p, unsigned long ms)         { Serial.printf("Hold at %d,%d for %lu ms\n", p.x, p.y, ms); }
@@ -144,7 +150,7 @@ void setupTouchScreen() {
     #endif
 
     touchController.setup(&touch);
-    Serial.println("setupTouchScreen done");
+    Serial.println("TouchScreen setup done");
 
     touchController.events().onHold(onHoldDrawPoints);
 
@@ -181,6 +187,8 @@ void setupTouchScreen() {
     touchController.events().onSwipeFromTop(onSwipeFromTopHandler);
     touchController.events().onSwipeFromLeft(onSwipeFromLeftHandler);
     touchController.events().onSwipeFromRight(onSwipeFromRightHandler);
+
+    Serial.println("TouchScreen controller done");
 }
 
 #if HAS_GMAIL_SENDER
@@ -188,15 +196,12 @@ GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
 #endif
 
 void setupLittleFS() {
-
   if (!LittleFS.begin(true)) {
     Serial.println("LittleFS mount failed!");
   } else {
     Serial.println("LittleFS mounted successfully (done)");
   }
 }
-
-JpegImage spaceImage;
 
 void dumpChipsetInfo() {
     /* static uint32_t lastDumpMs = millis() - 5 * 60 * 1000 - 10;
@@ -236,7 +241,6 @@ void dumpChipsetInfo() {
         Serial.printf("Free PSRAM:  %d bytes (%.2f Mb)\n", ESP.getFreePsram() / 1024.0 / 1024.0);
     }
 
-    Serial.printf("PSRAM found: %s\n", psramFound() ? "YES" : "NO");
     Serial.println();
     // Serial.printf("WiFi: %s", WiFi.SSID);
     Serial.printf("Last reset reason: %s\n", SystemReset::getLastResetReason());
@@ -283,9 +287,9 @@ void setupSerialCommander() {
             Serial.println(F("Використання: led on|off"));
         }
     });
- 
-    Serial.println(F("Готово. Введіть 'list' для перегляду команд."));
-}
+
+    Serial.println("SerialCommander setup done");
+ }
 
 void setupBackgroundImage() {
     #if defined(LITTLEFS_BACKGROUND_IMAGE)
@@ -294,8 +298,31 @@ void setupBackgroundImage() {
     #endif
 }
 
+void setupConfigStorage() {
+    configStorage.begin(PIO_PIOENV);
+    Serial.println("CondfigStorage init done");
+}
+
+void loadConfig() {
+    display.brightness(configStorage.getFloat("brightness", 50));
+    display.autobrightness(configStorage.getFloat("auto-brightness", false));
+    Serial.println("ConfigStorage load done");
+}
+
+void setupEventDispatcher() {
+    dispatcher.addListener("display.brightness", [](IEvent& e) {
+        // auto& ev = static_cast<SensorReadyEvent&>(e);
+        // Serial.printf("Sensor value: %.2f\n", ev.value());
+        Serial.printf("Event::display.brightness(%d)\n", display.brightness());
+    });
+
+    Serial.println("EventDispatcher setup done");
+}
+
 void setup() {
     setupSerial();
+    setupEventDispatcher();
+    setupConfigStorage();
     setupSerialCommander();
     setupLittleFS();
     setupDisplay();
@@ -303,8 +330,11 @@ void setup() {
     setupWiFi();
     setupNtpService();
     setupBackgroundImage();
+    loadConfig();
 
     display.flush();
+
+    Serial.println("\n> Ready. Введіть 'list' для перегляду команд.\n");
 }
 
 void drawSystemInfo() {

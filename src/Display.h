@@ -2,6 +2,7 @@
 #pragma once
 
 #include <stdarg.h> // Обов'язково для роботи з трикрапкою (...)
+#include <EventDispatcher.hpp>
 #include "TftInstance.h"
 // Для env:esp32-st7789     -> це справжній bodmer/TFT_eSPI (SPI, ST7789)
 // Для env:esp32-4848s040   -> TFT_eSPI тут є alias'ом на LGFX (LovyanGFX,
@@ -11,7 +12,12 @@
 
 class Display {
 public:
-    Display();
+    // eventDispatcher опціональний: TaskController не залежить від нього
+    // напряму і працює без подій, якщо диспетчер не передано/не встановлено.
+    explicit Display(IEventDispatcher* eventDispatcher = nullptr);
+
+    // Дозволяє прив'язати/змінити/відв'язати (nullptr) диспетчер після створення.
+    void setEventDispatcher(IEventDispatcher* eventDispatcher);
 
     // Ініціалізація дисплея (обов'язково викликати в setup())
     void init();
@@ -128,4 +134,6 @@ private:
     int height_ = 0;
     uint8_t brightness_ = 50; // percent!
     bool autoBrigtness = false;
+
+    IEventDispatcher* _eventDispatcher = nullptr; // не володіє, може бути nullptr
 };

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
-#include "EcoFlowMqttCredentials.h"
+#include "EcoFlowMqttCredentials.hpp"
 
 // Виконує автентифікацію в EcoFlow Open Platform (developer-eu.ecoflow.com)
 // через accessKey/secretKey і отримує параметри підключення до MQTT-брокера.

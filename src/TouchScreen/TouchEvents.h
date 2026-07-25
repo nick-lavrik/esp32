@@ -18,10 +18,7 @@ class TouchEvents {
 public:
     char dummy[32] = "initial";
 
-    // Максимум одночасних колбеків на один івент. За потреби - збільш тут.
-    static const int MAX_CALLBACKS = 4;
-
-    // TouchCallback / HoldCallback / SwipeCallback - std::function (як TaskCallback у TaskScheduler): підписатись можна і звичайною функцією,
+    // TouchCallback / HoldCallback / SwipeCallback - std::function (як TaskCallback у TaskController): підписатись можна і звичайною функцією,
     // і лямбдою із захопленням, напр.:
     //   int r = 5;
     //   touch.onTouch([r](TouchPoint p) { display.drawCircle(p.x, p.y, r, TFT_YELLOW); });
@@ -93,16 +90,17 @@ private:
     bool _holdFired = false;
     unsigned long _lastTapTime = 0;
 
-    // Списки колбеків (по декілька на кожен івент)
-    CallbackList<TouchCallback, MAX_CALLBACKS> _onTouch;
-    CallbackList<HoldCallback,  MAX_CALLBACKS> _onHold;
-    CallbackList<TouchCallback, MAX_CALLBACKS> _onDblClick;
-    CallbackList<SwipeCallback, MAX_CALLBACKS> _onSwipeLeft;
-    CallbackList<SwipeCallback, MAX_CALLBACKS> _onSwipeRight;
-    CallbackList<SwipeCallback, MAX_CALLBACKS> _onSwipeUp;
-    CallbackList<SwipeCallback, MAX_CALLBACKS> _onSwipeDown;
-    CallbackList<SwipeCallback, MAX_CALLBACKS> _onSwipeFromBottom;
-    CallbackList<SwipeCallback, MAX_CALLBACKS> _onSwipeFromTop;
-    CallbackList<SwipeCallback, MAX_CALLBACKS> _onSwipeFromLeft;
-    CallbackList<SwipeCallback, MAX_CALLBACKS> _onSwipeFromRight;
+    // Списки колбеків - динамічні (std::vector), без обмеження кількості
+    // підписників на один івент.
+    CallbackList<TouchCallback> _onTouch;
+    CallbackList<HoldCallback>  _onHold;
+    CallbackList<TouchCallback> _onDblClick;
+    CallbackList<SwipeCallback> _onSwipeLeft;
+    CallbackList<SwipeCallback> _onSwipeRight;
+    CallbackList<SwipeCallback> _onSwipeUp;
+    CallbackList<SwipeCallback> _onSwipeDown;
+    CallbackList<SwipeCallback> _onSwipeFromBottom;
+    CallbackList<SwipeCallback> _onSwipeFromTop;
+    CallbackList<SwipeCallback> _onSwipeFromLeft;
+    CallbackList<SwipeCallback> _onSwipeFromRight;
 };

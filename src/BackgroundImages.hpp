@@ -1,4 +1,3 @@
-// BackgroundImages.h
 #pragma once
 
 #include <cstddef>
