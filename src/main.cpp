@@ -25,7 +25,7 @@
 #include "JpegImage.h"
 #include "TaskScheduler.h"
 #include "SerialCommandHandler.h"
-//#include "SystemReset.h"
+#include "SystemReset.hpp"
 #include "TouchController.h"
 // #include "TouchEvents.h"
 
@@ -221,6 +221,9 @@ void dumpChipsetInfo() {
         Serial.printf("Free PSRAM:  %d bytes (%.2f Mb)\n", ESP.getFreePsram() / 1024.0 / 1024.0);
     }
 
+    Serial.printf("PSRAM found: %s\n", psramFound() ? "YES" : "NO");
+    Serial.println();
+    Serial.printf("Last reset reason: %s\n", SystemReset::getLastResetReason());
     Serial.printf("display.brightness = %d\n", display.brightness());
     /* Serial.println("\n==== ESP32 HEAP INFO =====");
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
