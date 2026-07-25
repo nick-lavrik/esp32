@@ -1,4 +1,4 @@
-#include "ConfigStorage.h"
+#include "ConfigStorage.hpp"
 
 ConfigStorage::ConfigStorage() {}
 

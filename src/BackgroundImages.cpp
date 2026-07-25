@@ -2,7 +2,6 @@
 #include <Arduino.h>
 #include "BackgroundImages.h"
 #include "Display.h"
-#include "JpegImage.h"
 
 #if BACKGROUND_IMAGES_COUNT >= 1
 #include "../assets/space-01.h"

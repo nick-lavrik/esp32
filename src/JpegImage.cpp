@@ -1,4 +1,4 @@
-#include "JpegImage.h"
+#include "JpegImage.hpp"
 
 #include <LittleFS.h>
 #include <TJpg_Decoder.h>

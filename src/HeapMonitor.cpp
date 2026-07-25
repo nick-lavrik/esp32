@@ -1,4 +1,4 @@
-#include "HeapMonitor.h"
+#include "HeapMonitor.hpp"
 
 HeapMonitor::HeapMonitor(uint32_t intervalMs)
     : _intervalMs(intervalMs), _lastPrintMs(0) {

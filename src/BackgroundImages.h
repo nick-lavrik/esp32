@@ -5,7 +5,7 @@
 #include <cstdint>
 
 #include "Display.h"
-#include "JpegImage.h"
+#include "JpegImage.hpp"
 
 // Самі дані зображень (76800 = 240*320 пікселів, RGB565) визначені
 // в іншому місці проєкту — тут лише оголошуємо їх як зовнішні,

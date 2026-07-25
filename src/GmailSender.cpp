@@ -1,4 +1,4 @@
-#include "GmailSender.h"
+#include "GmailSender.hpp"
 
 #if HAS_GMAIL_SENDER
 static const char* SMTP_HOST = "smtp.gmail.com";

@@ -1,4 +1,4 @@
-#include "SerialCommandHandler.h"
+#include "SerialCommandHandler.hpp"
 
 SerialCommandHandler::SerialCommandHandler(Stream& serial, char terminator)
     : serial_(serial), terminator_(terminator) {
@@ -63,10 +63,7 @@ void SerialCommandHandler::printUnknown(const String& name) const {
 void SerialCommandHandler::printList() const {
     serial_.println(F("Доступні команди:"));
     for (const auto& cmd : commands_) {
-        serial_.print(F("  "));
-        serial_.printf("%20s", cmd.name);
-        serial_.print(F(" - "));
-        serial_.println(cmd.description);
+        serial_.printf("  %-10s - %s\n", cmd.name.c_str(), cmd.description.c_str());
     }
 }
 

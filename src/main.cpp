@@ -14,6 +14,23 @@
 //     // а не в рантаймі.
 // }
 
+// ===== ESP32 CHIP INFO =====
+// PlatformIO: esp32-4848s040
+// Chip model: ESP32-S3
+// Chip revision: 2
+// CPU cores: 2
+// CPU freq: 240 MHz
+// SDK version:  v5.5.4
+// Core version: 3.3.9
+// ===== ESP32 CHIP INFO =====
+// PlatformIO: esp32-st7789
+// Chip model: ESP32-D0WD-V3
+// Chip revision: 301
+// CPU cores: 2
+// CPU freq: 240 MHz
+// SDK version:  v5.5.4
+// Core version: 3.3.9
+
 #include <Arduino.h>
 #include "Display.h"
 #include <SPI.h>
@@ -21,18 +38,17 @@
 #include "wifi.h"
 #include "ntp.h"
 #include "ping.h"
-#include "GmailSender.h"
-#include "JpegImage.h"
+#include "GmailSender.hpp"
+#include "JpegImage.hpp"
 #include "TaskScheduler.h"
-#include "SerialCommandHandler.h"
+#include "SerialCommandHandler.hpp"
 #include "SystemReset.hpp"
 #include "TouchController.h"
-// #include "TouchEvents.h"
+#include "BackgroundImages.h"
+#include "ConfigStorage.hpp"
 
 Display display;
 TaskScheduler scheduler;
-
-#include "BackgroundImages.h"
 
 void setupSerial() {
     Serial.begin(115200);
@@ -48,8 +64,6 @@ void setupDisplay() {
     display.autobrightness(true);
     Serial.println("setupDisplay done.");
 }
-
-TouchController touchController;
 
 static TouchScreenConfig makeTouchScreenConfig() {
     TouchScreenConfig c;
@@ -77,6 +91,7 @@ static TouchScreenConfig makeTouchScreenConfig() {
     return c;
 }
 
+TouchController touchController;
 TouchScreenConfig touchScreenConfig = makeTouchScreenConfig();
 TouchPointMapper mapper(touchScreenConfig);
 TouchEvents touch(touchScreenConfig);
@@ -223,6 +238,7 @@ void dumpChipsetInfo() {
 
     Serial.printf("PSRAM found: %s\n", psramFound() ? "YES" : "NO");
     Serial.println();
+    // Serial.printf("WiFi: %s", WiFi.SSID);
     Serial.printf("Last reset reason: %s\n", SystemReset::getLastResetReason());
     Serial.printf("display.brightness = %d\n", display.brightness());
     /* Serial.println("\n==== ESP32 HEAP INFO =====");
@@ -253,7 +269,11 @@ void setupSerialCommander() {
     commandHandler.registerCommand("status", "Показати статус пристрою", [](const String& args) {
         dumpChipsetInfo();
     });
- 
+
+    commandHandler.registerCommand("reboot", "Перезавантажити пристрій", [](const String& args) {
+        SystemReset::reboot();
+    });
+
     commandHandler.registerCommand("led", "Керування світлодіодом: led on|off", [](const String& args) {
         if (args.equalsIgnoreCase("on")) {
             Serial.println(F("LED увімкнено"));
@@ -267,28 +287,22 @@ void setupSerialCommander() {
     Serial.println(F("Готово. Введіть 'list' для перегляду команд."));
 }
 
-void setup() {
-    setupSerial();
-    setupSerialCommander();
-    setupLittleFS();
-    dumpChipsetInfo();
-    setupDisplay();
-    setupTouchScreen();
-    setupWiFi();
-    setupNtpService();
-
+void setupBackgroundImage() {
     #if defined(LITTLEFS_BACKGROUND_IMAGE)
     spaceImage.loadFromLittleFS(LITTLEFS_BACKGROUND_IMAGE, SPRITE_COLOR_DEPTH > 8 ? JpegColorDepth::RGB565 : JpegColorDepth::RGB332);
     setBackgroundImage(spaceImage);
     #endif
+}
 
-    #if SPRITE_COLOR_DEPTH == 16
-    //spaceImage.loadFromLittleFS("/space-01.jpg", JpegColorDepth::RGB565);
-    //setBackgroundImage(spaceImage);
-    #elif SPRITE_COLOR_DEPTH == 8
-    //spaceImage.loadFromLittleFS("/space-03.jpg", JpegColorDepth::RGB332);
-    //setBackgroundImage(spaceImage);
-    #endif
+void setup() {
+    setupSerial();
+    setupSerialCommander();
+    setupLittleFS();
+    setupDisplay();
+    setupTouchScreen();
+    setupWiFi();
+    setupNtpService();
+    setupBackgroundImage();
 
     display.flush();
 }
