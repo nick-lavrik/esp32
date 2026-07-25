@@ -88,3 +88,23 @@ void Display::brightness(uint8_t percent) {
     tft_.setBrightness(map(percent, 0, 100, 15, 255)); // делегуємо в LGFX Light_PWM, пін вже сконфігурований у Setup_ST7701_4848S040.h
     #endif
 }
+
+const uint32_t Display::loopFrameRate() {
+    // --- Метрики "здоров'я" системи ---
+    static uint32_t loopCounter = 0;
+    static uint32_t loopsPerSecond = 0;
+    static uint32_t lastLoopCheckMs = 0;
+
+    loopCounter++;
+
+    uint32_t now = millis();
+
+    // Підрахунок швидкості циклів loop() за секунду
+    if (now - lastLoopCheckMs >= 1000) {
+      loopsPerSecond = loopCounter;
+      loopCounter = 0;
+      lastLoopCheckMs = now;
+    }
+
+    return loopsPerSecond;
+}

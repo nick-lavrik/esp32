@@ -23,8 +23,11 @@
 #include "ping.h"
 #include "GmailSender.h"
 #include "JpegImage.h"
-#include "HeapMonitor.h"
 #include "TaskScheduler.h"
+#include "SerialCommandHandler.h"
+//#include "SystemReset.h"
+#include "TouchController.h"
+// #include "TouchEvents.h"
 
 Display display;
 TaskScheduler scheduler;
@@ -45,9 +48,6 @@ void setupDisplay() {
     display.autobrightness(true);
     Serial.println("setupDisplay done.");
 }
-
-#include "TouchController.h"
-#include "TouchEvents.h"
 
 TouchController touchController;
 
@@ -95,26 +95,6 @@ void onSwipeFromTopHandler(TouchPoint start, TouchPoint end)    { Serial.println
 void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end)   { Serial.println("Swipe FROM LEFT (напр., назад)"); }
 void onSwipeFromRightHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe FROM RIGHT (напр., бокова панель)"); }
 
-void onSwipeUpBrightnessPlus(TouchPoint s, TouchPoint e)    { 
-    display.autobrightness(false);
-    if (display.brightness() == 0) {
-        display.brightness(1);
-    } else {
-        display.brightness(min(display.brightness() + 10, 255)); 
-    }
-    Serial.printf("Brightness: %d%% (increase)\n", display.brightness());
-}
-
-void onSwipeDownBrightnessMinus(TouchPoint s, TouchPoint e) { 
-    display.autobrightness(false);
-    if (display.brightness() == 1) {
-        display.brightness(0);
-    } else {
-        display.brightness(max(display.brightness() - 10, 1)); 
-    }
-    Serial.printf("Brightness: %d%% (decrease)\n", display.brightness());
-}
-
 void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
     display.autobrightness(true);
 
@@ -140,7 +120,6 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
     );
 
     Serial.printf("\nONHOLD FRAME !!!\n\n");
-    //display.flush(); delay(500);
 }
 
 void setupTouchScreen() {
@@ -152,16 +131,37 @@ void setupTouchScreen() {
     touchController.setup(&touch);
     Serial.println("setupTouchScreen done");
 
+    touchController.events().onHold(onHoldDrawPoints);
+
+    touchController.events().onSwipeUp([](TouchPoint s, TouchPoint e) {
+        display.autobrightness(false);
+        if (display.brightness() == 0) {
+            display.brightness(1);
+        } else if (display.brightness() == 1) {
+            display.brightness(10);
+        } else {
+            display.brightness(min(display.brightness() + 10, 255)); 
+        }
+        Serial.printf("Brightness: %d%% (increase)\n", display.brightness());
+    });
+
+    touchController.events().onSwipeDown([](TouchPoint s, TouchPoint e) { 
+        display.autobrightness(false);
+        if (display.brightness() == 1) {
+            display.brightness(0);
+        } else {
+            display.brightness(max(display.brightness() - 10, 1)); 
+        }
+        Serial.printf("Brightness: %d%% (decrease)\n", display.brightness());
+    });
+
     touchController.events().onTouch(onTouchLog);
     touchController.events().onHold(onHoldHandler);
-    touchController.events().onHold(onHoldDrawPoints);
     touchController.events().onDblClick(onDblClickHandler);
     touchController.events().onSwipeLeft(onSwipeLeftHandler);
     touchController.events().onSwipeRight(onSwipeRightHandler);
     touchController.events().onSwipeUp(onSwipeUpHandler);
-    touchController.events().onSwipeUp(onSwipeUpBrightnessPlus);
     touchController.events().onSwipeDown(onSwipeDownHandler);
-    touchController.events().onSwipeDown(onSwipeDownBrightnessMinus);
     touchController.events().onSwipeFromBottom(onSwipeFromBottomHandler);
     touchController.events().onSwipeFromTop(onSwipeFromTopHandler);
     touchController.events().onSwipeFromLeft(onSwipeFromLeftHandler);
@@ -173,39 +173,20 @@ GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
 #endif
 
 void setupLittleFS() {
-  Serial.println("\n====== LittleFS INFO =======");
 
   if (!LittleFS.begin(true)) {
     Serial.println("LittleFS mount failed!");
   } else {
     Serial.println("LittleFS mounted successfully (done)");
   }
-
-  delay(50);
-
-  // --- Список усіх файлів ---
-  File root = LittleFS.open("/");
-  File file = root.openNextFile();
-  while (file) {
-    Serial.printf("File: %s, size: %d bytes\n", file.name(), file.size());
-    file = root.openNextFile();
-  }
-
-  size_t usedBytes = LittleFS.usedBytes();
-  size_t totalBytes = LittleFS.totalBytes();
-  double freePercent = ((totalBytes - usedBytes) * 100.00 / totalBytes);
-
-  // --- Скільки місця залишилось ---
-  Serial.printf("Used: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
-  Serial.printf("============================\n\n");
 }
 
 JpegImage spaceImage;
 
 void dumpChipsetInfo() {
-    static uint32_t lastDumpMs = millis() - 5 * 60 * 1000 - 10;
+    /* static uint32_t lastDumpMs = millis() - 5 * 60 * 1000 - 10;
     if ((millis() - lastDumpMs) < 5 * 60 * 1000) return;
-    lastDumpMs = millis();
+    lastDumpMs = millis(); */
 
     Serial.println("\n===== ESP32 CHIP INFO =====");
 
@@ -222,40 +203,73 @@ void dumpChipsetInfo() {
     // Serial.printf("Cycle Count: %d\n", ESP.getCycleCount());
 
     // --- ESP-IDF ---
-    Serial.printf("SDK version: %s\n", ESP.getSdkVersion());
+    Serial.printf("SDK version:  %s\n", ESP.getSdkVersion());
     Serial.printf("Core version: %s\n", ESP.getCoreVersion());
 
     // --- Flash ---
-    Serial.printf("Flash size: %d bytes (%.2f MB)\n", ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1024.0 / 1024.0);
+    Serial.printf("Flash size:  %d bytes (%.2f MB)\n", ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1024.0 / 1024.0);
     Serial.printf("Flash speed: %d Hz\n", ESP.getFlashChipSpeed());
 
     // --- Внутрішня RAM (SRAM) ---
-    Serial.printf("Total heap: %d bytes\n", ESP.getHeapSize());
-    Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("Total heap:  %d bytes\n", ESP.getHeapSize());
+    Serial.printf("Free heap:   %d bytes\n", ESP.getFreeHeap());
 
     // --- PSRAM ---
     Serial.printf("PSRAM found: %s\n", psramFound() ? "YES" : "NO");
     if (psramFound()) {
         Serial.printf("Total PSRAM: %d bytes (%.2f Mb)\n", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
-        Serial.printf("Free PSRAM: %d bytes (%.2f Mb)\n", ESP.getFreePsram() / 1024.0 / 1024.0);
+        Serial.printf("Free PSRAM:  %d bytes (%.2f Mb)\n", ESP.getFreePsram() / 1024.0 / 1024.0);
     }
 
     Serial.printf("display.brightness = %d\n", display.brightness());
     /* Serial.println("\n==== ESP32 HEAP INFO =====");
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
     Serial.println("============================");
+
+
+    Serial.println("\n====== LittleFS INFO =======");
+    // --- Список усіх файлів ---
+    File root = LittleFS.open("/");
+    File file = root.openNextFile();
+    while (file) {
+        Serial.printf("File: %s, size: %d bytes\n", file.name(), file.size());
+        file = root.openNextFile();
+    }
+
+    size_t usedBytes = LittleFS.usedBytes();
+    size_t totalBytes = LittleFS.totalBytes();
+    double freePercent = ((totalBytes - usedBytes) * 100.00 / totalBytes);
+
+    // --- Скільки місця залишилось ---
+    Serial.printf("Used: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
+    Serial.printf("============================\n\n");
 }
 
-HeapMonitor heapMonitor(60000); // друк кожні 60 сек
+SerialCommandHandler commandHandler;
+void setupSerialCommander() {
+    commandHandler.registerCommand("status", "Показати статус пристрою", [](const String& args) {
+        dumpChipsetInfo();
+    });
+ 
+    commandHandler.registerCommand("led", "Керування світлодіодом: led on|off", [](const String& args) {
+        if (args.equalsIgnoreCase("on")) {
+            Serial.println(F("LED увімкнено"));
+        } else if (args.equalsIgnoreCase("off")) {
+            Serial.println(F("LED вимкнено"));
+        } else {
+            Serial.println(F("Використання: led on|off"));
+        }
+    });
+ 
+    Serial.println(F("Готово. Введіть 'list' для перегляду команд."));
+}
 
 void setup() {
     setupSerial();
-
-    Serial.println("\n\n===== setup =====\n");
-    heapMonitor.begin();
+    setupSerialCommander();
+    setupLittleFS();
     dumpChipsetInfo();
     setupDisplay();
-    setupLittleFS();
     setupTouchScreen();
     setupWiFi();
     setupNtpService();
@@ -276,27 +290,6 @@ void setup() {
     display.flush();
 }
 
-const uint32_t loopFrameRate() {
-    // --- Метрики "здоров'я" системи ---
-    static uint32_t loopCounter = 0;
-    static uint32_t loopsPerSecond = 0;
-    static uint32_t lastLoopCheckMs = 0;
-
-    loopCounter++;
-
-    uint32_t now = millis();
-
-    // Підрахунок швидкості циклів loop() за секунду
-    if (now - lastLoopCheckMs >= 1000) {
-      loopsPerSecond = loopCounter;
-      loopCounter = 0;
-      lastLoopCheckMs = now;
-    }
-
-    return loopsPerSecond;
-}
-
-
 void drawSystemInfo() {
   // img.fillRect(0, 30, 320, 65, BG_COLOR);
 
@@ -314,7 +307,7 @@ void drawSystemInfo() {
   display.printf("Uptime: %02d:%02d:%02d", uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
 
   display.setCursor(10, 10 + 1 * (5 +  display.fontHeight()));
-  display.printf("CPU: %d MHz   Loop rate: %d/s", cpuFreq, loopFrameRate());
+  display.printf("CPU: %d MHz   Loop rate: %d/s", cpuFreq, display.loopFrameRate());
 
   display.setCursor(10, 10 + 2 * (5 +  display.fontHeight()));
   display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, heapPercent);
@@ -356,10 +349,10 @@ void sendEmail() {
 }
 
 void loop() {
+    commandHandler.update();
     doPing();
-    display.clear();
+    // display.clear();
     drawBackgroundImage();
-    dumpChipsetInfo();
     drawSystemInfo();
     drawTime();
 
@@ -370,5 +363,5 @@ void loop() {
 
     display.flush();
     //heapMonitor.update();
-    delay(16);
+    delay(10);
 }

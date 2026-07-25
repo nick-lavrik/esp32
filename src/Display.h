@@ -72,7 +72,7 @@ public:
         }
         #endif
     }
-
+    const uint32_t loopFrameRate();
     size_t   fontHeight() { return sprite_.fontHeight(); }
     void     setTextColor(uint16_t color) { sprite_.setTextColor(color); }
     void     setTextColor(uint16_t color, uint16_t bg) { sprite_.setTextColor(color, bg); }

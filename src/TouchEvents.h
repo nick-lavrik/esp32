@@ -5,6 +5,9 @@
 #include "CallbackList.h"
 #include "TouchPointMapper.h"
 #include "TouchPoint.h"
+#include "TouchCallback.h"
+#include "HoldCallback.h"
+#include "SwipeCallback.h"
 
 // Очікується, що десь вже існує:
 //   unsigned long millis();
@@ -18,9 +21,10 @@ public:
     // Максимум одночасних колбеків на один івент. За потреби - збільш тут.
     static const int MAX_CALLBACKS = 4;
 
-    typedef void (*TouchCallback)(TouchPoint point);
-    typedef void (*HoldCallback)(TouchPoint point, unsigned long holdDurationMs);
-    typedef void (*SwipeCallback)(TouchPoint start, TouchPoint end);
+    // TouchCallback / HoldCallback / SwipeCallback - std::function (як TaskCallback у TaskScheduler): підписатись можна і звичайною функцією,
+    // і лямбдою із захопленням, напр.:
+    //   int r = 5;
+    //   touch.onTouch([r](TouchPoint p) { display.drawCircle(p.x, p.y, r, TFT_YELLOW); });
 
     explicit TouchEvents(const TouchScreenConfig &config = TouchScreenConfig());
 

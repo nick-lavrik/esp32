@@ -1,21 +1,24 @@
 #include "TouchScreenConfig.h"
 #include "TouchEvents.h"
 #include <math.h>
+#include <utility> // std::move
 
 TouchEvents::TouchEvents(const TouchScreenConfig &config) : _config(config) {}
 
 // ---- Підписка ----
-int TouchEvents::onTouch(TouchCallback cb)           { return _onTouch.add(cb); }
-int TouchEvents::onHold(HoldCallback cb)             { return _onHold.add(cb); }
-int TouchEvents::onDblClick(TouchCallback cb)        { return _onDblClick.add(cb); }
-int TouchEvents::onSwipeLeft(SwipeCallback cb)       { return _onSwipeLeft.add(cb); }
-int TouchEvents::onSwipeRight(SwipeCallback cb)      { return _onSwipeRight.add(cb); }
-int TouchEvents::onSwipeUp(SwipeCallback cb)         { return _onSwipeUp.add(cb); }
-int TouchEvents::onSwipeDown(SwipeCallback cb)       { return _onSwipeDown.add(cb); }
-int TouchEvents::onSwipeFromBottom(SwipeCallback cb) { return _onSwipeFromBottom.add(cb); }
-int TouchEvents::onSwipeFromTop(SwipeCallback cb)    { return _onSwipeFromTop.add(cb); }
-int TouchEvents::onSwipeFromLeft(SwipeCallback cb)   { return _onSwipeFromLeft.add(cb); }
-int TouchEvents::onSwipeFromRight(SwipeCallback cb)  { return _onSwipeFromRight.add(cb); }
+// cb переміщується (std::move) далі в CallbackList::add - без зайвої копії
+// замикання, так само як TaskScheduler::addCronTask/addJob роблять з TaskCallback.
+int TouchEvents::onTouch(TouchCallback cb)           { return _onTouch.add(std::move(cb)); }
+int TouchEvents::onHold(HoldCallback cb)             { return _onHold.add(std::move(cb)); }
+int TouchEvents::onDblClick(TouchCallback cb)        { return _onDblClick.add(std::move(cb)); }
+int TouchEvents::onSwipeLeft(SwipeCallback cb)       { return _onSwipeLeft.add(std::move(cb)); }
+int TouchEvents::onSwipeRight(SwipeCallback cb)      { return _onSwipeRight.add(std::move(cb)); }
+int TouchEvents::onSwipeUp(SwipeCallback cb)         { return _onSwipeUp.add(std::move(cb)); }
+int TouchEvents::onSwipeDown(SwipeCallback cb)       { return _onSwipeDown.add(std::move(cb)); }
+int TouchEvents::onSwipeFromBottom(SwipeCallback cb) { return _onSwipeFromBottom.add(std::move(cb)); }
+int TouchEvents::onSwipeFromTop(SwipeCallback cb)    { return _onSwipeFromTop.add(std::move(cb)); }
+int TouchEvents::onSwipeFromLeft(SwipeCallback cb)   { return _onSwipeFromLeft.add(std::move(cb)); }
+int TouchEvents::onSwipeFromRight(SwipeCallback cb)  { return _onSwipeFromRight.add(std::move(cb)); }
 
 // ---- Відписка ----
 void TouchEvents::offTouch(int handle)           { _onTouch.remove(handle); }
