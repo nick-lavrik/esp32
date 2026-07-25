@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Event.hpp"
-#include "ITask.h" // звідти TaskId
+#include <Event.hpp>
+#include "TaskController/ITask.h" // звідти TaskId
 
 // Подія: TaskController видалив/скасував завдання.
 // dispatch("task.removed", TaskRemovedEvent(id))
