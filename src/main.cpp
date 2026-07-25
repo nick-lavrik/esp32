@@ -5,6 +5,15 @@
 //   env:esp32-st7789      -> include/Setup_ST7789.h        (bodmer/TFT_eSPI, SPI)
 //   env:esp32-4848s040    -> include/Setup_ST7701_4848S040.h (LovyanGFX, RGB-панель)
 
+// static const uint32_t freqs[] = {150, 300, 500, 800, 1000, 2000};
+// for (uint32_t f : freqs) {
+//     Serial.printf("Testing freq = %u Hz\n", f);
+//     // На жаль, LGFX Light_PWM не дає змінити freq в рантаймі без
+//     // повторної ініціалізації - тому цей тест краще робити,
+//     // міняючи light_cfg.freq в Setup_ST7701_4848S040.h і перепрошиваючи,
+//     // а не в рантаймі.
+// }
+
 #include <Arduino.h>
 #include "Display.h"
 #include <SPI.h>
@@ -15,30 +24,26 @@
 #include "GmailSender.h"
 #include "JpegImage.h"
 #include "HeapMonitor.h"
+#include "TaskScheduler.h"
 
 Display display;
+TaskScheduler scheduler;
 
 #include "BackgroundImages.h"
 
 void setupSerial() {
     Serial.begin(115200);
+    delay(200);
     Serial.println("Hello, ESP32!");
 }
 
-void setupDisplay() {
-    #ifdef BOARD_4848S040
-    pinMode(TFT_BL, OUTPUT);
-    analogWrite(TFT_BL, 80);
-    #endif
-    
-    #ifdef BOARD_ST7789
-    pinMode(TFT_BL, OUTPUT);
-    analogWrite(TFT_BL, 80);
-    #endif
+// --- Підсвітка + світловий сенсор ---
+// #define LIGHT_SENSOR_PIN 34
 
+void setupDisplay() {
     display.init();
-    display.clear(TFT_BLACK);
-    // display.drawCenteredText("Hello, ESP32!", TFT_YELLOW, 4);
+    display.autobrightness(true);
+    Serial.println("setupDisplay done.");
 }
 
 #include "TouchController.h"
@@ -65,6 +70,8 @@ static TouchScreenConfig makeTouchScreenConfig() {
     #ifdef BOARD_4848S040
     c.screenWidth  = 480;
     c.screenHeight = 480;
+    c.edgeZoneX = 40;
+    c.edgeZoneY = 40;
     #endif
 
     return c;
@@ -88,6 +95,54 @@ void onSwipeFromTopHandler(TouchPoint start, TouchPoint end)    { Serial.println
 void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end)   { Serial.println("Swipe FROM LEFT (напр., назад)"); }
 void onSwipeFromRightHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe FROM RIGHT (напр., бокова панель)"); }
 
+void onSwipeUpBrightnessPlus(TouchPoint s, TouchPoint e)    { 
+    display.autobrightness(false);
+    if (display.brightness() == 0) {
+        display.brightness(1);
+    } else {
+        display.brightness(min(display.brightness() + 10, 255)); 
+    }
+    Serial.printf("Brightness: %d%% (increase)\n", display.brightness());
+}
+
+void onSwipeDownBrightnessMinus(TouchPoint s, TouchPoint e) { 
+    display.autobrightness(false);
+    if (display.brightness() == 1) {
+        display.brightness(0);
+    } else {
+        display.brightness(max(display.brightness() - 10, 1)); 
+    }
+    Serial.printf("Brightness: %d%% (decrease)\n", display.brightness());
+}
+
+void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
+    display.autobrightness(true);
+
+    // Тип 2 (JobTask): "показувати frame"
+    // постійно протягом 1 хвилини, після чого само зникає з черги
+    scheduler.addJob(
+        10UL * 1000UL,
+        [p]() {
+            display.drawCircle(p.x, p.y, 4, TFT_YELLOW);
+            display.drawRect(0, 0, 1, 1, TFT_WHITE);
+            display.drawRect(display.width()-1, 0, 1, 1, TFT_WHITE);
+            display.drawRect(display.width()-1, display.height() - 1, 1, 1, TFT_WHITE);
+            display.drawRect(0, display.height() - 1, 1, 1, TFT_WHITE);
+
+            display.drawRect(
+                touchScreenConfig.edgeZoneX, touchScreenConfig.edgeZoneY,
+                touchScreenConfig.screenWidth - 2 * touchScreenConfig.edgeZoneX,
+                touchScreenConfig.screenHeight - 2 * touchScreenConfig.edgeZoneY,
+                TFT_DARKGREY
+            );
+        },
+        1 // з інтервалом 100 мс, а не на кожному tick()
+    );
+
+    Serial.printf("\nONHOLD FRAME !!!\n\n");
+    //display.flush(); delay(500);
+}
+
 void setupTouchScreen() {
 
     #ifdef BOARD_ST7789
@@ -95,13 +150,18 @@ void setupTouchScreen() {
     #endif
 
     touchController.setup(&touch);
+    Serial.println("setupTouchScreen done");
+
     touchController.events().onTouch(onTouchLog);
     touchController.events().onHold(onHoldHandler);
+    touchController.events().onHold(onHoldDrawPoints);
     touchController.events().onDblClick(onDblClickHandler);
     touchController.events().onSwipeLeft(onSwipeLeftHandler);
     touchController.events().onSwipeRight(onSwipeRightHandler);
     touchController.events().onSwipeUp(onSwipeUpHandler);
+    touchController.events().onSwipeUp(onSwipeUpBrightnessPlus);
     touchController.events().onSwipeDown(onSwipeDownHandler);
+    touchController.events().onSwipeDown(onSwipeDownBrightnessMinus);
     touchController.events().onSwipeFromBottom(onSwipeFromBottomHandler);
     touchController.events().onSwipeFromTop(onSwipeFromTopHandler);
     touchController.events().onSwipeFromLeft(onSwipeFromLeftHandler);
@@ -113,6 +173,7 @@ GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
 #endif
 
 void setupLittleFS() {
+  Serial.println("\n====== LittleFS INFO =======");
 
   if (!LittleFS.begin(true)) {
     Serial.println("LittleFS mount failed!");
@@ -136,6 +197,7 @@ void setupLittleFS() {
 
   // --- Скільки місця залишилось ---
   Serial.printf("Used: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
+  Serial.printf("============================\n\n");
 }
 
 JpegImage spaceImage;
@@ -147,11 +209,21 @@ void dumpChipsetInfo() {
 
     Serial.println("\n===== ESP32 CHIP INFO =====");
 
+    // --- PlatformIO environment ---
+    Serial.printf("PlatformIO: %s\n", PIO_PIOENV);
+
     // --- Модель чипа ---
     Serial.printf("Chip model: %s\n", ESP.getChipModel());
     Serial.printf("Chip revision: %d\n", ESP.getChipRevision());
     Serial.printf("CPU cores: %d\n", ESP.getChipCores());
     Serial.printf("CPU freq: %d MHz\n", ESP.getCpuFreqMHz());
+
+    //  возвращает общее количество тактов процессора (CPU cycles), прошедших с момента запуска
+    // Serial.printf("Cycle Count: %d\n", ESP.getCycleCount());
+
+    // --- ESP-IDF ---
+    Serial.printf("SDK version: %s\n", ESP.getSdkVersion());
+    Serial.printf("Core version: %s\n", ESP.getCoreVersion());
 
     // --- Flash ---
     Serial.printf("Flash size: %d bytes (%.2f MB)\n", ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1024.0 / 1024.0);
@@ -164,10 +236,11 @@ void dumpChipsetInfo() {
     // --- PSRAM ---
     Serial.printf("PSRAM found: %s\n", psramFound() ? "YES" : "NO");
     if (psramFound()) {
-        Serial.printf("Total PSRAM: %d bytes (%.2f MB)\n", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
-        Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
+        Serial.printf("Total PSRAM: %d bytes (%.2f Mb)\n", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
+        Serial.printf("Free PSRAM: %d bytes (%.2f Mb)\n", ESP.getFreePsram() / 1024.0 / 1024.0);
     }
 
+    Serial.printf("display.brightness = %d\n", display.brightness());
     /* Serial.println("\n==== ESP32 HEAP INFO =====");
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
     Serial.println("============================");
@@ -177,6 +250,8 @@ HeapMonitor heapMonitor(60000); // друк кожні 60 сек
 
 void setup() {
     setupSerial();
+
+    Serial.println("\n\n===== setup =====\n");
     heapMonitor.begin();
     dumpChipsetInfo();
     setupDisplay();
@@ -185,9 +260,14 @@ void setup() {
     setupWiFi();
     setupNtpService();
 
-    #if SPRITE_COLOR_DEPTH == 16
-    spaceImage.loadFromLittleFS("/space-01.jpg", JpegColorDepth::RGB565);
+    #if defined(LITTLEFS_BACKGROUND_IMAGE)
+    spaceImage.loadFromLittleFS(LITTLEFS_BACKGROUND_IMAGE, SPRITE_COLOR_DEPTH > 8 ? JpegColorDepth::RGB565 : JpegColorDepth::RGB332);
     setBackgroundImage(spaceImage);
+    #endif
+
+    #if SPRITE_COLOR_DEPTH == 16
+    //spaceImage.loadFromLittleFS("/space-01.jpg", JpegColorDepth::RGB565);
+    //setBackgroundImage(spaceImage);
     #elif SPRITE_COLOR_DEPTH == 8
     //spaceImage.loadFromLittleFS("/space-03.jpg", JpegColorDepth::RGB332);
     //setBackgroundImage(spaceImage);
@@ -242,6 +322,11 @@ void drawSystemInfo() {
   display.setCursor(10, 10 + 3 * (5 +  display.fontHeight()));
   display.print(dumpPingStatsStr());
 
+  char brightnessStr[200];
+  sprintf(brightnessStr, "Brigtness: %d%% lightsensor: %s (%d)", display.brightness(), display.hasLightSensor() ? "yes" : "no", display.lightSensor());
+  display.setCursor(10, 10 + 4 * (5 +  display.fontHeight()));
+  display.print(brightnessStr);
+
   // Візуальний бар пам'яті
   // int barX = 10, barY = 56, barW = 300, barH = 10;
   // img.drawRect(barX, barY, barW, barH, GRID_COLOR);
@@ -252,13 +337,6 @@ void drawSystemInfo() {
   // int lightPercent = readLightPercent();
   // img.setCursor(180, 70);
   // img.printf("Light: %d%%", lightPercent);
-}
-
-void drawPoints() {
-    display.drawRect(0, 0, 1, 1, TFT_WHITE);
-    display.drawRect(display.width()-1, 0, 1, 1, TFT_WHITE);
-    display.drawRect(display.width()-1, display.height() - 1, 1, 1, TFT_WHITE);
-    display.drawRect(0, display.height() - 1, 1, 1, TFT_WHITE);
 }
 
 void sendEmail() {
@@ -278,18 +356,19 @@ void sendEmail() {
 }
 
 void loop() {
-    heapMonitor.update(); // неблокуюче, друкує тільки коли настав час
     doPing();
-
     display.clear();
-    touchController.update();
-    dumpChipsetInfo();
     drawBackgroundImage();
+    dumpChipsetInfo();
     drawSystemInfo();
-    drawPoints();
     drawTime();
-    sendEmail();
+
+    //sendEmail();
+
+    scheduler.loop();
+    touchController.update();
 
     display.flush();
+    //heapMonitor.update();
     delay(16);
 }

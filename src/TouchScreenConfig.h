@@ -27,5 +27,6 @@ struct TouchScreenConfig {
     unsigned long dblClickIntervalMs = 300;  // макс. інтервал між тапами для onDblClick
     unsigned int  swipeMinDistancePx = 30;   // мін. дистанція, щоб зарахувати свайп
     unsigned long swipeMaxDurationMs = 700;  // макс. тривалість жесту-свайпу
-    unsigned int  edgeZonePx         = 30;   // зона біля краю для swipeFromXxx
+    unsigned int  edgeZoneX          = 30;   // зона біля краю для swipeFromXxx
+    unsigned int  edgeZoneY          = 30;   // зона біля краю для swipeFromXxx
 };

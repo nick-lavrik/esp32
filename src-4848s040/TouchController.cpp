@@ -1,4 +1,4 @@
-#include <TAMC_GT911.h>
+// #include <TAMC_GT911.h>
 #include "GT911Touch.h"
 #include "TouchEvents.h"
 #include "TouchController.h"
@@ -24,6 +24,7 @@ GT911Touch ts = GT911Touch(TOUCH_SDA, TOUCH_SCL, TOUCH_INT, TOUCH_RST, TOUCH_WID
 TouchEvents* TouchController::_events = nullptr;
 
 void TouchController::setup(TouchEvents* events) {
+
   ts.begin();
   ts.setRotation(ROTATION_NORMAL);
   // ts.setRotation(ROTATION_INVERTED);

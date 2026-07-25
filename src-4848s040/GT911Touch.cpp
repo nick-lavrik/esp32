@@ -1,6 +1,6 @@
 #include "GT911Touch.h"
 
-GT911Touch::GT911Touch(uint8_t sda, uint8_t scl, uint8_t interruptPin, uint8_t resetPin,
+GT911Touch::GT911Touch(uint8_t sda, uint8_t scl, int8_t interruptPin, int8_t resetPin,
                        uint16_t width, uint16_t height, uint8_t i2cAddr)
     : _gt911(sda, scl, interruptPin, resetPin, width, height),
       _i2cAddr(i2cAddr) 

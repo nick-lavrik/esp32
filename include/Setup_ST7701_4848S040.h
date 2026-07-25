@@ -98,7 +98,13 @@ public:
         light_cfg.pin_bl = 38;    // GPIO підсвітки — звірте зі схемою
         light_cfg.invert = false;
         // light_cfg.invert = true;
-        light_cfg.freq   = 44100;
+        // light_cfg.freq   = 44100;
+        // light_cfg.freq   = 150; // 150Hz - працює, але яскравість не дуже висока
+        // light_cfg.freq   = 1500; // setBrightness(min 75, max 255)
+        // light_cfg.freq   = 1000; // setBrightness(min 50, max 255)
+        // light_cfg.freq   = 500; // setBrightness(min 25, max 255)
+        light_cfg.freq   = 300; // setBrightness(min 10, max 255)
+        // light_cfg.freq   = 250; // setBrightness(min 10, max 255)
         light_cfg.pwm_channel = 0;
         _light.config(light_cfg);
         _panel.setLight(&_light);

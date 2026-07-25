@@ -11,6 +11,7 @@ Display::Display() : tft_(tft), sprite_(&tft_) {}
 
 void Display::init() {
     tft_.init();
+    Serial.println("tft.init() done.");
     tft_.setRotation(TFT_ROTATION);
 
     width_  = tft_.width();
@@ -27,6 +28,10 @@ void Display::init() {
     }
 
     sprite_.fillSprite(TFT_BLACK);
+
+    #if defined(BOARD_ST7789)
+    pinMode(TFT_BL, OUTPUT); // st7789
+    #endif
 
     flush(); // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
 }
@@ -58,6 +63,7 @@ void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16
 
 void Display::flush() {
     sprite_.pushSprite(0, 0);
+    autobrightness();
 }
 
 int Display::width() const {
@@ -66,4 +72,19 @@ int Display::width() const {
  
 int Display::height() const {
     return height_;
+}
+
+void Display::brightness(uint8_t percent) {
+    percent = percent < 0 ? 0 : percent;
+    percent = percent > 100 ? 100 : percent;
+
+    brightness_ = percent;
+
+    #if defined(BOARD_ST7789)
+    analogWrite(TFT_BL, map(percent, 0, 100, 0, 255));
+    #endif
+
+    #if defined(BOARD_4848S040)
+    tft_.setBrightness(map(percent, 0, 100, 15, 255)); // делегуємо в LGFX Light_PWM, пін вже сконфігурований у Setup_ST7701_4848S040.h
+    #endif
 }

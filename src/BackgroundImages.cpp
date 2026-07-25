@@ -4,9 +4,15 @@
 #include "Display.h"
 #include "JpegImage.h"
 
-#include "../assets/space-02.h"
-#ifdef BOARD_4848S040
+#if BACKGROUND_IMAGES_COUNT >= 1
 #include "../assets/space-01.h"
+#endif
+
+#if BACKGROUND_IMAGES_COUNT >= 2
+#include "../assets/space-02.h"
+#endif
+
+#if BACKGROUND_IMAGES_COUNT >= 3
 #include "../assets/space-03.h"
 #endif
 
@@ -17,19 +23,25 @@ void setBackgroundImage(JpegImage& image) {
 }
 
 const uint16_t* const backgroundImages[BACKGROUND_IMAGES_COUNT] PROGMEM = {
-    backgroundSpace02,
-    #ifdef BOARD_4848S040
+    #if BACKGROUND_IMAGES_COUNT >= 1
     backgroundSpace01,
+    #endif
+    #if BACKGROUND_IMAGES_COUNT >= 2
+    backgroundSpace02,
+    #endif
+    #if BACKGROUND_IMAGES_COUNT >= 3
     backgroundSpace03,
     #endif
 };
 
-const uint16_t* getBackgroundImage() {
+const uint16_t* getBackgroundImage(uint16_t* width, uint16_t* height) {
     static uint32_t lastUpdateMs = 0;
     static size_t currentIndex = 0;
     uint32_t now = millis();
 
     if (_activeInstance != nullptr && _activeInstance->isLoaded()) {
+        *width = _activeInstance->width();
+        *height = _activeInstance->height();
         return static_cast<uint16_t *>(_activeInstance->buffer());
     }
 
@@ -37,22 +49,26 @@ const uint16_t* getBackgroundImage() {
         return nullptr;
     }
 
-    if (BACKGROUND_IMAGES_COUNT == 0) {
+    #if BACKGROUND_IMAGES_COUNT == 0
         return nullptr;
-    }
+    #endif
 
+    #if BACKGROUND_IMAGES_COUNT > 0
     if (now - lastUpdateMs >= 5000) {
         currentIndex = (currentIndex + 1) % BACKGROUND_IMAGES_COUNT;
         lastUpdateMs = now;
     }
+    #endif
 
+    *width = 320; *height = 240;
     return backgroundImages[currentIndex];
 }
 
 extern Display display;
 void drawBackgroundImage() {
-    const uint16_t* ptr = getBackgroundImage();
+    uint16_t width, height;
+    const uint16_t* ptr = getBackgroundImage(&width, &height);
     if (ptr != nullptr) {
-        display.pushImage((uint32_t) (display.width() - 320) / 2, (uint32_t) (display.height() - 240) / 2, 320, 240, ptr);
+        display.pushImage((uint32_t) (display.width() - width) / 2, (uint32_t) (display.height() - height) / 2, width, height, ptr);
     }
 }

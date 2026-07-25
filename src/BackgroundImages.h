@@ -15,10 +15,16 @@ extern const uint16_t backgroundSpace02[76800];
 extern const uint16_t backgroundSpace03[76800];
 
 // Кількість фонових зображень
-#ifdef BOARD_ST7789
-constexpr size_t BACKGROUND_IMAGES_COUNT = 1;
-#elifdef BOARD_4848S040
-constexpr size_t BACKGROUND_IMAGES_COUNT = 3;
+#if defined(BOARD_ST7789) && !defined(BACKGROUND_IMAGES_COUNT)
+#define BACKGROUND_IMAGES_COUNT 1
+#endif
+
+#if defined(BOARD_4848S040) && !defined(BACKGROUND_IMAGES_COUNT)
+#define BACKGROUND_IMAGES_COUNT 1
+#endif
+
+#if !defined(BACKGROUND_IMAGES_COUNT)
+#define BACKGROUND_IMAGES_COUNT 0
 #endif
 
 // Масив вказівників на всі фонові зображення (індекси 0..2)
