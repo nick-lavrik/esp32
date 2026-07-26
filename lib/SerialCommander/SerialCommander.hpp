@@ -8,11 +8,11 @@
 // Неблокуючий обробник команд, що надходять через Serial.
 // Викликайте update() у loop() на кожній ітерації — метод НЕ блокує
 // виконання, навіть якщо у порту ще немає жодного байта.
-class SerialCommandHandler {
+class SerialCommander {
 public:
     using CommandCallback = std::function<void(const String& args)>;
 
-    SerialCommandHandler(Stream& serial = Serial, char terminator = '\n');
+    SerialCommander(Stream& serial = Serial, char terminator = '\n');
 
     // Реєстрація нової команди.
     // name        — назва команди, порівнюється без урахування регістру

@@ -42,6 +42,10 @@ void EventDispatcher::addSubscriber(IEventSubscriber& subscriber) {
 void EventDispatcher::removeSubscriber(IEventSubscriber& subscriber) {
     subscriber.unsubscribe(*this);
 }
+IEvent& EventDispatcher::dispatch(const std::string& eventName) {
+    Event e;
+    return dispatch(e, eventName);
+}
 
 IEvent& EventDispatcher::dispatch(IEvent& event, const std::string& eventName) {
     auto it = _listenersByEvent.find(eventName);

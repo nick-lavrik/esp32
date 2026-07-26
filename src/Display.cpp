@@ -91,12 +91,9 @@ void Display::brightness(uint8_t percent) {
     #endif
 
     if (brightness_ == percent) return;
-    if (_eventDispatcher != nullptr) {
-        Event e;
-        _eventDispatcher->dispatch(e, "display.brightness");
-    }
 
     brightness_ = percent;
+    dispatch(Display::EVT_BRIGHTNESS);
 }
 
 const uint32_t Display::loopFrameRate() {

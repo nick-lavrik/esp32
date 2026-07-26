@@ -36,15 +36,18 @@ public:
         uint16_t size;
     };
 
+    // Обмеження NVS: і ключ, і ім'я namespace не можуть перевищувати 15 символів (ASCII)
+    static constexpr size_t MAX_KEY_LENGTH = 15;
+
+    // Перевіряє довжину ключа/namespace ще ДО звернення до NVS.
+    // Повертає false, якщо key == nullptr, порожній, або довший за MAX_KEY_LENGTH.
+    static bool isKeyValid(const char* key);
+
     ConfigStorage();
 
     // namespaceName обмежений 15 символами (обмеження NVS)
     bool begin(const char* namespaceName = "config", const char* partitionLabel = "nvs");
     void end();
-
-    // ---- bool ----
-    void setBool(const char* key, const bool value);
-    const bool getBool(const char* key, const bool defaultValue = 0);
 
     // ---- int ----
     void setInt(const char* key, int32_t value);
@@ -58,9 +61,19 @@ public:
     void setString(const char* key, const String& value);
     String getString(const char* key, const String& defaultValue = "");
 
+    // ---- bool ----
+    void setBool(const char* key, bool value);
+    bool getBool(const char* key, bool defaultValue = false);
+
     // ---- масив float ----
     void setFloatArray(const char* key, const float* arr, size_t count);
     size_t getFloatArray(const char* key, float* outArr, size_t maxCount);
+
+    // ---- масив String ----
+    // Формат: [uint16_t count][uint16_t len1][bytes1][uint16_t len2][bytes2]...
+    // Зберігається одним blob-ключем через putBytes/getBytes.
+    void setStringArray(const char* key, const std::vector<String>& arr);
+    size_t getStringArray(const char* key, std::vector<String>& outArr);
 
     // видаляє ВСІ ключі в поточному namespace (обережно!)
     void clearAll();
@@ -75,6 +88,10 @@ public:
     // ---- довільні структури з перевіркою версії/розміру/magic ----
     template<typename T>
     bool setStruct(const char* key, const T& value, uint16_t version, uint32_t magic) {
+        if (!isKeyValid(key)) {
+            warnInvalidKey(key, "setStruct");
+            return false;
+        }
         BlobHeader header{magic, version, static_cast<uint16_t>(sizeof(T))};
         std::vector<uint8_t> buffer(sizeof(BlobHeader) + sizeof(T));
         memcpy(buffer.data(), &header, sizeof(BlobHeader));
@@ -85,6 +102,10 @@ public:
 
     template<typename T>
     StructReadResult getStruct(const char* key, T& outValue, uint16_t expectedVersion, uint32_t expectedMagic) {
+        if (!isKeyValid(key)) {
+            warnInvalidKey(key, "getStruct");
+            return StructReadResult::SIZE_MISMATCH;
+        }
         size_t storedLen = prefs_.getBytesLength(key);
         if (storedLen == 0) return StructReadResult::NOT_FOUND;
         if (storedLen < sizeof(BlobHeader)) return StructReadResult::SIZE_MISMATCH;
@@ -111,4 +132,7 @@ private:
     Preferences prefs_;
     String namespaceName_;
     String partitionLabel_;
+
+    // друкує попередження в Serial, якщо ключ не проходить валідацію
+    static void warnInvalidKey(const char* key, const char* methodName);
 };

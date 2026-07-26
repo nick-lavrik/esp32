@@ -1,0 +1,52 @@
+{
+  "name": "EventDispatcher",
+  "version": "0.1.0",
+  "#version-description": {
+    "MAJOR (1.x.x)": "Несумісні зміни API (зламали зворотну сумісність)",
+    "MINOR (x.2.x)": "Додали нову функціональність, зберігши сумісність",
+    "PATCH (x.x.3)": "Виправлення багів без зміни API"
+  },
+  "description": "EventDispatcher (ESP32) Arduino",
+  "keywords": ["esp32", "esp-idf", "EventDispatcher", "event"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/username/MySensorLib.git"
+  },
+  "authors": [
+    {
+      "name": "Mykola Lavryk",
+      "email": "nick.lavrik@gmail.com",
+      "maintainer": true
+    }
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/nick-lavrik",
+  "frameworks": ["espidf", "arduino"],
+  "platforms": ["espressif32"],
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  },
+  "#dependencies": {
+    "some1-lib": "^2.0.0 // >=2.0.0 <3.0.0 (сумісні мінорні/патч оновлення)",
+    "some2-lib": "~1.5.0 // >=1.5.0 <1.6.0 (тільки патч оновлення)",
+    "exact-lib": "3.1.0  // рівно 3.1.0",
+    "range-lib": ">=1.0.0 <2.0.0"
+  },
+  "#export": {
+    "include": [
+      "allow .gitignore patterns ...",
+      "src",
+      "include",
+      "library.json",
+      "README.md"
+    ],
+    "exclude": [
+      "*.tmp",
+      ".git",
+       "tests",
+      "examples/old_examples"
+    ]
+  }
+}

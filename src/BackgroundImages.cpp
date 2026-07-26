@@ -1,6 +1,6 @@
 // BackgroundImages.cpp
 #include <Arduino.h>
-#include "BackgroundImages.hpp"
+#include <BackgroundImages.hpp>
 #include "Display.h"
 
 #if BACKGROUND_IMAGES_COUNT >= 1

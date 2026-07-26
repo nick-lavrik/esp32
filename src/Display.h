@@ -12,6 +12,9 @@
 
 class Display {
 public:
+    static constexpr const char* EVT_BRIGHTNESS = "display.brightness";
+    static constexpr const char* EVT_AUTOBRIGHTNESS = "display.auto-brightness";
+
     // eventDispatcher опціональний: TaskController не залежить від нього
     // напряму і працює без подій, якщо диспетчер не передано/не встановлено.
     explicit Display(IEventDispatcher* eventDispatcher = nullptr);
@@ -63,7 +66,17 @@ public:
     }
 
     bool isAutoBrightness() { return autoBrigtness && hasLightSensor(); }
-    void autobrightness(bool b) { autoBrigtness = b; autobrightness(); }
+    void autobrightness(bool b) { 
+        if (!hasLightSensor()) return;
+
+        if (autoBrigtness != b) {
+            autoBrigtness = b;
+            dispatch(EVT_AUTOBRIGHTNESS);
+        }
+
+        autobrightness();
+    }
+
     void autobrightness() {
         #if defined(LIGHT_SENSOR_PIN)
         if (!autoBrigtness) return;
@@ -124,8 +137,16 @@ public:
         return result;
     }
 
+protected:
+    void dispatch(const std::string& eventName, IEvent* event = nullptr) {
+        if (_eventDispatcher && event != nullptr) {
+            _eventDispatcher->dispatch(*event, eventName);
+        } else if (_eventDispatcher) {
+            _eventDispatcher->dispatch(eventName);
+        }
+    }
 
-private:
+    private:
     TFT_eSPI&   tft_;
     TFT_eSprite sprite_; // вся робота з екраном (drawText/clear/...) йде через спрайт,
                          // на реальний дисплей кадр потрапляє лише через flush()

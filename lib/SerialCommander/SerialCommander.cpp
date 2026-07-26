@@ -1,17 +1,17 @@
-#include "SerialCommandHandler.hpp"
+#include "SerialCommander.hpp"
 
-SerialCommandHandler::SerialCommandHandler(Stream& serial, char terminator)
+SerialCommander::SerialCommander(Stream& serial, char terminator)
     : serial_(serial), terminator_(terminator) {
     // Вбудована команда "list" / "help" — виводить усі зареєстровані команди.
     registerCommand("list", "Показати список доступних команд", [this](const String&) { printList(); });
     // registerCommand("help", "Показати список доступних команд", [this](const String&) { printList(); });
 }
 
-void SerialCommandHandler::registerCommand(const String& name, const String& description, CommandCallback callback) {
+void SerialCommander::registerCommand(const String& name, const String& description, CommandCallback callback) {
     commands_.push_back(Command{ name, description, callback });
 }
 
-void SerialCommandHandler::update() {
+void SerialCommander::update() {
     // Неблокуюче: заходимо у while лише якщо дані вже є в буфері UART.
     while (serial_.available() > 0) {
         char c = static_cast<char>(serial_.read());
@@ -40,7 +40,7 @@ void SerialCommandHandler::update() {
     }
 }
 
-void SerialCommandHandler::processLine(const String& line) {
+void SerialCommander::processLine(const String& line) {
     String name, args;
     splitFirstToken(line, name, args);
 
@@ -54,20 +54,20 @@ void SerialCommandHandler::processLine(const String& line) {
     printUnknown(name);
 }
 
-void SerialCommandHandler::printUnknown(const String& name) const {
+void SerialCommander::printUnknown(const String& name) const {
     serial_.print(F("Невідома команда: "));
     serial_.println(name);
     serial_.println(F("Введіть 'list' для перегляду доступних команд"));
 }
 
-void SerialCommandHandler::printList() const {
+void SerialCommander::printList() const {
     serial_.println(F("Доступні команди:"));
     for (const auto& cmd : commands_) {
         serial_.printf("  %-10s - %s\n", cmd.name.c_str(), cmd.description.c_str());
     }
 }
 
-String SerialCommandHandler::trim(const String& s) {
+String SerialCommander::trim(const String& s) {
     int start = 0;
     int end = s.length() - 1;
     while (start <= end && isspace(s[start])) start++;
@@ -76,7 +76,7 @@ String SerialCommandHandler::trim(const String& s) {
     return s.substring(start, end + 1);
 }
 
-void SerialCommandHandler::splitFirstToken(const String& line, String& outName, String& outArgs) {
+void SerialCommander::splitFirstToken(const String& line, String& outName, String& outArgs) {
     int spaceIdx = line.indexOf(' ');
     if (spaceIdx == -1) {
         outName = line;

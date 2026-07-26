@@ -39,6 +39,11 @@ public:
 
     // Викликає всіх зареєстрованих слухачів для eventName у порядку
     // пріоритету, доки один із них не викличе event.stopPropagation().
+    // Повертає посилання на event.
+    virtual IEvent& dispatch(const std::string& eventName) = 0;
+
+    // Викликає всіх зареєстрованих слухачів для eventName у порядку
+    // пріоритету, доки один із них не викличе event.stopPropagation().
     // Повертає посилання на той самий event (для зручного чейнінгу).
     virtual IEvent& dispatch(IEvent& event, const std::string& eventName) = 0;
 

@@ -35,19 +35,21 @@
 #include "Display.h"
 #include <SPI.h>
 #include <LittleFS.h>
+#include <GmailSender.hpp>
+#include <ConfigStorage.hpp>
+#include <EventDispatcher.hpp>
+#include <SerialCommander.hpp>
+#include <JpegImage.hpp>
+#include <SystemReset.hpp>
 #include "wifi.h"
 #include "ntp.h"
 #include "ping.h"
-#include "GmailSender.hpp"
-#include "JpegImage.hpp"
-#include "SerialCommandHandler.hpp"
-#include "SystemReset.hpp"
 #include "BackgroundImages.hpp"
-#include "ConfigStorage.hpp"
 #include "TouchScreen/TouchController.h"
 #include "TaskController/TaskController.hpp"
-#include <EventDispatcher.hpp>
-#include <Event.hpp>
+
+const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
+const char* CFG_DISPLAY_AUTOBRIGHTNESS = "auto-brightness";
 
 void setupSerial() {
     Serial.begin(115200);
@@ -62,7 +64,7 @@ void setupSerial() {
 
 void setupDisplay() {
     display.init();
-    display.autobrightness(true);
+    //display.autobrightness(true);
     Serial.println("Display setup done.");
 }
 
@@ -101,6 +103,10 @@ TouchPointMapper mapper(touchScreenConfig);
 TouchEvents touch(touchScreenConfig);
 ConfigStorage configStorage;
 JpegImage spaceImage;
+
+#if HAS_GMAIL_SENDER
+GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
+#endif
 
 void onTouchLog(TouchPoint p)                              { Serial.printf("Touch: %d, %d\n", p.x, p.y); }
 void onHoldHandler(TouchPoint p, unsigned long ms)         { Serial.printf("Hold at %d,%d for %lu ms\n", p.x, p.y, ms); }
@@ -191,10 +197,6 @@ void setupTouchScreen() {
     Serial.println("TouchScreen controller done");
 }
 
-#if HAS_GMAIL_SENDER
-GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
-#endif
-
 void setupLittleFS() {
   if (!LittleFS.begin(true)) {
     Serial.println("LittleFS mount failed!");
@@ -249,6 +251,37 @@ void dumpChipsetInfo() {
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
     Serial.println("============================");
 
+    Serial.println("\n=== ConfigStorage (NVS) ====");
+    auto entries = configStorage.listEntries();
+ 
+    if (entries.empty()) {
+        Serial.println(F("(empty.)"));
+    }
+ 
+    for (const auto& e : entries) {
+        switch (e.type) {
+            case NVS_TYPE_U8:
+            case NVS_TYPE_I8:
+            case NVS_TYPE_U16:
+            case NVS_TYPE_I16:
+            case NVS_TYPE_U32:
+            case NVS_TYPE_I32:
+            case NVS_TYPE_U64:
+            case NVS_TYPE_I64:
+                Serial.printf("  key: %-16s type: %-4s value: %d\n", e.key.c_str(), e.typeName.c_str(), configStorage.getInt(e.key.c_str()));
+                break;
+            case NVS_TYPE_STR:
+                Serial.printf("  key: %-16s type: %-4s value: %s\n", e.key.c_str(), e.typeName.c_str(), configStorage.getString(e.key.c_str()));
+                break;
+            default:
+                Serial.printf("  key: %-16s type: %-4s\n", e.key.c_str(), e.typeName.c_str());
+                break;
+        }
+    }
+
+    Serial.println();
+    Serial.printf("Всього записів: %d\n", entries.size());
+    Serial.println("============================\n");
 
     Serial.println("\n====== LittleFS INFO =======");
     // --- Список усіх файлів ---
@@ -264,11 +297,11 @@ void dumpChipsetInfo() {
     double freePercent = ((totalBytes - usedBytes) * 100.00 / totalBytes);
 
     // --- Скільки місця залишилось ---
-    Serial.printf("Used: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
+    Serial.printf("\nUsed: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
     Serial.printf("============================\n\n");
 }
 
-SerialCommandHandler commandHandler;
+SerialCommander commandHandler;
 void setupSerialCommander() {
     commandHandler.registerCommand("status", "Показати статус пристрою", [](const String& args) {
         dumpChipsetInfo();
@@ -304,16 +337,22 @@ void setupConfigStorage() {
 }
 
 void loadConfig() {
-    display.brightness(configStorage.getFloat("brightness", 50));
-    display.autobrightness(configStorage.getFloat("auto-brightness", false));
+    display.brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
+    display.autobrightness(configStorage.getBool(CFG_DISPLAY_AUTOBRIGHTNESS, false));
     Serial.println("ConfigStorage load done");
 }
 
 void setupEventDispatcher() {
-    dispatcher.addListener("display.brightness", [](IEvent& e) {
+    dispatcher.addListener(Display::EVT_BRIGHTNESS, [](IEvent& e) {
         // auto& ev = static_cast<SensorReadyEvent&>(e);
         // Serial.printf("Sensor value: %.2f\n", ev.value());
         Serial.printf("Event::display.brightness(%d)\n", display.brightness());
+        configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+    });
+
+    dispatcher.addListener(Display::EVT_AUTOBRIGHTNESS, [](IEvent& e) {
+        Serial.printf("Event::display.auto-brightness(%s)\n", display.isAutoBrightness() ? "YES" : "NO");
+        configStorage.setBool(CFG_DISPLAY_AUTOBRIGHTNESS, display.isAutoBrightness());
     });
 
     Serial.println("EventDispatcher setup done");

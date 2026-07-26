@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "IEventDispatcher.hpp"
+#include "Event.hpp"
 
 // Динамічний диспетчер подій. Кількість імен подій і слухачів на кожну
 // подію не обмежена наперед - сховище росте/зменшується через
@@ -31,6 +32,7 @@ public:
     void addSubscriber(IEventSubscriber& subscriber) override;
     void removeSubscriber(IEventSubscriber& subscriber) override;
 
+    IEvent& dispatch(const std::string& eventName) override;
     IEvent& dispatch(IEvent& event, const std::string& eventName) override;
 
     bool hasListeners(const std::string& eventName = "") const override;
