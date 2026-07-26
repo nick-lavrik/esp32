@@ -49,6 +49,12 @@
 #include "TouchScreen/TouchController.h"
 #include "TaskController/TaskController.hpp"
 
+#if defined(SD_SCK) && defined(SD_MISO) && defined(SD_MOSI) && defined(SD_CS) && SD_CS > 0
+constexpr bool kHasSD = true;
+#else
+constexpr bool kHasSD = false;
+#endif
+
 const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 const char* CFG_DISPLAY_AUTOBRIGHTNESS = "auto-brightness";
 
@@ -207,46 +213,23 @@ void setupLittleFS() {
 }
 
 void setupSD() {
-#if defined(SD_SCK) && SD_CS > 0
-  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS); 
+  if (!kHasSD) { return; }
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   // Намагаємося запустити роботу з карткою
-  if (!SD.begin(SD_CS)) {
-    Serial.println(F("❌ Помилка: Картку НЕ знайдено або слот порожній!"));
-    return;
+  const int maxAttempts = 3;
+
+  for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+    if (SD.begin(SD_CS)) {
+      Serial.println(F("SD card init done"));
+      return;
+    }
   }
-
-  // Якщо ініціалізація успішна, перевіряємо тип картки
-  uint8_t cardType = SD.cardType();
-
-  if (cardType == CARD_NONE) {
-    Serial.println("❌ Картку не вставлено (або тип не визначено).");
-    return;
-  }
-
-  Serial.println("✅ Картку успішно знайдено!");
-
-    // Виводимо тип для деталізації
-    Serial.print("Тип картки: ");
-    if (cardType == CARD_MMC) Serial.println("MMC");
-    else if (cardType == CARD_SD) Serial.println("SDSC");
-    else if (cardType == CARD_SDHC) Serial.println("SDHC");
-    else Serial.println("Невідомий тип");
-
-    // Виводимо розмір картки
-    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-    Serial.printf("Розмір картки: %llu MB\n", cardSize);
-
-
-
-    Serial.println("Картку успішно підключено!");
-#endif
+  // Serial.println(F("❌ Помилка: Картку НЕ знайдено або слот порожній!"));
+  Serial.println(F("SD init fail."));
+  return;
 }
 
-void dumpChipsetInfo() {
-    /* static uint32_t lastDumpMs = millis() - 5 * 60 * 1000 - 10;
-    if ((millis() - lastDumpMs) < 5 * 60 * 1000) return;
-    lastDumpMs = millis(); */
-
+void dumpSystemInfo() {
     Serial.println("\n======== ESP32 CHIP INFO ==============");
 
     // --- PlatformIO environment ---
@@ -287,7 +270,9 @@ void dumpChipsetInfo() {
     /* Serial.println("\n======= ESP32 HEAP INFO ========");
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
     Serial.println("========================================");
+}
 
+void dumpConfigStorage() {
     Serial.println("\n====== ConfigStorage (NVS) =============");
     auto entries = configStorage.listEntries();
  
@@ -319,11 +304,36 @@ void dumpChipsetInfo() {
     Serial.println();
     Serial.printf("Всього записів: %d\n", entries.size());
     Serial.println("========================================\n");
+}
 
-    Serial.println();
-    Serial.println("\n========= SD Card Info =================");
-    // SD.begin();
+void dumpSDInfo() {
 
+  Serial.println("\n========= SD Card Info =================");
+
+  // Якщо ініціалізація успішна, перевіряємо тип картки
+  uint8_t cardType = SD.cardType();
+
+  if (cardType == CARD_NONE) {
+    Serial.println("❌ Картку не вставлено (або тип не визначено).");
+    return;
+  }
+
+  Serial.println("✅ Картку успішно знайдено!");
+
+  // Виводимо тип для деталізації
+  Serial.print("Тип картки: ");
+  if (cardType == CARD_MMC) Serial.println("MMC");
+  else if (cardType == CARD_SD) Serial.println("SDSC");
+  else if (cardType == CARD_SDHC) Serial.println("SDHC");
+  else Serial.println(F("Невідомий тип"));
+  // Виводимо розмір картки
+  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+  Serial.printf(F("Розмір картки: %llu MB\n"), cardSize);
+  Serial.println(F("Картку успішно підключено!\n"));
+  Serial.println("========================================\n\n");
+}
+
+void dumpLittleFSInfo() {
     Serial.println("\n========= LittleFS INFO ================");
     // --- Список усіх файлів ---
     File root = LittleFS.open("/");
@@ -342,10 +352,24 @@ void dumpChipsetInfo() {
     Serial.printf("========================================\n\n");
 }
 
+void dumpStatus(const String& section) {
+    if (section.equals("sys")) {
+        dumpSystemInfo();
+    } else if (section.equals("cfg")) {
+        dumpConfigStorage();
+    } else if (section.equals("sd")) {
+        dumpSDInfo();
+    } else if (section.equals("littlefs")) {
+        dumpLittleFSInfo();
+    } else {
+        Serial.println(F("Використання: status sys|cfg|sd|littlefs"));
+    }
+}
+
 SerialCommander commandHandler;
 void setupSerialCommander() {
-    commandHandler.registerCommand("status", "Показати статус пристрою", [](const String& args) {
-        dumpChipsetInfo();
+    commandHandler.registerCommand("status", "Показати статус пристрою: status sys|cfg|sd|littlefs", [](const String& args) {
+        dumpStatus(args);
     });
 
     commandHandler.registerCommand("reboot", "Перезавантажити пристрій", [](const String& args) {
