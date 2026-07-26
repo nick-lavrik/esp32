@@ -15,7 +15,7 @@ void TouchController::setup(TouchEvents* events) {
   touchSPI.begin(25, 39, 32, TOUCH_CS);
   ts.begin(touchSPI);
   ts.setRotation(3);
-  Serial.println("TouchScreen initialised()");
+  Serial.println(F("TouchScreen init done"));
 
   _events = events;
 }

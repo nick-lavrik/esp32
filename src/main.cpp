@@ -34,6 +34,7 @@
 #include <Arduino.h>
 #include "Display.h"
 #include <SPI.h>
+#include <SD.h>
 #include <LittleFS.h>
 #include <GmailSender.hpp>
 #include <ConfigStorage.hpp>
@@ -205,12 +206,48 @@ void setupLittleFS() {
   }
 }
 
+void setupSD() {
+#if defined(SD_SCK) && SD_CS > 0
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS); 
+  // Намагаємося запустити роботу з карткою
+  if (!SD.begin(SD_CS)) {
+    Serial.println(F("❌ Помилка: Картку НЕ знайдено або слот порожній!"));
+    return;
+  }
+
+  // Якщо ініціалізація успішна, перевіряємо тип картки
+  uint8_t cardType = SD.cardType();
+
+  if (cardType == CARD_NONE) {
+    Serial.println("❌ Картку не вставлено (або тип не визначено).");
+    return;
+  }
+
+  Serial.println("✅ Картку успішно знайдено!");
+
+    // Виводимо тип для деталізації
+    Serial.print("Тип картки: ");
+    if (cardType == CARD_MMC) Serial.println("MMC");
+    else if (cardType == CARD_SD) Serial.println("SDSC");
+    else if (cardType == CARD_SDHC) Serial.println("SDHC");
+    else Serial.println("Невідомий тип");
+
+    // Виводимо розмір картки
+    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.printf("Розмір картки: %llu MB\n", cardSize);
+
+
+
+    Serial.println("Картку успішно підключено!");
+#endif
+}
+
 void dumpChipsetInfo() {
     /* static uint32_t lastDumpMs = millis() - 5 * 60 * 1000 - 10;
     if ((millis() - lastDumpMs) < 5 * 60 * 1000) return;
     lastDumpMs = millis(); */
 
-    Serial.println("\n===== ESP32 CHIP INFO =====");
+    Serial.println("\n======== ESP32 CHIP INFO ==============");
 
     // --- PlatformIO environment ---
     Serial.printf("PlatformIO: %s\n", PIO_PIOENV);
@@ -247,11 +284,11 @@ void dumpChipsetInfo() {
     // Serial.printf("WiFi: %s", WiFi.SSID);
     Serial.printf("Last reset reason: %s\n", SystemReset::getLastResetReason());
     Serial.printf("display.brightness = %d\n", display.brightness());
-    /* Serial.println("\n==== ESP32 HEAP INFO =====");
+    /* Serial.println("\n======= ESP32 HEAP INFO ========");
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
-    Serial.println("============================");
+    Serial.println("========================================");
 
-    Serial.println("\n=== ConfigStorage (NVS) ====");
+    Serial.println("\n====== ConfigStorage (NVS) =============");
     auto entries = configStorage.listEntries();
  
     if (entries.empty()) {
@@ -281,9 +318,13 @@ void dumpChipsetInfo() {
 
     Serial.println();
     Serial.printf("Всього записів: %d\n", entries.size());
-    Serial.println("============================\n");
+    Serial.println("========================================\n");
 
-    Serial.println("\n====== LittleFS INFO =======");
+    Serial.println();
+    Serial.println("\n========= SD Card Info =================");
+    // SD.begin();
+
+    Serial.println("\n========= LittleFS INFO ================");
     // --- Список усіх файлів ---
     File root = LittleFS.open("/");
     File file = root.openNextFile();
@@ -298,7 +339,7 @@ void dumpChipsetInfo() {
 
     // --- Скільки місця залишилось ---
     Serial.printf("\nUsed: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
-    Serial.printf("============================\n\n");
+    Serial.printf("========================================\n\n");
 }
 
 SerialCommander commandHandler;
@@ -318,6 +359,15 @@ void setupSerialCommander() {
             Serial.println(F("LED вимкнено"));
         } else {
             Serial.println(F("Використання: led on|off"));
+        }
+    });
+
+    commandHandler.registerCommand("brightness", "Керування яскравістю: brightness 0-100", [](const String& args) {
+        if (args.length() > 0) {
+            Serial.printf("[SerialCommander] display.brightness(%d)\n", args.toInt());
+            display.brightness(args.toInt());
+        } else {
+            Serial.println(F("Використання: brightness 0-100"));
         }
     });
 
@@ -346,34 +396,32 @@ void setupEventDispatcher() {
     dispatcher.addListener(Display::EVT_BRIGHTNESS, [](IEvent& e) {
         // auto& ev = static_cast<SensorReadyEvent&>(e);
         // Serial.printf("Sensor value: %.2f\n", ev.value());
-        Serial.printf("Event::display.brightness(%d)\n", display.brightness());
+        Serial.printf("[EventDispatcher] display.brightness(%d)\n", display.brightness());
         configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
     });
 
     dispatcher.addListener(Display::EVT_AUTOBRIGHTNESS, [](IEvent& e) {
-        Serial.printf("Event::display.auto-brightness(%s)\n", display.isAutoBrightness() ? "YES" : "NO");
+        Serial.printf("[EventDispatcher] display.auto-brightness(%s)\n", display.isAutoBrightness() ? "YES" : "NO");
         configStorage.setBool(CFG_DISPLAY_AUTOBRIGHTNESS, display.isAutoBrightness());
     });
 
     Serial.println("EventDispatcher setup done");
 }
 
-void setup() {
-    setupSerial();
-    setupEventDispatcher();
-    setupConfigStorage();
-    setupSerialCommander();
-    setupLittleFS();
-    setupDisplay();
-    setupTouchScreen();
-    setupWiFi();
-    setupNtpService();
-    setupBackgroundImage();
-    loadConfig();
+void sendEmail() {
+    static bool once = false;
+    if (once) {
+        return;
+    }
 
+    once = true;
+    display.drawText(10, 10 + 3 * (3 + display.fontHeight()), "SMTP sendmail", TFT_LIGHTGREY);
     display.flush();
-
-    Serial.println("\n> Ready. Введіть 'list' для перегляду команд.\n");
+    #if HAS_GMAIL_SENDER
+    //mailer.sendEmail("nick.lavrik@gmail.com", PIO_PIOENV, "hhhh");
+    #endif
+    display.drawText(10, 10 + 4 * (3 + display.fontHeight()), "SMTP sendmail (done)", TFT_LIGHTGREY);
+    display.flush();
 }
 
 void drawSystemInfo() {
@@ -418,25 +466,28 @@ void drawSystemInfo() {
   // img.printf("Light: %d%%", lightPercent);
 }
 
-void sendEmail() {
-    static bool once = false;
-    if (once) {
-        return;
-    }
+void setup() {
+    setupSerial();
+    setupSD();
+    setupEventDispatcher();
+    setupConfigStorage();
+    setupSerialCommander();
+    setupLittleFS();
+    setupDisplay();
+    setupTouchScreen();
+    setupWiFi();
+    setupNtpService();
+    setupBackgroundImage();
+    loadConfig();
 
-    once = true;
-    display.drawText(10, 10 + 3 * (3 + display.fontHeight()), "SMTP sendmail", TFT_LIGHTGREY);
     display.flush();
-    #if HAS_GMAIL_SENDER
-    //mailer.sendEmail("nick.lavrik@gmail.com", PIO_PIOENV, "hhhh");
-    #endif
-    display.drawText(10, 10 + 4 * (3 + display.fontHeight()), "SMTP sendmail (done)", TFT_LIGHTGREY);
-    display.flush();
+
+    Serial.println("\n> Ready. Введіть 'list' для перегляду команд.\n");
 }
 
 void loop() {
     commandHandler.update();
-    doPing();
+    // doPing();
     // display.clear();
     drawBackgroundImage();
     drawSystemInfo();
@@ -448,6 +499,5 @@ void loop() {
     touchController.update();
 
     display.flush();
-    //heapMonitor.update();
     delay(10);
 }

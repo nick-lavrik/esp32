@@ -5,7 +5,7 @@
 // --- Пінг ---
 const char* pingHost = "8.8.8.8";
 
-#define PING_INTERVAL_MS 1000
+#define PING_INTERVAL_MS 5000
 #define GRAPH_POINTS 100
 
 int pingHistory[GRAPH_POINTS];

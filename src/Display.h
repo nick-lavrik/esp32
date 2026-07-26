@@ -10,6 +10,13 @@
 // Вибір відбувається через -DBOARD_4848S040 у build_flags конкретного env
 // (TftInstance.h), прикладний код нижче однаковий для обох плат.
 
+#if defined(LIGHT_SENSOR_PIN)
+constexpr bool kHasLightSensor = true;
+constexpr int kLightSensorPin = LIGHT_SENSOR_PIN;
+#else
+constexpr bool kHasLightSensor = false;
+constexpr int kLightSensorPin = 0;
+#endif
 class Display {
 public:
     static constexpr const char* EVT_BRIGHTNESS = "display.brightness";
@@ -48,21 +55,14 @@ public:
     int width() const;
     int height() const;
 
-    bool hasLightSensor() {
-        #if defined(LIGHT_SENSOR_PIN)
-        return true;
-        #else
-        return false;
-        #endif
-    }
+    bool hasLightSensor() { return kHasLightSensor; }
 
     int lightSensor() {
-        #if defined(LIGHT_SENSOR_PIN)
-        int raw = analogRead(LIGHT_SENSOR_PIN);
-        return constrain(map(raw, 1500, 0, 1, 100), 1, 100);
-        #else
+        if constexpr (kHasLightSensor) {
+            int raw = analogRead(kLightSensorPin);
+            return constrain(map(raw, 1500, 0, 1, 100), 1, 100);
+        }
         return -1;
-        #endif  
     }
 
     bool isAutoBrightness() { return autoBrigtness && hasLightSensor(); }
@@ -78,7 +78,7 @@ public:
     }
 
     void autobrightness() {
-        #if defined(LIGHT_SENSOR_PIN)
+        if constexpr (!kHasLightSensor) return;
         if (!autoBrigtness) return;
 
         static uint32_t lastCheck = 0;
@@ -89,22 +89,22 @@ public:
         if (abs(lightPercent - brightness()) > 5) { // оновлювати тільки при помітній зміні
             brightness(lightPercent);
         }
-        #endif
     }
+
     const uint32_t loopFrameRate();
     size_t   fontHeight() { return sprite_.fontHeight(); }
-    void     setTextColor(uint16_t color) { sprite_.setTextColor(color); }
+
+    void     setTextColor(uint16_t color)              { sprite_.setTextColor(color); }
     void     setTextColor(uint16_t color, uint16_t bg) { sprite_.setTextColor(color, bg); }
+    void     setTextSize(uint8_t size)                 { sprite_.setTextSize(size); }
 
     void     drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) { sprite_.drawRect(x, y, w, h, color); }
-
-    void     drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color) { sprite_.drawCircle(x, y, r, color); }
-    // void     drawCircle(int32_t x, int32_t y, int32_t r)                 { sprite_.drawCircle(x, y, r); }
-
-    uint16_t drawString(const char *text, int32_t x, int32_t y) { return sprite_.drawString(text, x, y); }
+    void     drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color)          { sprite_.drawCircle(x, y, r, color); }
+    uint16_t drawString(const char *text, int32_t x, int32_t y)                   { return sprite_.drawString(text, x, y); }
 
     int16_t textWidth(const char *string) { return sprite_.textWidth(string); }
 
+    size_t print(const char *string) { return sprite_.print(string); }
     size_t printf(const __FlashStringHelper *ifsh, ...) {
         // 1. Створюємо список аргументів
         va_list args;
@@ -125,9 +125,7 @@ public:
         return result;
     }
 
-    void setTextSize(uint8_t size) { sprite_.setTextSize(size); }
     size_t println(const char *string) { return sprite_.println(string); }
-    size_t print(const char *string) { return sprite_.print(string); }
     size_t printf(const char *format, ...) {
         va_list args;
         va_start(args, format);
