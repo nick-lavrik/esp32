@@ -13,6 +13,8 @@
 //     // міняючи light_cfg.freq в Setup_ST7701_4848S040.h і перепрошиваючи,
 //     // а не в рантаймі.
 // }
+// Serial.println(F("❌ Fail Message"));
+// Serial.println(F("✅ Success Message"));
 
 // ===== ESP32 CHIP INFO =====
 // PlatformIO: esp32-4848s040
@@ -46,8 +48,10 @@
 #include "ntp.h"
 #include "ping.h"
 #include "BackgroundImages.hpp"
+#include "SizeFormatter.hpp"
 #include "TouchScreen/TouchController.h"
 #include "TaskController/TaskController.hpp"
+#include <PubSubClient.h>
 
 #if defined(SD_SCK) && defined(SD_MISO) && defined(SD_MOSI) && defined(SD_CS) && SD_CS > 0
 constexpr bool kHasSD = true;
@@ -100,6 +104,7 @@ static TouchScreenConfig makeTouchScreenConfig() {
 
     return c;
 }
+// SPIClass hspiSD(HSPI);
 
 EventDispatcher dispatcher;
 Display display(&dispatcher);
@@ -110,10 +115,14 @@ TouchPointMapper mapper(touchScreenConfig);
 TouchEvents touch(touchScreenConfig);
 ConfigStorage configStorage;
 JpegImage spaceImage;
+SerialCommander commandHandler;
 
 #if HAS_GMAIL_SENDER
 GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
 #endif
+
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 void onTouchLog(TouchPoint p)                              { Serial.printf("Touch: %d, %d\n", p.x, p.y); }
 void onHoldHandler(TouchPoint p, unsigned long ms)         { Serial.printf("Hold at %d,%d for %lu ms\n", p.x, p.y, ms); }
@@ -130,6 +139,7 @@ void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end)   { Serial.println
 void onSwipeFromRightHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe FROM RIGHT (напр., бокова панель)"); }
 
 void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
+    // TODO: restore brightness before trigger autobrightness = off (!)
     display.autobrightness(true);
 
     // Тип 2 (JobTask): "показувати frame"
@@ -215,22 +225,22 @@ void setupLittleFS() {
 void setupSD() {
   if (!kHasSD) { return; }
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  // Намагаємося запустити роботу з карткою
   const int maxAttempts = 3;
 
   for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
-    if (SD.begin(SD_CS)) {
-      Serial.println(F("SD card init done"));
+    if (SD.begin(SD_CS, SPI, 4000000)) {
+      Serial.printf(F("SD card init done (%d/%d)\n"), attempt, maxAttempts);
       return;
     }
+    delay(100);
   }
-  // Serial.println(F("❌ Помилка: Картку НЕ знайдено або слот порожній!"));
+
   Serial.println(F("SD init fail."));
   return;
 }
 
 void dumpSystemInfo() {
-    Serial.println("\n======== ESP32 CHIP INFO ==============");
+    Serial.println("\n======== ESP32 CHIP INFO ==================================");
 
     // --- PlatformIO environment ---
     Serial.printf("PlatformIO: %s\n", PIO_PIOENV);
@@ -269,11 +279,11 @@ void dumpSystemInfo() {
     Serial.printf("display.brightness = %d\n", display.brightness());
     /* Serial.println("\n======= ESP32 HEAP INFO ========");
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
-    Serial.println("========================================");
+    Serial.println("============================================================\n");
 }
 
 void dumpConfigStorage() {
-    Serial.println("\n====== ConfigStorage (NVS) =============");
+    Serial.println("\n====== ConfigStorage (NVS) =================================");
     auto entries = configStorage.listEntries();
  
     if (entries.empty()) {
@@ -303,22 +313,53 @@ void dumpConfigStorage() {
 
     Serial.println();
     Serial.printf("Всього записів: %d\n", entries.size());
-    Serial.println("========================================\n");
+    Serial.println("============================================================\n");
+}
+
+void dumpSDlistDir(const char* dirname, uint8_t levels) {
+    Serial.printf("Вміст директорії: %s\n", dirname);
+
+    File root = SD.open(dirname);
+    if (!root || !root.isDirectory()) {
+        Serial.println("  (не вдалось відкрити директорію)");
+        return;
+    }
+
+    File file = root.openNextFile();
+    int maxFiles = 50;
+    while (file && --maxFiles) {
+        if (file.isDirectory()) {
+            Serial.printf("  DIR : %-30s       ****\n", file.name());
+            if (levels) {
+                dumpSDlistDir(file.path(), levels - 1);
+            }
+        } else {
+            Serial.printf("  FILE: %-30s SIZE: %u\n", file.name(), file.size());
+        }
+        file = root.openNextFile();
+    }
+    if (file && !maxFiles) {
+        Serial.println("  ...");
+    }
 }
 
 void dumpSDInfo() {
+  // 1. Деактивируем выбор других устройств на шине
+  //digitalWrite(15, HIGH); // Отключаем TFT_CS
+  //digitalWrite(33, HIGH); // Отключаем TOUCH_CS
+  //digitalWrite(5, HIGH);  // SD_CS = HIGH (пока отключен)
 
-  Serial.println("\n========= SD Card Info =================");
+  Serial.println(F("\n========= SD Card Info ====================================="));
 
-  // Якщо ініціалізація успішна, перевіряємо тип картки
   uint8_t cardType = SD.cardType();
 
   if (cardType == CARD_NONE) {
-    Serial.println("❌ Картку не вставлено (або тип не визначено).");
+    Serial.println(F("❌ Картку не вставлено (або тип не визначено)."));
+    Serial.println(F("============================================================\n"));
     return;
   }
 
-  Serial.println("✅ Картку успішно знайдено!");
+  Serial.println(F("✅ Картку успішно знайдено!"));
 
   // Виводимо тип для деталізації
   Serial.print("Тип картки: ");
@@ -326,20 +367,32 @@ void dumpSDInfo() {
   else if (cardType == CARD_SD) Serial.println("SDSC");
   else if (cardType == CARD_SDHC) Serial.println("SDHC");
   else Serial.println(F("Невідомий тип"));
+
+  Serial.println(F("------------------------------------------------------------\n"));
+  dumpSDlistDir("/", 2);
+  Serial.println(F("------------------------------------------------------------\n"));
+
   // Виводимо розмір картки
   uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-  Serial.printf(F("Розмір картки: %llu MB\n"), cardSize);
-  Serial.println(F("Картку успішно підключено!\n"));
-  Serial.println("========================================\n\n");
+  // Serial.printf(F("Розмір картки: %llu MB\n"), cardSize);
+  Serial.printf(F("Розмір картки: %s\n"), SizeFormatter::format(SD.cardSize()));
+  Serial.printf(F("Зайнято місця: %s (%.2f%%)\n"), SizeFormatter::format(SD.usedBytes()), SD.usedBytes() * 100.0 / SD.cardSize());
+  Serial.printf(F("Вільно місця:  %s (%.2f%%)\n"), 
+    SizeFormatter::format(SD.cardSize() - SD.usedBytes()),
+    (SD.cardSize() - SD.usedBytes()) * 100.0 / SD.cardSize()
+  );
+
+  Serial.println(F("============================================================\n"));
 }
 
 void dumpLittleFSInfo() {
-    Serial.println("\n========= LittleFS INFO ================");
+    Serial.println(F("\n========= LittleFS INFO ===================================="));
+
     // --- Список усіх файлів ---
     File root = LittleFS.open("/");
     File file = root.openNextFile();
     while (file) {
-        Serial.printf("File: %s, size: %d bytes\n", file.name(), file.size());
+        Serial.printf("File: %-28s %8d bytes (%s)\n", file.name(), file.size(), SizeFormatter::format(file.size()));
         file = root.openNextFile();
     }
 
@@ -349,7 +402,7 @@ void dumpLittleFSInfo() {
 
     // --- Скільки місця залишилось ---
     Serial.printf("\nUsed: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
-    Serial.printf("========================================\n\n");
+    Serial.println(F("============================================================\n"));
 }
 
 void dumpStatus(const String& section) {
@@ -364,9 +417,9 @@ void dumpStatus(const String& section) {
     } else {
         Serial.println(F("Використання: status sys|cfg|sd|littlefs"));
     }
+    Serial.print("> ");
 }
 
-SerialCommander commandHandler;
 void setupSerialCommander() {
     commandHandler.registerCommand("status", "Показати статус пристрою: status sys|cfg|sd|littlefs", [](const String& args) {
         dumpStatus(args);
@@ -374,6 +427,10 @@ void setupSerialCommander() {
 
     commandHandler.registerCommand("reboot", "Перезавантажити пристрій", [](const String& args) {
         SystemReset::reboot();
+    });
+
+    commandHandler.registerCommand("scan", "Сканувати wi-fi мережі", [](const String& args) {
+        WiFi_scan();
     });
 
     commandHandler.registerCommand("led", "Керування світлодіодом: led on|off", [](const String& args) {
@@ -387,11 +444,15 @@ void setupSerialCommander() {
     });
 
     commandHandler.registerCommand("brightness", "Керування яскравістю: brightness 0-100", [](const String& args) {
-        if (args.length() > 0) {
-            Serial.printf("[SerialCommander] display.brightness(%d)\n", args.toInt());
-            display.brightness(args.toInt());
+        if (args.length() == 0) {
+            Serial.println(F("Використання: brightness 0-100|auto"));
+        } else if (args.equalsIgnoreCase("auto")) {
+            Serial.printf("[SerialCommander] display.autobrightness(true)\n", args.toInt());
+            display.autobrightness(true);
         } else {
-            Serial.println(F("Використання: brightness 0-100"));
+            Serial.printf("[SerialCommander] display.brightness(%d)\n", args.toInt());
+            display.autobrightness(0);
+            display.brightness(args.toInt());
         }
     });
 
@@ -511,8 +572,9 @@ void setup() {
 
 void loop() {
     commandHandler.update();
+
+    // display.startWrite();
     // doPing();
-    // display.clear();
     drawBackgroundImage();
     drawSystemInfo();
     drawTime();
@@ -523,5 +585,7 @@ void loop() {
     touchController.update();
 
     display.flush();
+    // display.endWrite();
+
     delay(10);
 }

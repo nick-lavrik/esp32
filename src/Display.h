@@ -22,6 +22,9 @@ public:
     static constexpr const char* EVT_BRIGHTNESS = "display.brightness";
     static constexpr const char* EVT_AUTOBRIGHTNESS = "display.auto-brightness";
 
+    void startWrite() { tft_.startWrite(); }
+    void endWrite() { tft_.endWrite(); }
+
     // eventDispatcher опціональний: TaskController не залежить від нього
     // напряму і працює без подій, якщо диспетчер не передано/не встановлено.
     explicit Display(IEventDispatcher* eventDispatcher = nullptr);

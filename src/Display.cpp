@@ -15,6 +15,10 @@ void Display::setEventDispatcher(IEventDispatcher* eventDispatcher) {
 }
 
 void Display::init() {
+    #if defined(BOARD_ST7789)
+    pinMode(TFT_BL, OUTPUT); // st7789
+    #endif
+
     tft_.init();
     tft_.setRotation(TFT_ROTATION);
 
@@ -32,10 +36,6 @@ void Display::init() {
     }
 
     sprite_.fillSprite(TFT_BLACK);
-
-    #if defined(BOARD_ST7789)
-    pinMode(TFT_BL, OUTPUT); // st7789
-    #endif
 
     flush(); // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
 }
