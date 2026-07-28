@@ -160,6 +160,33 @@ def guess_lib(path):
         return '(ваш код: src/)'
     if 'FrameworkArduino' in path or path.endswith('libFrameworkArduino.a'):
         return '(Arduino framework)'
+
+    # Загальний випадок: шлях містить архів виду '.../libXXX.a(member.o)'
+    # (ESP-IDF системні бібліотеки: libnet80211.a, libphy.a, libpp.a,
+    # liblwip.a, libwpa_supplicant.a, libfreertos.a, libc.a тощо).
+    m = re.search(r'/lib([A-Za-z0-9_+.]+?)\.a\(', path)
+    if m:
+        name = m.group(1)
+        friendly = {
+            'net80211': 'net80211 (Wi-Fi 802.11 MAC стек)',
+            'phy': 'phy (Wi-Fi/BT radio PHY)',
+            'pp': 'pp (Wi-Fi packet processing)',
+            'lwip': 'lwip (TCP/IP стек)',
+            'wpa_supplicant': 'wpa_supplicant (WPA/WPA2 автентифікація)',
+            'freertos': 'freertos (RTOS ядро)',
+            'esp_netif': 'esp_netif (мережевий інтерфейс ESP-IDF)',
+            'fatfs': 'fatfs (FAT файлова система, для SD)',
+            'joltwallet__littlefs': 'littlefs (ESP-IDF, для LittleFS)',
+            'c': 'libc (toolchain: printf/malloc/строки)',
+            'esp_driver_uart': 'esp_driver_uart (UART драйвер)',
+        }
+        return friendly.get(name, f'{name} (ESP-IDF системна бібліотека)')
+
+    if 'framework-arduinoespressif32-libs' in path:
+        return '(ESP-IDF, не атрибутовано)'
+    if 'toolchain-xtensa-esp-elf' in path:
+        return '(toolchain xtensa, не атрибутовано)'
+
     return '(інше/невизначено)'
 
 lib_totals = defaultdict(int)
@@ -180,6 +207,8 @@ total = sum(lib_totals.values())
 for lib, size in sorted_libs:
     pct = 100.0 * size / total if total else 0
     print(f'{size:>10} bytes  ({pct:5.1f}%)  {lib}')
+print()
+print(f'total: {total} bytes')
 
 print()
 print(f'Загалом (.text+.rodata+.data у фінальному бінарнику): {total} bytes')

@@ -216,6 +216,7 @@ void setupTouchScreen() {
 
 void setupLittleFS() {
   if (!LittleFS.begin(true)) {
+  // if (!LittleFS.begin(true, "/littlefs", 10, "littlefs")) {
     Serial.println("LittleFS mount failed!");
   } else {
     Serial.println("LittleFS mounted successfully (done)");
