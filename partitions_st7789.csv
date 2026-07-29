@@ -15,8 +15,8 @@
 # Без нього застосунок працює нормально, лише пише попередження при бут.
 #
 # Name,      Type,  SubType,   Offset,    Size,      Flags
-phy_init,    data,  phy,       0x9000,    0x1000,
-app,         app,   factory,   0x10000,   0x1E3000,
-coredump,    data,  coredump,  0x1F3000,  0x10000,
-nvs,         data,  nvs,       0x203000,  0x7D000,
+phy_init,    data,  phy,       0x009000,  0x001000,
+app,         app,   factory,   0x010000,  0x1E3000,
+coredump,    data,  coredump,  0x1F3000,  0x010000,
+nvs,         data,  nvs,       0x203000,  0x07D000,
 spiffs,      data,  spiffs,    0x280000,  0x180000,

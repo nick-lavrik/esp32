@@ -37,6 +37,7 @@
 #include "Display.h"
 #include <SPI.h>
 #include <SD.h>
+#include <SD_MMC.h>
 #include <LittleFS.h>
 #include <GmailSender.hpp>
 #include <ConfigStorage.hpp>
@@ -44,6 +45,7 @@
 #include <SerialCommander.hpp>
 #include <JpegImage.hpp>
 #include <SystemReset.hpp>
+#include <EspPartitionInspector.hpp>
 #include "wifi.h"
 #include "ntp.h"
 #include "ping.h"
@@ -415,14 +417,18 @@ void dumpStatus(const String& section) {
         dumpSDInfo();
     } else if (section.equals("littlefs")) {
         dumpLittleFSInfo();
+    } else if (section.equals("flash")) {
+        EspPartitionInspector::printAll(Serial);
+    } else if (section.equals("flash+")) {
+        EspPartitionInspector::printAll(Serial, true);
     } else {
-        Serial.println(F("Використання: status sys|cfg|sd|littlefs"));
+        Serial.println(F("Використання: status sys|cfg|sd|flash|flash+|littlefs"));
     }
     Serial.print("> ");
 }
 
 void setupSerialCommander() {
-    commandHandler.registerCommand("status", "Показати статус пристрою: status sys|cfg|sd|littlefs", [](const String& args) {
+    commandHandler.registerCommand("status", "Показати статус пристрою: status sys|cfg|sd|flash|flash+|littlefs", [](const String& args) {
         dumpStatus(args);
     });
 
@@ -484,6 +490,12 @@ void setupEventDispatcher() {
         // Serial.printf("Sensor value: %.2f\n", ev.value());
         Serial.printf("[EventDispatcher] display.brightness(%d)\n", display.brightness());
         configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+    });
+
+    dispatcher.addListener(Display::EVT_LIGHTSENSOR, [](IEvent& e) {
+        auto& ev = static_cast<LightSensorChangedEvent&>(e);
+        // Serial.printf("Sensor value: %.2f\n", ev.value());
+        Serial.printf("[EventDispatcher] display.lightSensor() = %d\n", ev.value());
     });
 
     dispatcher.addListener(Display::EVT_AUTOBRIGHTNESS, [](IEvent& e) {

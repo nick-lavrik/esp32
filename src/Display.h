@@ -2,7 +2,9 @@
 #pragma once
 
 #include <stdarg.h> // Обов'язково для роботи з трикрапкою (...)
+#include <atomic>
 #include <EventDispatcher.hpp>
+#include "LightSensorChangedEvent.hpp"
 #include "TftInstance.h"
 // Для env:esp32-st7789     -> це справжній bodmer/TFT_eSPI (SPI, ST7789)
 // Для env:esp32-4848s040   -> TFT_eSPI тут є alias'ом на LGFX (LovyanGFX,
@@ -21,6 +23,7 @@ class Display {
 public:
     static constexpr const char* EVT_BRIGHTNESS = "display.brightness";
     static constexpr const char* EVT_AUTOBRIGHTNESS = "display.auto-brightness";
+    static constexpr const char* EVT_LIGHTSENSOR = "display.lightsensor";
 
     void startWrite() { tft_.startWrite(); }
     void endWrite() { tft_.endWrite(); }
@@ -58,14 +61,32 @@ public:
     int width() const;
     int height() const;
 
-    bool hasLightSensor() { return kHasLightSensor; }
+    constexpr bool hasLightSensor() { return kHasLightSensor; }
 
     int lightSensor() {
-        if constexpr (kHasLightSensor) {
-            int raw = analogRead(kLightSensorPin);
-            return constrain(map(raw, 1500, 0, 1, 100), 1, 100);
+        if constexpr (!kHasLightSensor) return -1;
+
+        // lock_free прапорець, спільний для всіх викликів методу
+        static std::atomic_flag isExecuting = ATOMIC_FLAG_INIT;
+
+        // test_and_set повертає true, якщо прапорець ВЖЕ був встановлений
+        if (isExecuting.test_and_set(std::memory_order_acquire)) {
+            return _lightSensor; // Забороняємо рекурсію або паралельне виконання
         }
-        return -1;
+
+        int raw = analogRead(kLightSensorPin);
+        int currentSensorPercent = constrain(map(raw, 1500, 0, 1, 100), 1, 100);
+
+        if (abs(_lightSensor - currentSensorPercent) > 2) {
+            _lightSensor = currentSensorPercent;
+            LightSensorChangedEvent e(_lightSensor);
+            dispatch(EVT_LIGHTSENSOR, &e);
+        }
+
+        // Звільняємо прапорець
+        isExecuting.clear(std::memory_order_release);
+
+        return currentSensorPercent;
     }
 
     bool isAutoBrightness() { return autoBrigtness && hasLightSensor(); }
@@ -82,16 +103,20 @@ public:
 
     void autobrightness() {
         if constexpr (!kHasLightSensor) return;
+
+        int currentSensorPercent = lightSensor();
+
         if (!autoBrigtness) return;
 
         static uint32_t lastCheck = 0;
         if (millis() - lastCheck < 1000) return; // перевіряти раз на секунду
         lastCheck = millis();
         
-        int lightPercent = lightSensor();
-        if (abs(lightPercent - brightness()) > 5) { // оновлювати тільки при помітній зміні
-            brightness(lightPercent);
+        if (abs(_lightSensor - brightness()) > 5) { // оновлювати тільки при помітній зміні
+            brightness(_lightSensor);
         }
+
+        return;
     }
 
     const uint32_t loopFrameRate();
@@ -152,10 +177,14 @@ protected:
     TFT_eSprite sprite_; // вся робота з екраном (drawText/clear/...) йде через спрайт,
                          // на реальний дисплей кадр потрапляє лише через flush()
  
+    
     int width_  = 0;
     int height_ = 0;
     uint8_t brightness_ = 50; // percent!
+
+    int _lightSensor = -1;
     bool autoBrigtness = false;
+
 
     IEventDispatcher* _eventDispatcher = nullptr; // не володіє, може бути nullptr
 };
