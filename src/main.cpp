@@ -590,7 +590,7 @@ void loop() {
     commandHandler.update();
 
     // display.startWrite();
-    // doPing();
+    doPing();
     drawBackgroundImage();
     drawSystemInfo();
     drawTime();
