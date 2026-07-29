@@ -37,7 +37,6 @@
 #include "Display.h"
 #include <SPI.h>
 #include <SD.h>
-#include <SD_MMC.h>
 #include <LittleFS.h>
 #include <GmailSender.hpp>
 #include <ConfigStorage.hpp>
@@ -46,6 +45,7 @@
 #include <JpegImage.hpp>
 #include <SystemReset.hpp>
 #include <EspPartitionInspector.hpp>
+#include <SDCardInspector.hpp>
 #include "wifi.h"
 #include "ntp.h"
 #include "ping.h"
@@ -413,16 +413,19 @@ void dumpStatus(const String& section) {
         dumpSystemInfo();
     } else if (section.equals("cfg")) {
         dumpConfigStorage();
-    } else if (section.equals("sd")) {
-        dumpSDInfo();
     } else if (section.equals("littlefs")) {
         dumpLittleFSInfo();
     } else if (section.equals("flash")) {
         EspPartitionInspector::printAll(Serial);
     } else if (section.equals("flash+")) {
         EspPartitionInspector::printAll(Serial, true);
+    } else if (section.equals("sd")) {
+        SDCardInspector::printAll(SD, Serial);
+        // SDCardInspector::printAll(SD_MMC, Serial);
+    } else if (section.equals("sd+")) {
+        dumpSDInfo();
     } else {
-        Serial.println(F("Використання: status sys|cfg|sd|flash|flash+|littlefs"));
+        Serial.println(F("Використання: status sys|cfg|sd|sd+|flash|flash+|littlefs"));
     }
     Serial.print("> ");
 }
