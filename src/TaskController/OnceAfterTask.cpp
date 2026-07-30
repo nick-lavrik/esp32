@@ -18,3 +18,8 @@ bool OnceAfterTask::update(uint32_t now) {
     }
     return true; // ще чекаємо
 }
+
+void OnceAfterTask::onResume(uint32_t pausedForMs) {
+    // Зсуваємо старт відліку затримки на час паузи.
+    _startTime += pausedForMs;
+}

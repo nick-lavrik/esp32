@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <atomic>
 #include <algorithm>
 #include <functional>
 #include <vector>
@@ -23,8 +24,6 @@ using AnalogSensorListenerId = uint32_t;
  * 
  * TODO: add mutex in update() / addListener() / removeListener() 
  * safe FreeRTOS task (e.g. AsyncPinger)
- * 
- * TODO: add std::atomic_flag in update() - reject any call recursion
  */
 class AnalogSensor {
 public:
@@ -48,6 +47,14 @@ public:
 
     // Call periodically (e.g. from a CronTask) to take a new reading.
     void update() {
+        // lock_free прапорець, спільний для всіх викликів методу
+        static std::atomic_flag isExecuting = ATOMIC_FLAG_INIT;
+
+        // test_and_set повертає true, якщо прапорець ВЖЕ був встановлений
+        if (isExecuting.test_and_set(std::memory_order_acquire)) {
+            return; // Забороняємо рекурсію або паралельне виконання
+        }
+
         // raw analag sensor value
         uint16_t raw = analogRead(_adcPin);
         // raw "percentage" (normalised) sensor value
@@ -61,6 +68,9 @@ public:
             _value = actual;
             notify();
         }
+
+        // Звільняємо прапорець
+        isExecuting.clear(std::memory_order_release);
     }
 
     AnalogSensorListenerId addListener(AnalogSensorListener listener) {

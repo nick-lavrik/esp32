@@ -17,6 +17,12 @@ bool CronTask::update(uint32_t now) {
         }
     }
     // CronTask ніколи не повертає false сам - лише через cancel()
-    // (перевіряється TaskScheduler-ом окремо).
+    // (перевіряється TaskController-ом окремо).
     return true;
+}
+
+void CronTask::onResume(uint32_t pausedForMs) {
+    // Зсуваємо мітку останнього запуску, щоб час на паузі не
+    // враховувався як "минулий" інтервал.
+    _lastRun += pausedForMs;
 }

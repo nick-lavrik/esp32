@@ -25,3 +25,10 @@ bool JobTask::update(uint32_t now) {
 
     return true; // ще активне
 }
+
+void JobTask::onResume(uint32_t pausedForMs) {
+    // Зсуваємо обидві мітки, щоб час на паузі не рахувався
+    // ні в загальну тривалість, ні в інтервал між викликами.
+    _startTime += pausedForMs;
+    _lastCallTime += pausedForMs;
+}

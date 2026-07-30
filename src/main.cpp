@@ -62,6 +62,7 @@ constexpr bool kHasSD = true;
 constexpr bool kHasSD = false;
 #endif
 
+const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 const char* CFG_DISPLAY_AUTOBRIGHTNESS = "auto-brightness";
 
@@ -109,9 +110,9 @@ static TouchScreenConfig makeTouchScreenConfig() {
 }
 // SPIClass hspiSD(HSPI);
 
+bool isAutoBrightness = false;
 EventDispatcher dispatcher;
-
-Display display(&dispatcher);
+Display display;
 TaskController scheduler;
 TouchController touchController;
 TouchScreenConfig touchScreenConfig = makeTouchScreenConfig();
@@ -120,13 +121,17 @@ TouchEvents touch(touchScreenConfig);
 ConfigStorage configStorage;
 JpegImage spaceImage;
 SerialCommander commandHandler;
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 #if HAS_GMAIL_SENDER
 GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
 #endif
 
-WiFiClient espClient;
-PubSubClient client(espClient);
+#if LIGHT_SENSOR_PIN > 0
+AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 3);
+#endif
+
 
 void onTouchLog(TouchPoint p)                              { Serial.printf("Touch: %d, %d\n", p.x, p.y); }
 void onHoldHandler(TouchPoint p, unsigned long ms)         { Serial.printf("Hold at %d,%d for %lu ms\n", p.x, p.y, ms); }
@@ -144,10 +149,10 @@ void onSwipeFromRightHandler(TouchPoint start, TouchPoint end)  { Serial.println
 
 void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
     // TODO: restore brightness before trigger autobrightness = off (!)
-    display.autobrightness(true);
+    // display.autobrightness(true);
 
     // Тип 2 (JobTask): "показувати frame"
-    // постійно протягом 1 хвилини, після чого само зникає з черги
+    // постійно протягом 10 секунд, після чого само зникає з черги
     scheduler.addJob(
         10UL * 1000UL,
         [p]() {
@@ -164,7 +169,7 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
                 TFT_DARKGREY
             );
         },
-        1 // з інтервалом 1 мс, а не на кожному tick()
+        1 // з інтервалом 1 мілісекунда, а не на кожному tick()
     );
 
     Serial.printf("\nONHOLD FRAME !!!\n\n");
@@ -182,23 +187,21 @@ void setupTouchScreen() {
     touchController.events().onHold(onHoldDrawPoints);
 
     touchController.events().onSwipeUp([](TouchPoint s, TouchPoint e) {
-        display.autobrightness(false);
         if (display.brightness() == 0) {
             display.brightness(1);
         } else if (display.brightness() == 1) {
             display.brightness(10);
         } else {
-            display.brightness(min(display.brightness() + 10, 255)); 
+            display.brightness(display.brightness() + 10); 
         }
         Serial.printf("Brightness: %d%% (increase)\n", display.brightness());
     });
 
     touchController.events().onSwipeDown([](TouchPoint s, TouchPoint e) { 
-        display.autobrightness(false);
         if (display.brightness() == 1) {
             display.brightness(0);
         } else {
-            display.brightness(max(display.brightness() - 10, 1)); 
+            display.brightness(display.brightness() - 10);
         }
         Serial.printf("Brightness: %d%% (decrease)\n", display.brightness());
     });
@@ -298,6 +301,8 @@ void dumpConfigStorage() {
     for (const auto& e : entries) {
         switch (e.type) {
             case NVS_TYPE_U8:
+                Serial.printf("  key: %-16s type: %-4s value: %s\n", e.key.c_str(), e.typeName.c_str(), configStorage.getBool(e.key.c_str()) ? "true" : "false");
+                break;
             case NVS_TYPE_I8:
             case NVS_TYPE_U16:
             case NVS_TYPE_I16:
@@ -459,12 +464,19 @@ void setupSerialCommander() {
         if (args.length() == 0) {
             Serial.println(F("Використання: brightness 0-100|auto"));
         } else if (args.equalsIgnoreCase("auto")) {
-            Serial.printf("[SerialCommander] display.autobrightness(true)\n", args.toInt());
-            display.autobrightness(true);
+            #if LIGHT_SENSOR_PIN > 0
+            display.brightness(lightSensor.value());
+            configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
+            configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+            Serial.printf("[SerialCommander] isAutoBrighness = %s\n", isAutoBrightness ? "true" : "false");
+            #else
+            Serial.printf("[SerialCommander] isAutoBrighness **disabled**\n");
+            #endif
         } else {
-            Serial.printf("[SerialCommander] display.brightness(%d)\n", args.toInt());
-            display.autobrightness(0);
+            configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
             display.brightness(args.toInt());
+            configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+            Serial.printf("[SerialCommander] display.brightness(%d)\n", display.brightness());
         }
     });
 
@@ -480,57 +492,56 @@ void setupBackgroundImage() {
 
 void setupConfigStorage() {
     configStorage.begin(PIO_PIOENV);
-    Serial.println("CondfigStorage init done");
+    Serial.println("ConfigStorage init done");
 }
 
 void loadConfig() {
+    isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, true);
     display.brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
-    display.autobrightness(configStorage.getBool(CFG_DISPLAY_AUTOBRIGHTNESS, false));
     Serial.println("ConfigStorage load done");
+    Serial.printf("\t- %s = %s\n", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
+    Serial.printf("\t- %s = %d\n", CFG_DISPLAY_BRIGHTNESS, configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
+    Serial.println();
 }
 
 void setupEventDispatcher() {
-    dispatcher.addListener(Display::EVT_BRIGHTNESS, [](IEvent& e) {
-        // auto& ev = static_cast<SensorReadyEvent&>(e);
-        // Serial.printf("Sensor value: %.2f\n", ev.value());
-        Serial.printf("[EventDispatcher] display.brightness(%d)\n", display.brightness());
-        configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
-    });
-
-    dispatcher.addListener(Display::EVT_LIGHTSENSOR, [](IEvent& e) {
-        auto& ev = static_cast<LightSensorChangedEvent&>(e);
-        // Serial.printf("Sensor value: %.2f\n", ev.value());
-        // Serial.printf("[EventDispatcher] display.lightSensor() = %d\n", ev.value());
-    });
-
-    dispatcher.addListener(Display::EVT_AUTOBRIGHTNESS, [](IEvent& e) {
-        Serial.printf("[EventDispatcher] display.auto-brightness(%s)\n", display.isAutoBrightness() ? "YES" : "NO");
-        configStorage.setBool(CFG_DISPLAY_AUTOBRIGHTNESS, display.isAutoBrightness());
-    });
-
     Serial.println("EventDispatcher setup done");
 }
 
 void setupTaskCommander() {
 }
 
-#if LIGHT_SENSOR_PIN > 0
-AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 1);
-#endif
-
 void setupLightSensor() {
-    static bool isAutoBrightness = true;
-    static uint16_t percent = -1;
 
     #if LIGHT_SENSOR_PIN > 0
-    scheduler.addCronTask(0, []() { lightSensor.update(); });
+        lightSensor.begin();
+        scheduler.addCronTask(0, []() { lightSensor.update(); });
 
-    lightSensor.addListener([]() {
-        Serial.printf("lightSensor.value() = %4d (%3d%%)\n", lightSensor.read(), lightSensor.value());
-        if (isAutoBrightness) {
-            Serial.println("update display brightness");
-        }
-    });
+        lightSensor.addListener([]() {
+            Serial.printf("lightSensor.value() = %4d (%3d%%)", lightSensor.read(), lightSensor.value());
+            if (isAutoBrightness) {
+                display.brightness(lightSensor.value());
+                Serial.printf(" / display.brightness(%d)", lightSensor.value());
+            }
+            Serial.println();
+        });
+
+        touchController.events().onHold([](TouchPoint p, unsigned long ms) {
+            configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
+            configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, lightSensor.value());
+            display.brightness(lightSensor.value());
+        });
+
+        SwipeCallback onSwipe = [](TouchPoint s, TouchPoint e) {
+            configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
+        };
+
+        touchController.events().onSwipeUp(onSwipe);
+        touchController.events().onSwipeDown(onSwipe);
+
+        scheduler.addCronTask(0, []() {
+
+        });
     #endif
 }
 
@@ -576,7 +587,7 @@ void drawSystemInfo() {
   display.print(dumpPingStatsStr());
 
   char brightnessStr[200];
-  sprintf(brightnessStr, "Brigtness: %d%% lightsensor: %s (%d)", display.brightness(), display.hasLightSensor() ? "yes" : "no", display.lightSensor());
+  sprintf(brightnessStr, "Brigtness: %d%%", display.brightness());
   display.setCursor(10, 10 + 4 * (5 +  display.fontHeight()));
   display.print(brightnessStr);
 
@@ -628,8 +639,8 @@ void loop() {
     scheduler.loop();
     touchController.update();
 
-    display.flush();
     // display.endWrite();
+    display.flush();
 
-    delay(500);
+    delay(10);
 }

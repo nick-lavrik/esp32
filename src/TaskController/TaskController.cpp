@@ -37,6 +37,26 @@ bool TaskController::removeTask(TaskId id) {
     return false;
 }
 
+bool TaskController::pause(TaskId id) {
+    for (auto& task : _tasks) {
+        if (task->id() == id) {
+            task->pause();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TaskController::resume(TaskId id) {
+    for (auto& task : _tasks) {
+        if (task->id() == id) {
+            task->resume();
+            return true;
+        }
+    }
+    return false;
+}
+
 void TaskController::loop() {
     const uint32_t now = millis();
 
@@ -48,7 +68,10 @@ void TaskController::loop() {
         std::remove_if(_tasks.begin(), _tasks.end(),
                         [now](const std::unique_ptr<ITask>& task) {
                             if (task->isCancelled()) {
-                                return true;
+                                return true; // видаляємо з черги
+                            }
+                            if (task->isPaused()) {
+                                return false; // залишаємо, update() не викликаємо
                             }
                             return !task->update(now);
                         }),

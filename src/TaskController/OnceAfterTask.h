@@ -11,6 +11,9 @@ public:
 
     bool update(uint32_t now) override;
 
+protected:
+    void onResume(uint32_t pausedForMs) override;
+
 private:
     uint32_t _startTime;
     uint32_t _delayMs;
