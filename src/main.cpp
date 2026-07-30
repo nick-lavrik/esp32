@@ -515,8 +515,7 @@ void setupTaskCommander() {
 }
 
 #if LIGHT_SENSOR_PIN > 0
-AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 1.0, 1855, 100, 0);
-// AnalogSensorEventDispatcher lightSensorEventDispatcher(lightSensor, dispatcher, 5);
+AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 1);
 #endif
 
 void setupLightSensor() {
@@ -527,26 +526,11 @@ void setupLightSensor() {
     scheduler.addCronTask(0, []() { lightSensor.update(); });
 
     lightSensor.addListener([]() {
-        const uint16_t current = constrain(map(lightSensor.rawValue(), 1855, 0, 0, 100), 0, 100);
-        if (abs(current - percent) >= 1) {
-            percent = current;
-            Serial.printf("lightSensor.value() = %4d (%3d%%)\n", lightSensor.rawValue(), percent);
-            if (isAutoBrightness) {
-                Serial.println("update display brightness");
-            }
+        Serial.printf("lightSensor.value() = %4d (%3d%%)\n", lightSensor.read(), lightSensor.value());
+        if (isAutoBrightness) {
+            Serial.println("update display brightness");
         }
     });
-
-
-    /*
-    scheduler.addCronTask(0, []() { lightSensorEventDispatcher.update(); });
-
-    dispatcher.addListener(AnalogSensorEventDispatcher::EVT_ANALOG_SENSOR_VALUE, [](IEvent& e) {
-        auto& ev = static_cast<AnalogSensorEvent&>(e);
-        // Serial.printf("Sensor value: %.2f\n", ev.value());
-        Serial.printf("[EventDispatcher] %s() = %4d (%3d%%)\n", AnalogSensorEventDispatcher::EVT_ANALOG_SENSOR_VALUE, ev.value(), ev.percent);
-    });
-    */
     #endif
 }
 
@@ -647,5 +631,5 @@ void loop() {
     display.flush();
     // display.endWrite();
 
-    delay(10);
+    delay(500);
 }

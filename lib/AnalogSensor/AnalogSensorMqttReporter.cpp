@@ -13,12 +13,12 @@ AnalogSensorMqttReporter::AnalogSensorMqttReporter(AnalogSensor& sensor,
 void AnalogSensorMqttReporter::update() {
     _sensor.update();
 
-    uint8_t currentPercent = _sensor.percent();
+    /* uint8_t currentPercent = _sensor.percent();
     unsigned long now = millis();
 
     if (_shouldPublish(currentPercent, now)) {
         _publish(currentPercent);
-    }
+    } */
 }
 
 bool AnalogSensorMqttReporter::_shouldPublish(uint8_t currentPercent, unsigned long now) const {

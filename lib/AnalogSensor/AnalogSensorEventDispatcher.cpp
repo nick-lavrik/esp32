@@ -9,13 +9,13 @@ AnalogSensorEventDispatcher::AnalogSensorEventDispatcher(AnalogSensor& sensor,
 void AnalogSensorEventDispatcher::update() {
     _sensor.update();
 
-    if (_hasChangedEnough(_sensor.percent())) {
+    /* if (_hasChangedEnough(_sensor.percent())) {
         AnalogSensorEvent event(_sensor, _sensor.percent(), _sensor.value(), millis());
         _eventDispatcher.dispatch(event, EVT_ANALOG_SENSOR_VALUE);
 
         _lastDispatchedPercent = _sensor.percent();
         _hasDispatched = true;
-    }
+    } */
 }
 
 bool AnalogSensorEventDispatcher::_hasChangedEnough(uint8_t currentPercent) const {
