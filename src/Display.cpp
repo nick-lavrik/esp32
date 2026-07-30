@@ -67,7 +67,7 @@ void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16
 
 void Display::flush() {
     sprite_.pushSprite(0, 0);
-    autobrightness();
+    // autobrightness();
 }
 
 int Display::width() const {

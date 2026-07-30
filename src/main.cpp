@@ -54,6 +54,7 @@
 #include "TouchScreen/TouchController.h"
 #include "TaskController/TaskController.hpp"
 #include <PubSubClient.h>
+#include <AnalogSensor.hpp>
 
 #if defined(SD_SCK) && defined(SD_MISO) && defined(SD_MOSI) && defined(SD_CS) && SD_CS > 0
 constexpr bool kHasSD = true;
@@ -109,6 +110,7 @@ static TouchScreenConfig makeTouchScreenConfig() {
 // SPIClass hspiSD(HSPI);
 
 EventDispatcher dispatcher;
+
 Display display(&dispatcher);
 TaskController scheduler;
 TouchController touchController;
@@ -162,7 +164,7 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
                 TFT_DARKGREY
             );
         },
-        1 // з інтервалом 100 мс, а не на кожному tick()
+        1 // з інтервалом 1 мс, а не на кожному tick()
     );
 
     Serial.printf("\nONHOLD FRAME !!!\n\n");
@@ -498,7 +500,7 @@ void setupEventDispatcher() {
     dispatcher.addListener(Display::EVT_LIGHTSENSOR, [](IEvent& e) {
         auto& ev = static_cast<LightSensorChangedEvent&>(e);
         // Serial.printf("Sensor value: %.2f\n", ev.value());
-        Serial.printf("[EventDispatcher] display.lightSensor() = %d\n", ev.value());
+        // Serial.printf("[EventDispatcher] display.lightSensor() = %d\n", ev.value());
     });
 
     dispatcher.addListener(Display::EVT_AUTOBRIGHTNESS, [](IEvent& e) {
@@ -507,6 +509,45 @@ void setupEventDispatcher() {
     });
 
     Serial.println("EventDispatcher setup done");
+}
+
+void setupTaskCommander() {
+}
+
+#if LIGHT_SENSOR_PIN > 0
+AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 1.0, 1855, 100, 0);
+// AnalogSensorEventDispatcher lightSensorEventDispatcher(lightSensor, dispatcher, 5);
+#endif
+
+void setupLightSensor() {
+    static bool isAutoBrightness = true;
+    static uint16_t percent = -1;
+
+    #if LIGHT_SENSOR_PIN > 0
+    scheduler.addCronTask(0, []() { lightSensor.update(); });
+
+    lightSensor.addListener([]() {
+        const uint16_t current = constrain(map(lightSensor.rawValue(), 1855, 0, 0, 100), 0, 100);
+        if (abs(current - percent) >= 1) {
+            percent = current;
+            Serial.printf("lightSensor.value() = %4d (%3d%%)\n", lightSensor.rawValue(), percent);
+            if (isAutoBrightness) {
+                Serial.println("update display brightness");
+            }
+        }
+    });
+
+
+    /*
+    scheduler.addCronTask(0, []() { lightSensorEventDispatcher.update(); });
+
+    dispatcher.addListener(AnalogSensorEventDispatcher::EVT_ANALOG_SENSOR_VALUE, [](IEvent& e) {
+        auto& ev = static_cast<AnalogSensorEvent&>(e);
+        // Serial.printf("Sensor value: %.2f\n", ev.value());
+        Serial.printf("[EventDispatcher] %s() = %4d (%3d%%)\n", AnalogSensorEventDispatcher::EVT_ANALOG_SENSOR_VALUE, ev.value(), ev.percent);
+    });
+    */
+    #endif
 }
 
 void sendEmail() {
@@ -570,6 +611,7 @@ void drawSystemInfo() {
 void setup() {
     setupSerial();
     setupSD();
+
     setupEventDispatcher();
     setupConfigStorage();
     setupSerialCommander();
@@ -579,6 +621,8 @@ void setup() {
     setupWiFi();
     setupNtpService();
     setupBackgroundImage();
+    setupTaskCommander();
+    setupLightSensor();
     loadConfig();
 
     display.flush();
@@ -595,7 +639,7 @@ void loop() {
     drawSystemInfo();
     drawTime();
 
-    //sendEmail();
+    // sendEmail();
 
     scheduler.loop();
     touchController.update();

@@ -27,7 +27,7 @@ public:
     // Повертає ID (можна видалити достроково через removeTask(id)).
     TaskId addJob(uint32_t durationMs, TaskCallback callback, uint32_t intervalMs = 0);
 
-    // Виконати callback РІВНО ОДИН РАЗ через delayMs, після чого
+    // Тип 3: Виконати callback РІВНО ОДИН РАЗ через delayMs, після чого
     // завдання автоматично видаляється з черги.
     // Повертає ID (можна скасувати достроково через removeTask(id)).
     TaskId runOnceAfterMs(uint32_t delayMs, TaskCallback callback);
