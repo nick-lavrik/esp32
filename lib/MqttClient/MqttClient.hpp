@@ -59,14 +59,14 @@ public:
     }
 
     template<typename T>
-    MqttListenerId addStructListener(const char* topic, std::function<void(const T&)> callback)
+    MqttListenerId addStructListener(const char* topic, std::function<void(const char*, const T&)> callback)
     {
         static_assert(std::is_trivially_copyable<T>::value, "T має бути POD (trivially copyable)");
-        return addListener(topic, [callback](const char*, const uint8_t* payload, unsigned int length) -> void {
+        return addListener(topic, [callback](const char* topic, const uint8_t* payload, unsigned int length) -> void {
             T value{};
             unsigned int copyLength = length < sizeof(T) ? length : sizeof(T);
             memcpy(&value, payload, copyLength);
-            callback(value);
+            callback(topic, value);
         });
     }
 
@@ -74,11 +74,11 @@ public:
     // mqtt->publishNumber("sensors/count", 42);                      // "42" (int)
     // mqtt->publishNumber("sensors/uptime", (uint32_t)millis());     // "128340"
 
-    // mqtt->addNumberListener<float>("sensors/temperature", [](float value) -> void {
+    // mqtt->addNumberListener<float>("sensors/temperature", [](const char* topic, float value) -> void {
     //     Serial.printf("temp=%.1f\n", value);
     // });
 
-    // mqtt->addNumberListener<int32_t>("sensors/count", [](int32_t value) {
+    // mqtt->addNumberListener<int32_t>("sensors/count", [](const char* topic, int32_t value) {
     //     Serial.printf("count=%d\n", value);
     // });
 
@@ -100,10 +100,10 @@ public:
     }
 
     template<typename T>
-    MqttListenerId addNumberListener(const char* topic, std::function<void(T)> callback)
+    MqttListenerId addNumberListener(const char* topic, std::function<void(const char*, T)> callback)
     {
         static_assert(std::is_arithmetic<T>::value, "T має бути числовим типом");
-        return addStringListener(topic, [callback](const char*, const char* payload) -> void {
+        return addStringListener(topic, [callback](const char* topic, const char* payload) -> void {
             T value;
             if constexpr (std::is_floating_point<T>::value) {
                 value = static_cast<T>(strtod(payload, nullptr));
@@ -112,13 +112,14 @@ public:
             } else {
                 value = static_cast<T>(strtoull(payload, nullptr, 10));
             }
-            callback(value);
+            callback(topic, value);
         });
     }
+
     // JSON (ArduinoJson v7). Некоректний JSON у addJsonListener -> callback не викликається,
     // обробка продовжується на наступних лістенерах (return true).
     bool publishJson(const char* topic, JsonDocument& doc, bool retained = false);
-    MqttListenerId addJsonListener(const char* topic, std::function<void(JsonDocument&)> callback);
+    MqttListenerId addJsonListener(const char* topic, std::function<void(const char*, JsonDocument&)> callback);
 
     bool isConnected() const;
 

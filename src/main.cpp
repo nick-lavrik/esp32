@@ -277,6 +277,10 @@ void setupMqttClient() {
         Serial.println();
     });
 
+    static uint32_t i = 0;
+    mqtt.addNumberListener<uint32_t>("mykola-lavrik:int32/#", [](const char* t, uint32_t v) { Serial.printf("[MQTT] %s int32=%d\n", t, v); });
+    scheduler.addCronTask(1 * 60 * 1000UL, []() { mqtt.publishNumber<uint32_t>("mykola-lavrik:int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
+
     Serial.printf("[MQTT] %s:%d (%s)\n", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID);
 }
 

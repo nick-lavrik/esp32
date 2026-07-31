@@ -121,14 +121,14 @@ bool MqttClient::publishJson(const char* topic, JsonDocument& doc, bool retained
     return publish(topic, reinterpret_cast<const uint8_t*>(buffer.data()), size, retained);
 }
 
-MqttListenerId MqttClient::addJsonListener(const char* topic, std::function<void(JsonDocument&)> callback) {
-    return addListener(topic, [callback](const char*, const uint8_t* payload, unsigned int length) -> void {
+MqttListenerId MqttClient::addJsonListener(const char* topic, std::function<void(const char*, JsonDocument&)> callback) {
+    return addListener(topic, [callback](const char* topic, const uint8_t* payload, unsigned int length) -> void {
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, payload, length);
         if (error) {
             return;
         }
-        callback(doc);
+        callback(topic, doc);
     });
 }
 
