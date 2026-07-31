@@ -64,7 +64,6 @@ constexpr bool kHasSD = false;
 
 const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
-const char* CFG_DISPLAY_AUTOBRIGHTNESS = "auto-brightness";
 
 void setupSerial() {
     Serial.begin(115200);
@@ -192,7 +191,7 @@ void setupTouchScreen() {
         } else if (display.brightness() == 1) {
             display.brightness(10);
         } else {
-            display.brightness(display.brightness() + 10); 
+            display.brightness(min(100, display.brightness() + 10)); 
         }
         Serial.printf("Brightness: %d%% (increase)\n", display.brightness());
     });
@@ -201,7 +200,7 @@ void setupTouchScreen() {
         if (display.brightness() == 1) {
             display.brightness(0);
         } else {
-            display.brightness(display.brightness() - 10);
+            display.brightness(max(1, display.brightness() - 10));
         }
         Serial.printf("Brightness: %d%% (decrease)\n", display.brightness());
     });
@@ -496,7 +495,7 @@ void setupConfigStorage() {
 }
 
 void loadConfig() {
-    isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, true);
+    isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
     display.brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
     Serial.println("ConfigStorage load done");
     Serial.printf("\t- %s = %s\n", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
@@ -540,7 +539,10 @@ void setupLightSensor() {
         touchController.events().onSwipeDown(onSwipe);
 
         scheduler.addCronTask(0, []() {
-
+            display.setTextSize(1);
+            display.setTextColor(TFT_DARKGREY);
+            display.setCursor(10, 240 - 1 * (5 +  display.fontHeight()));
+            display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
         });
     #endif
 }
@@ -587,7 +589,7 @@ void drawSystemInfo() {
   display.print(dumpPingStatsStr());
 
   char brightnessStr[200];
-  sprintf(brightnessStr, "Brigtness: %d%%", display.brightness());
+  sprintf(brightnessStr, "Brigtness: %d%% %s", display.brightness(), isAutoBrightness ? "(auto)" : "");
   display.setCursor(10, 10 + 4 * (5 +  display.fontHeight()));
   display.print(brightnessStr);
 

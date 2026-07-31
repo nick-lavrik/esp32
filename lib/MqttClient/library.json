@@ -1,5 +1,5 @@
 {
-  "name": "Mqtt",
+  "name": "MqttClient",
   "version": "0.1.0",
   "description": "MQTT client wrapper: connection handling, config, topic management",
   "keywords": ["esp32", "esp-idf", "mqtt", "iot"],

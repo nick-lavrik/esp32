@@ -23,7 +23,6 @@ void Display::init() {
     // Спрайт на весь розмір екрана — вся подальша робота йде через нього.
     sprite_.setColorDepth(SPRITE_COLOR_DEPTH); // 16
     sprite_.setSwapBytes(true);
-    sprite_.createSprite(width_, height_);
     void* buf = sprite_.createSprite(width_, height_);
     if (buf == nullptr) {
         Serial.println("[Display] ПОМИЛКА: createSprite() не зміг виділити пам'ять!");
