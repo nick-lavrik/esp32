@@ -21,4 +21,14 @@ struct MqttConfig {
 
     uint16_t bufferSize = 512;
     uint32_t reconnectIntervalMs = 5000;
+
+    // LWT (опціонально). Якщо lwtTopic або lwtOfflineMessage nullptr/порожні - LWT ігнорується.
+    // lwtOnlineMessage (опціонально) - публікується автоматично в lwtTopic одразу після
+    // кожного вдалого connect() (незалежно від lwtOfflineMessage), якщо lwtTopic задано.
+    // PubSubClient підтримує лише QoS 0/1.
+    const char* lwtTopic = nullptr;
+    const char* lwtOfflineMessage = nullptr;
+    const char* lwtOnlineMessage = nullptr;
+    uint8_t lwtQos = 0;
+    bool lwtRetain = false;
 };

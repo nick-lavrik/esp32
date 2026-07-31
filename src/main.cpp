@@ -1,5 +1,8 @@
 // main.cpp
 //
+// esptool --port /dev/ttyUSB0 --after hard-reset chip-id
+// python3 -m serial.tools.miniterm --echo --non-exclusive /dev/ttyUSB0 115200
+//
 // Працює однаково для обох середовищ, різниться лише build_flags (-include)
 // у platformio.ini:
 //   env:esp32-st7789      -> include/Setup_ST7789.h        (bodmer/TFT_eSPI, SPI)
@@ -55,6 +58,7 @@
 #include "TaskController/TaskController.hpp"
 #include <PubSubClient.h>
 #include <AnalogSensor.hpp>
+#include <MqttClient.hpp>
 
 #if defined(SD_SCK) && defined(SD_MISO) && defined(SD_MOSI) && defined(SD_CS) && SD_CS > 0
 constexpr bool kHasSD = true;
@@ -62,8 +66,9 @@ constexpr bool kHasSD = true;
 constexpr bool kHasSD = false;
 #endif
 
-const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
-const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
+const char* EVT_REBOOT PROGMEM = "reboot";
+const char* CFG_SYS_AUTOBRIGHTNESS PROGMEM = "auto-brightness";
+const char* CFG_DISPLAY_BRIGHTNESS PROGMEM = "brightness";
 
 void setupSerial() {
     Serial.begin(115200);
@@ -109,6 +114,20 @@ static TouchScreenConfig makeTouchScreenConfig() {
 }
 // SPIClass hspiSD(HSPI);
 
+MqttConfig makeMqttConfig() {
+    MqttConfig config;
+    config.host = MQTT_HOST,
+    config.port = MQTT_PORT,
+    config.clientId = MQTT_CLIENT_ID;
+    config.username = MQTT_USERNAME;
+    config.password = MQTT_PASSWORD;
+    config.lwtTopic = MQTT_LWT_TOPIC;
+    config.lwtOfflineMessage = MQTT_LWT_MSG_OFFLINE;
+    config.lwtOnlineMessage = MQTT_LWT_MSG_ONLINE;
+
+    return config;
+}
+
 bool isAutoBrightness = false;
 EventDispatcher dispatcher;
 Display display;
@@ -122,6 +141,7 @@ JpegImage spaceImage;
 SerialCommander commandHandler;
 WiFiClient espClient;
 PubSubClient client(espClient);
+MqttClient mqtt(makeMqttConfig());
 
 #if HAS_GMAIL_SENDER
 GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
@@ -227,6 +247,37 @@ void setupLittleFS() {
   } else {
     Serial.println("LittleFS mounted successfully (done)");
   }
+}
+
+void setupMqttClient() {
+    mqtt.begin();
+
+    mqtt.publish(MQTT_LWT_TOPIC, "156");
+
+    // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
+    mqtt.addStringListener("mykola-lavryk:devices/+/status", [](const char* topic, const char* payload) -> bool {
+        Serial.printf("[MQTT] topic:%s payload:%s\n", topic, payload);
+        return true;
+    });
+
+    dispatcher.addListener(EVT_REBOOT, [](IEvent& e) { mqtt.disconnect("reboot"); });
+
+    #if LIGHT_SENSOR_PIN > 0
+    /* lightSensor.addListener([]() {
+        // mqtt.publishStruct("mykola-lavryk:sensors/ldr", )
+        // isAutoBrightness, lightSensor.read(), lightSensor.value())
+    }); */
+    #else
+    // subscribe on mqtt
+    #endif
+
+    scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
+    commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
+        Serial.printf("[MQTT] isConnected = %s\n", mqtt.isConnected() ? "yes" : "no");
+        Serial.println();
+    });
+
+    Serial.printf("[MQTT] %s:%d (%s)\n", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID);
 }
 
 void setupSD() {
@@ -442,6 +493,7 @@ void setupSerialCommander() {
     });
 
     commandHandler.registerCommand("reboot", "Перезавантажити пристрій", [](const String& args) {
+        dispatcher.dispatch(EVT_REBOOT);
         SystemReset::reboot();
     });
 
@@ -620,6 +672,7 @@ void setup() {
     setupBackgroundImage();
     setupTaskCommander();
     setupLightSensor();
+    setupMqttClient();
     loadConfig();
 
     display.flush();
@@ -629,6 +682,7 @@ void setup() {
 
 void loop() {
     commandHandler.update();
+    mqtt.loop();
 
     // display.startWrite();
     doPing();

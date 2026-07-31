@@ -45,9 +45,9 @@ void AnalogSensorMqttReporter::_publish(uint8_t percent) {
     String payload;
     serializeJson(doc, payload);
 
-    if (_mqttClient.publish(_topic.c_str(), payload)) {
+    /* if (_mqttClient.publish(_topic.c_str(), payload)) {
         _lastPublishMs = millis();
         _lastPublishedPercent = percent;
         _hasPublished = true;
-    }
+    } */
 }
