@@ -6,7 +6,6 @@
 
 using MqttListenerId = uint32_t;
 
-// Повертає true -> продовжити обробку іншими лістенерами, false -> зупинити.
 using MqttListenerCallback = std::function<void(const char* topic, const uint8_t* payload, unsigned int length)>;
 
 // Payload як null-terminated рядок (зручно для текстових/JSON-топіків без бінарних даних).

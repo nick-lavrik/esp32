@@ -117,7 +117,6 @@ public:
     }
 
     // JSON (ArduinoJson v7). Некоректний JSON у addJsonListener -> callback не викликається,
-    // обробка продовжується на наступних лістенерах (return true).
     bool publishJson(const char* topic, JsonDocument& doc, bool retained = false);
     MqttListenerId addJsonListener(const char* topic, std::function<void(const char*, JsonDocument&)> callback);
 
