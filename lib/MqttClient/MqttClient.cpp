@@ -14,7 +14,11 @@ void MqttClient::begin() {
 
     if (_config.useTls) {
         if (_config.caCert != nullptr) {
+            #if BOARD_ESP8266
+            _secureClient.setInsecure();
+            #else
             _secureClient.setCACert(_config.caCert);
+            #endif
         } else {
             _secureClient.setInsecure();
         }

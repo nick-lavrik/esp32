@@ -4,7 +4,7 @@
   "description": "MQTT client wrapper: connection handling, config, topic management",
   "keywords": ["esp32", "esp-idf", "mqtt", "iot"],
   "frameworks": ["espidf", "arduino"],
-  "platforms": ["espressif32"],
+  "platforms": ["espressif32", "espressif8266"],
   "build": {
     "flags": [
       "-std=gnu++17"

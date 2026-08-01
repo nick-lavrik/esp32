@@ -22,7 +22,7 @@
   "license": "MIT",
   "homepage": "https://github.com/nick-lavrik",
   "frameworks": ["espidf", "arduino"],
-  "platforms": ["espressif32"],
+  "platforms": ["espressif32", "espressif8266"],
   "build": {
     "flags": [
       "-std=gnu++17"
