@@ -76,8 +76,6 @@ void Display::brightness(uint8_t percent) {
     percent = percent < 0 ? 0 : percent;
     percent = percent > 100 ? 100 : percent;
 
-    // if (brightness_ == percent) return;
-
     #if defined(BOARD_ST7789)
     analogWrite(TFT_BL, map(percent, 0, 100, 0, 255));
     #endif

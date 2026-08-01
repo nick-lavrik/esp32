@@ -1,7 +1,8 @@
 #pragma once
+#if __has_include(<TAMC_GT911.h>)
 #include <Arduino.h>
 #include <TAMC_GT911.h>   // lib_deps: tamctec/TAMC_GT911@^1.0.2
-#include "TouchScreen/TouchPoint.h"
+#include <TouchPoint.h>
 
 // Обгортка над TAMC_GT911, яка надає той самий інтерфейс, що й
 // XPT2046_Touchscreen (touched() + getPoint()).
@@ -31,3 +32,4 @@ private:
     TAMC_GT911 _gt911;
     uint8_t _i2cAddr;
 };
+#endif

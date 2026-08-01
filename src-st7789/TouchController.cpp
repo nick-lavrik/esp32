@@ -1,5 +1,6 @@
+#if __has_include(<XPT2046_Touchscreen.h>)
 #include <XPT2046_Touchscreen.h>
-#include "TouchScreen/TouchController.h"
+#include <TouchController.h>
 
 
 // --- Тач ---
@@ -39,3 +40,4 @@ void TouchController::update() {
 TouchEvents& TouchController::events() {
     return *_events;
 }
+#endif

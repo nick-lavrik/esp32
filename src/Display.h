@@ -57,28 +57,13 @@ public:
 
     int16_t textWidth(const char *string) { return sprite_.textWidth(string); }
 
-    size_t print(const char *string) { return sprite_.print(string); }
-    size_t printf(const __FlashStringHelper *ifsh, ...) {
-        // 1. Створюємо список аргументів
-        va_list args;
-        
-        // 2. Ініціалізуємо список (ifsh — останній відомий аргумент)
-        va_start(args, ifsh);
-        
-        // 3. Приводимо тип через reinterpret_cast або (const char*)
-        // У TFT_eSPI (і загалом в ESP32) vprintf очікує звичайний const char*
-        const char *fmt = reinterpret_cast<const char *>(ifsh);
-    
-        // 4. Передаємо в метод vprintf вашого спрайту
-        size_t result = sprite_.vprintf(fmt, args);
-        
-        // 4. Очищуємо список аргументів
-        va_end(args);
-        
-        return result;
-    }
-
+    size_t print(const char *string)   { return sprite_.print(string); }
     size_t println(const char *string) { return sprite_.println(string); }
+
+    template <typename... Args>
+    size_t printf(const __FlashStringHelper *ifsh, const Args&... args) {
+        return sprite_.printf(ifsh, args...); 
+    }
 
     template <typename... Args>
     size_t printf(const char* format, const Args&... args) {

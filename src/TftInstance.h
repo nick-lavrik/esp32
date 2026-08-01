@@ -1,4 +1,3 @@
-// TftInstance.h
 #pragma once
 
 // Вибір реалізації відбувається через -D у build_flags конкретного env
@@ -14,5 +13,9 @@
   #include <TFT_eSPI.h>              // справжній bodmer/TFT_eSPI (ST7789, SPI)
 #endif
 
-extern TFT_eSPI tft; // єдиний глобальний екземпляр, визначений в одному з
-                     // TftInstance_ST7789.cpp / TftInstance_4848S040.cpp
+/**
+ * єдиний глобальний екземпляр, визначений в одному з
+ * @see file://./../src-4848s040/TftInstance.cpp
+ * @see file://./../src-st7789/TftInstance.cpp
+ */
+extern TFT_eSPI tft; 

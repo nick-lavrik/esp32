@@ -54,11 +54,15 @@
 #include "ping.h"
 #include "BackgroundImages.hpp"
 #include "SizeFormatter.hpp"
-#include "TouchScreen/TouchController.h"
+#include <TouchScreenConfig.h>
 #include <TaskController.hpp>
 #include <PubSubClient.h>
 #include <AnalogSensor.hpp>
 #include <MqttClient.hpp>
+
+#if BOARD_HAS_TOUCH
+#include <TouchController.h>
+#endif
 
 #if defined(SD_SCK) && defined(SD_MISO) && defined(SD_MOSI) && defined(SD_CS) && SD_CS > 0
 constexpr bool kHasSD = true;
@@ -145,16 +149,19 @@ bool isAutoBrightness = false;
 EventDispatcher dispatcher;
 Display display;
 TaskController scheduler;
-TouchController touchController;
-TouchScreenConfig touchScreenConfig = makeTouchScreenConfig();
-TouchPointMapper mapper(touchScreenConfig);
-TouchEvents touch(touchScreenConfig);
 ConfigStorage configStorage;
 JpegImage spaceImage;
 SerialCommander commandHandler;
-WiFiClient espClient;
-PubSubClient client(espClient);
+WiFiClient wifiClient;
+PubSubClient client(wifiClient);
 MqttClient mqtt(makeMqttConfig());
+TouchScreenConfig displayConfig = makeTouchScreenConfig();
+
+#if BOARD_HAS_TOUCH
+TouchPointMapper  mapper(displayConfig);
+TouchEvents       touch(displayConfig);
+TouchController   touchController;
+#endif
 
 #if HAS_GMAIL_SENDER
 GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
@@ -164,7 +171,7 @@ GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
 AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 3);
 #endif
 
-
+#if BOARD_HAS_TOUCH
 void onTouchLog(TouchPoint p)                              { Serial.printf("Touch: %d, %d\n", p.x, p.y); }
 void onHoldHandler(TouchPoint p, unsigned long ms)         { Serial.printf("Hold at %d,%d for %lu ms\n", p.x, p.y, ms); }
 void onDblClickHandler(TouchPoint p)                       { Serial.printf("Double click: %d, %d\n", p.x, p.y); }
@@ -195,9 +202,9 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
             display.drawRect(0, display.height() - 1, 1, 1, TFT_WHITE);
 
             display.drawRect(
-                touchScreenConfig.edgeZoneX, touchScreenConfig.edgeZoneY,
-                touchScreenConfig.screenWidth - 2 * touchScreenConfig.edgeZoneX,
-                touchScreenConfig.screenHeight - 2 * touchScreenConfig.edgeZoneY,
+                displayConfig.edgeZoneX, displayConfig.edgeZoneY,
+                displayConfig.screenWidth - 2 * displayConfig.edgeZoneX,
+                displayConfig.screenHeight - 2 * displayConfig.edgeZoneY,
                 TFT_DARKGREY
             );
         },
@@ -206,14 +213,16 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
 
     Serial.printf("\nONHOLD FRAME !!!\n\n");
 }
+#endif
 
 void display_flip() {
-    touchScreenConfig.invertY = !touchScreenConfig.invertY;
-    touchScreenConfig.invertX = !touchScreenConfig.invertX;
+    displayConfig.invertY = !displayConfig.invertY;
+    displayConfig.invertX = !displayConfig.invertX;
     display.flip();
 }
 
 void setupTouchScreen() {
+    #if BOARD_HAS_TOUCH
     touch.setTouchPointMapper(&mapper);
     touchController.setup(&touch);
     Serial.println("TouchScreen setup done");
@@ -253,6 +262,9 @@ void setupTouchScreen() {
     touchController.events().onSwipeFromRight(onSwipeFromRightHandler);
 
     Serial.println("TouchScreen controller done");
+    #else
+    Serial.println("TouchScreen not found!");
+    #endif
 }
 
 void setupLittleFS() {
@@ -545,9 +557,9 @@ void setupSerialCommander() {
             Serial.printf("[SerialCommander] isAutoBrighness **disabled**\n");
             #endif
         } else {
-            configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
             display.brightness(args.toInt());
             configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+            configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
             Serial.printf("[SerialCommander] display.brightness(%d)\n", display.brightness());
         }
     });
@@ -598,6 +610,14 @@ void setupLightSensor() {
             Serial.println();
         });
 
+        scheduler.addCronTask(0, []() {
+            display.setTextSize(1);
+            display.setTextColor(TFT_DARKGREY);
+            display.setCursor(10, display.height() - 1 * (5 +  display.fontHeight()));
+            display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
+        });
+
+        #if BOARD_HAS_TOUCH
         touchController.events().onHold([](TouchPoint p, unsigned long ms) {
             configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
             configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, lightSensor.value());
@@ -610,13 +630,7 @@ void setupLightSensor() {
 
         touchController.events().onSwipeUp(onSwipe);
         touchController.events().onSwipeDown(onSwipe);
-
-        scheduler.addCronTask(0, []() {
-            display.setTextSize(1);
-            display.setTextColor(TFT_DARKGREY);
-            display.setCursor(10, 240 - 1 * (5 +  display.fontHeight()));
-            display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
-        });
+        #endif
     #endif
 }
 
@@ -657,7 +671,7 @@ void drawSystemInfo() {
   display.printf(F("CPU: %d MHz   Loop rate: %d/s"), cpuFreq, display.loopFrameRate());
 
   display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
-  display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, heapPercent);
+  display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, (freeHeap * 100) / totalHeap);
 
   char* dumpPingStr = dumpPingStatsStr();
   if (dumpPingStr) {
@@ -703,27 +717,35 @@ void setup() {
     display.flush();
 
     #if defined(BOOT_BUTTON_PIN)
-    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP); // Enable pull-up resistor
+    // GPIO - INPUT, OUTPUT, INPUT_PULLUP, or INPUT_PULLDOWN
+    // - INPUT: Sets the pin as a regular digital read.
+    // - OUTPUT: Sets the pin to send out a 3.3V high or 0V low signal.
+    // - INPUT_PULLUP: Turns on a built-in resistor holding the pin HIGH until pulled to ground.
+    // - INPUT_PULLDOWN: Turns on a built-in resistor holding the pin LOW until supplied with 3.3V.
+    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP); // GPIO0 - Enable pull-up resistor
+    scheduler.addCronTask(0, []() -> void {
+        static bool bootButtonPressed = false;
+        int buttonState = digitalRead(BOOT_BUTTON_PIN);
+        if ((buttonState == LOW) && !bootButtonPressed) {
+            bootButtonPressed = true;
+            display_flip();
+            Serial.println("Button pressed!");
+        } else if (buttonState == LOW) {
+            // loop (pressed) ....
+        } else if (bootButtonPressed) {
+            // button release
+            bootButtonPressed = false;
+            Serial.println("Button released!");
+        } else {
+            // loop (released) ...
+        }
+    });
     #endif
 
     Serial.println("\n> Ready. Введіть 'list' для перегляду команд.\n");
 }
 
 void loop() {
-    #if defined(BOOT_BUTTON_PIN)
-    static bool bootButtonPressed = false;
-    int buttonState = digitalRead(BOOT_BUTTON_PIN);
-    if ((buttonState == LOW) && !bootButtonPressed) {
-        bootButtonPressed = true;
-        display_flip();
-        Serial.println("Button pressed!");
-    } else if (buttonState == LOW) {
-        // loop ....
-    } else {
-        bootButtonPressed = false;
-    }
-    #endif
-
     commandHandler.update();
     mqtt.loop();
 
@@ -737,7 +759,9 @@ void loop() {
     // sendEmail();
 
     scheduler.loop();
+    #if BOARD_HAS_TOUCH
     touchController.update();
+    #endif
 
     // display.endWrite();
     display.flush();

@@ -16,8 +16,6 @@
 
 class TouchEvents {
 public:
-    char dummy[32] = "initial";
-
     // TouchCallback / HoldCallback / SwipeCallback - std::function (як TaskCallback у TaskController): підписатись можна і звичайною функцією,
     // і лямбдою із захопленням, напр.:
     //   int r = 5;
@@ -86,6 +84,7 @@ private:
     State _state = IDLE;
     TouchPoint _start;
     TouchPoint _last;
+
     unsigned long _startTime = 0;
     bool _holdFired = false;
     unsigned long _lastTapTime = 0;

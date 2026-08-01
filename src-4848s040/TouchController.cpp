@@ -1,6 +1,6 @@
 #include "GT911Touch.h"
-#include "TouchScreen/TouchEvents.h"
-#include "TouchScreen/TouchController.h"
+#include <TouchEvents.h>
+#include <TouchController.h>
 /*
 #define TOUCH_SDA 19 - SDA (Serial Data) I²C
 #define TOUCH_SCL 45 - SCL (Serial Clock) I²C
