@@ -10,10 +10,6 @@
 Display::Display() : tft_(tft), sprite_(&tft_) {}
 
 void Display::init() {
-    #if defined(BOARD_ST7789)
-    pinMode(TFT_BL, OUTPUT); // st7789
-    #endif
-
     tft_.init();
     tft_.setRotation(TFT_ROTATION);
     
@@ -87,7 +83,7 @@ void Display::brightness(uint8_t percent) {
     #endif
 
     #if defined(BOARD_4848S040)
-    tft_.setBrightness(map(percent, 0, 100, 15, 255)); // делегуємо в LGFX Light_PWM, пін вже сконфігурований у Setup_ST7701_4848S040.h
+    tft_.setBrightness(map(percent, 0, 100, 10, 255)); // делегуємо в LGFX Light_PWM, пін вже сконфігурований у Setup_ST7701_4848S040.h
     #endif
 
     brightness_ = percent;

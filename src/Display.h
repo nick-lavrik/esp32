@@ -79,13 +79,10 @@ public:
     }
 
     size_t println(const char *string) { return sprite_.println(string); }
-    size_t printf(const char *format, ...) {
-        va_list args;
-        va_start(args, format);
-        // Передаємо напряму, оскільки тип вже const char*
-        size_t result = sprite_.vprintf(format, args);
-        va_end(args);
-        return result;
+
+    template <typename... Args>
+    size_t printf(const char* format, const Args&... args) {
+        return sprite_.printf(format, args...); 
     }
 
 protected:

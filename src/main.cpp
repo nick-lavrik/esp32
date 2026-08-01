@@ -55,7 +55,7 @@
 #include "BackgroundImages.hpp"
 #include "SizeFormatter.hpp"
 #include "TouchScreen/TouchController.h"
-#include "TaskController/TaskController.hpp"
+#include <TaskController.hpp>
 #include <PubSubClient.h>
 #include <AnalogSensor.hpp>
 #include <MqttClient.hpp>
@@ -78,10 +78,11 @@ void setupSerial() {
     Serial.printf("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*\n\n");
 }
 
-// --- Підсвітка + світловий сенсор ---
-// #define LIGHT_SENSOR_PIN 34
-
 void setupDisplay() {
+    #if defined(BOARD_ST7789)
+    pinMode(TFT_BL, OUTPUT); // st7789
+    #endif
+
     display.init();
     //display.autobrightness(true);
     Serial.println("Display setup done.");
@@ -104,14 +105,17 @@ TouchScreenConfig makeTouchScreenConfig() {
     c.invertY = true;   // якщо вертикаль перевернута
     c.invertX = true;   // якщо горизонталь перевернута
     c.swapXY = false;  // якщо екран повернутий на 90/270 градусів
+
+    c.edgeZoneX = 25;
+    c.edgeZoneY = 25;
     #endif
 
     #ifdef BOARD_4848S040
     c.rawMinX = 0; c.rawMaxX = 480;
     c.rawMinY = 0; c.rawMaxY = 480;
 
-    //c.screenWidth  = 480;
-    //c.screenHeight = 480;
+    c.screenWidth  = 480;
+    c.screenHeight = 480;
 
     c.invertX = false;
     c.invertY = true;
@@ -224,7 +228,7 @@ void setupTouchScreen() {
         } else {
             display.brightness(min(100, display.brightness() + 10)); 
         }
-        Serial.printf("Brightness: %d%% (increase)\n", display.brightness());
+        Serial.printf(F("Brightness: %d%% (increase)\n"), display.brightness());
     });
 
     touchController.events().onSwipeDown([](TouchPoint s, TouchPoint e) { 
@@ -233,7 +237,7 @@ void setupTouchScreen() {
         } else {
             display.brightness(max(1, display.brightness() - 10));
         }
-        Serial.printf("Brightness: %d%% (decrease)\n", display.brightness());
+        Serial.printf(F("Brightness: %d%% (decrease)\n"), display.brightness());
     });
 
     touchController.events().onTouch(onTouchLog);
@@ -647,10 +651,10 @@ void drawSystemInfo() {
   display.setTextColor(TFT_DARKGREY);
 
   display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
-  display.printf("Uptime: %02d:%02d:%02d", uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
+  display.printf(F("Uptime: %02d:%02d:%02d"), uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
 
   display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
-  display.printf("CPU: %d MHz   Loop rate: %d/s", cpuFreq, display.loopFrameRate());
+  display.printf(F("CPU: %d MHz   Loop rate: %d/s"), cpuFreq, display.loopFrameRate());
 
   display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
   display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, heapPercent);
