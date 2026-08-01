@@ -17,6 +17,7 @@ void setupWiFi() {
   display.flush();
   
   WiFi.begin(ssid, password);
+  // WiFi.setSleep(false); // вирішуємо проблему сміття в моніторі (ttgo-t1)
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 30) {
     display.print("."); display.flush();
@@ -26,18 +27,18 @@ void setupWiFi() {
 
   // tft.fillScreen(BG_COLOR);
   if (WiFi.status() == WL_CONNECTED) {
-    display.setCursor(10, 10 + 3 + display.fontHeight());
-    display.println("WiFi connected!");
+    // display.setCursor(10, 10 + 3 + display.fontHeight());
+    display.println("\nWiFi connected!");
     display.flush();
     Serial.println("WiFi connected, IP: " + WiFi.localIP().toString());
     // setLed(false, true, false);
   } else {
     display.setTextColor(TFT_RED);
-    display.setCursor(10, 10 + 3 + display.fontHeight());
-    display.println("WiFi FAILED");
+    // display.setCursor(10, 10 + 3 + display.fontHeight());
+    display.println("\nWiFi FAILED");
     display.flush();
     // setLed(true, false, false);
-    delay(1000);
+    delay(5000);
   }
 }
 

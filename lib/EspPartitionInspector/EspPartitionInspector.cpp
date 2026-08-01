@@ -11,6 +11,19 @@ namespace {
 // заголовок лише заради однієї константи.
 constexpr uint8_t kEspAppImageMagic = 0xE9;
 
+namespace PartitionState {
+    inline constexpr const char* Unknown = "Unknown";
+    inline constexpr const char* ReadError = "read-error";
+    inline constexpr const char* ErasedEmpty = "erased/empty";
+    inline constexpr const char* ValidAppImage = "valid-app-image";
+    inline constexpr const char* InvalidAppImage = "invalid-app-image";
+    inline constexpr const char* FatSignatureOk = "fat-signature-ok";
+    inline constexpr const char* FatSignatureMissing = "fat-signature-missing";
+    inline constexpr const char* NvsDataPresent = "nvs-data-present";
+    inline constexpr const char* DataPresent = "data-present";
+    inline constexpr const char* Present = "present";
+}
+
 bool isErased(const uint8_t *buffer, size_t len) {
     for (size_t i = 0; i < len; ++i) {
         if (buffer[i] != 0xFF) {
@@ -82,21 +95,23 @@ std::string EspPartitionInspector::partitionSubtypeToString(uint8_t type, uint8_
 
 std::string EspPartitionInspector::detectState(const esp_partition_t *partition) {
     if (partition == nullptr) {
-        return "unknown";
+        return PartitionState::Unknown;
     }
 
     uint8_t header[32] = {};
     esp_err_t err = esp_partition_read(partition, 0, header, sizeof(header));
     if (err != ESP_OK) {
-        return "read-error";
+        return PartitionState::ReadError;
     }
 
     if (isErased(header, sizeof(header))) {
-        return "erased/empty";
+        return PartitionState::ErasedEmpty;
     }
 
     if (partition->type == ESP_PARTITION_TYPE_APP) {
-        return (header[0] == kEspAppImageMagic) ? "valid-app-image" : "invalid-app-image";
+        return (header[0] == kEspAppImageMagic)
+            ? PartitionState::ValidAppImage
+            : PartitionState::InvalidAppImage;
     }
 
     if (partition->type == ESP_PARTITION_TYPE_DATA) {
@@ -104,19 +119,19 @@ std::string EspPartitionInspector::detectState(const esp_partition_t *partition)
             uint8_t bootSector[512] = {};
             if (esp_partition_read(partition, 0, bootSector, sizeof(bootSector)) == ESP_OK) {
                 bool signatureOk = (bootSector[510] == 0x55 && bootSector[511] == 0xAA);
-                return signatureOk ? "fat-signature-ok" : "fat-signature-missing";
+                return signatureOk ? PartitionState::FatSignatureOk : PartitionState::FatSignatureMissing;
             }
-            return "read-error";
+            return PartitionState::ReadError;
         }
         if (partition->subtype == ESP_PARTITION_SUBTYPE_DATA_NVS) {
             // Формат сторінок NVS внутрішній для компонента nvs_flash;
             // тут лише підтверджуємо, що розділ не порожній.
-            return "nvs-data-present";
+            return PartitionState::NvsDataPresent;
         }
-        return "data-present";
+        return PartitionState::DataPresent;
     }
 
-    return "present";
+    return PartitionState::Present;
 }
 
 bool EspPartitionInspector::readSha256(const esp_partition_t *partition, uint8_t *out32) {
@@ -188,15 +203,21 @@ void EspPartitionInspector::printOne(const EspPartitionInfo &info, Print &out) {
 }
 
 void EspPartitionInspector::printAll(Print &out, bool computeSha256) {
+    char line[] = "-----------------------------------";
     auto partitions = collectAll(computeSha256);
 
     out.println(F("=== Flash Partition Table ==="));
     out.printf("%-12s %-6s %-10s %-10s %-10s %-5s %-9s %s\n",
                "label", "type", "subtype", "offset", "size", "encr", "readonly", "state");
+    out.printf("%.12s %.6s %.10s %.10s %.10s %.5s %.9s %s\n",
+               line, line, line, line, line, line, line, line);
 
     for (const auto &info : partitions) {
         printOne(info, out);
     }
+
+    out.printf("%.12s-%.6s-%.10s-%.10s-%.10s-%.5s-%.9s-%s\n",
+               line, line, line, line, line, line, line, line);
 
     out.printf("Total: %u partitions\n", static_cast<unsigned int>(partitions.size()));
 }

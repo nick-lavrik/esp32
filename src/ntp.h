@@ -29,13 +29,45 @@ void drawTime() {
   char timeStr[9];
   strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
 
-  // img.fillRect(200, 5, 120, 20, BG_COLOR);
-  display.setTextSize(2);
-  // img.setTextColor(TEXT_MAIN, BG_COLOR);
-  display.setTextColor(TFT_LIGHTGREY);
+  #if BOARD_TTGO_T1
+  // time
+    display.setTextFont(7); // великий "цифровий" шрифт (тільки цифри та ":")
 
-  display.setCursor(max(0, display.width() - 10 - display.textWidth(timeStr)), 8);
-  display.print(timeStr);
+    int textW = display.textWidth(timeStr);
+    int textH = display.fontHeight();
+    int x = (tft.width() - textW) / 2;
+    int y = 30;
 
-  // Serial.printf("%s\n", timeStr);
+    // Затираємо попередній текст перед виводом нового
+    // tft.fillRect(0, y, tft.width(), textH, TFT_BLACK);
+
+    // display.setTextColor(TFT_DARKGREY);
+    display.setTextColor(TFT_CYAN);
+    display.setCursor(x, y);
+    display.print(timeStr);
+
+    // date
+    char dateStr[16];
+    strftime(dateStr, sizeof(dateStr), "%d.%m.%Y", &timeinfo);
+
+    display.setTextFont(4);
+
+    textW = display.textWidth(dateStr);
+    x = (display.width() - textW) / 2;
+    y = 100;
+
+    // tft.fillRect(0, y, tft.width(), tft.fontHeight(), TFT_BLACK);
+
+    // display.setTextColor(TFT_DARKGREEN);
+    display.setTextColor(TFT_ORANGE);
+    display.setCursor(x, y);
+    display.print(dateStr);
+
+    display.setTextFont(1);
+  #else
+    display.setTextSize(2);
+    display.setTextColor(TFT_LIGHTGREY);
+    display.setCursor(max(0, display.width() - 10 - display.textWidth(timeStr)), 8);
+    display.print(timeStr);
+  #endif
 }

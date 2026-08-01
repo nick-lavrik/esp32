@@ -50,19 +50,13 @@ void doPing() {
 
 char pingDumpStr[45];
 char* dumpPingStatsStr() {
-  static uint32_t lastUpdateMs = 0;
-  uint32_t now = millis();
-
-  // if (now - lastUpdateMs < 1000) return;
-
-  lastUpdateMs = now;
 
   int avgPing = pingCount > 0 ? (pingSum / pingCount) : 0;
 
   if (currentPing < 0) {
-    sprintf(pingDumpStr, "PING: TIMEOUT   min:%3d avg:%3d max:%3d ms\n", minPing, avgPing, maxPing);
+    sprintf(pingDumpStr, "PING: FAIL   %3d / %3d / %3d ms\n", minPing, avgPing, maxPing);
   } else {
-    sprintf(pingDumpStr, "PING: %3dms     min:%3d avg:%3d max:%3d ms\n", currentPing, minPing, avgPing, maxPing);
+    sprintf(pingDumpStr, "PING: %3dms  %3d / %3d / %3d ms\n", currentPing, minPing, avgPing, maxPing);
   }
 
   return pingDumpStr;

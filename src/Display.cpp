@@ -76,12 +76,12 @@ void Display::brightness(uint8_t percent) {
     percent = percent < 0 ? 0 : percent;
     percent = percent > 100 ? 100 : percent;
 
-    #if defined(BOARD_ST7789)
+    #if defined(TFT_BL)
     analogWrite(TFT_BL, map(percent, 0, 100, 0, 255));
     #endif
 
     #if defined(BOARD_4848S040)
-    tft_.setBrightness(map(percent, 0, 100, 10, 255)); // делегуємо в LGFX Light_PWM, пін вже сконфігурований у Setup_ST7701_4848S040.h
+    // tft_.setBrightness(map(percent, 0, 100, 10, 255)); // делегуємо в LGFX Light_PWM, пін вже сконфігурований у Setup_ST7701_4848S040.h
     #endif
 
     brightness_ = percent;

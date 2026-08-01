@@ -59,38 +59,16 @@
 #include <PubSubClient.h>
 #include <AnalogSensor.hpp>
 #include <MqttClient.hpp>
+#include "setup.h"
 
 #if BOARD_HAS_TOUCH
 #include <TouchController.h>
 #endif
 
-#if defined(SD_SCK) && defined(SD_MISO) && defined(SD_MOSI) && defined(SD_CS) && SD_CS > 0
-constexpr bool kHasSD = true;
-#else
-constexpr bool kHasSD = false;
-#endif
-
 const char* EVT_REBOOT PROGMEM = "reboot";
+const char* CFG_SHOW_CLOCK PROGMEM = "clock";
 const char* CFG_SYS_AUTOBRIGHTNESS PROGMEM = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS PROGMEM = "brightness";
-
-void setupSerial() {
-    Serial.begin(115200);
-    delay(200);
-    Serial.printf("\n\n-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*\n");
-    Serial.printf(" %s (%s)\n", ESP.getChipModel(), PIO_PIOENV );
-    Serial.printf("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*\n\n");
-}
-
-void setupDisplay() {
-    #if defined(BOARD_ST7789)
-    pinMode(TFT_BL, OUTPUT); // st7789
-    #endif
-
-    display.init();
-    //display.autobrightness(true);
-    Serial.println("Display setup done.");
-}
 
 TouchScreenConfig makeTouchScreenConfig() {
     TouchScreenConfig c;
@@ -145,9 +123,10 @@ MqttConfig makeMqttConfig() {
     return config;
 }
 
+bool showClock = true;
 bool isAutoBrightness = false;
+
 EventDispatcher dispatcher;
-Display display;
 TaskController scheduler;
 ConfigStorage configStorage;
 JpegImage spaceImage;
@@ -155,7 +134,11 @@ SerialCommander commandHandler;
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 MqttClient mqtt(makeMqttConfig());
+
+#if BOARD_HAS_DISPLAY
+Display display;
 TouchScreenConfig displayConfig = makeTouchScreenConfig();
+#endif
 
 #if BOARD_HAS_TOUCH
 TouchPointMapper  mapper(displayConfig);
@@ -312,19 +295,23 @@ void setupMqttClient() {
 }
 
 void setupSD() {
-  if (!kHasSD) { return; }
-  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  const int maxAttempts = 3;
+  #if BOARD_HAS_SD
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    const int maxAttempts = 3;
 
-  for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
-    if (SD.begin(SD_CS, SPI, 4000000)) {
-      Serial.printf(F("SD card init done (%d/%d)\n"), attempt, maxAttempts);
-      return;
+    for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+        if (SD.begin(SD_CS, SPI, 4000000)) {
+        Serial.printf(F("SD card init done (%d/%d)\n"), attempt, maxAttempts);
+        return;
+        }
+        delay(100);
     }
-    delay(100);
-  }
 
-  Serial.println(F("SD init fail."));
+    Serial.println(F("SD init fail."));
+  #else
+    Serial.println(F("SD disabled."));
+  #endif
+
   return;
 }
 
@@ -544,6 +531,18 @@ void setupSerialCommander() {
         }
     });
 
+    commandHandler.registerCommand("clock", "Керування годинником: clock on|off", [](const String& args) {
+        if (args.equalsIgnoreCase("on")) {
+            configStorage.setBool(CFG_SHOW_CLOCK, showClock = true);
+            Serial.println(F("clock ON"));
+        } else if (args.equalsIgnoreCase("off")) {
+            configStorage.setBool(CFG_SHOW_CLOCK, showClock = false);
+            Serial.println(F("clock OFF"));
+        } else {
+            Serial.println(F("Керування годинником: clock on|off"));
+        }
+    });
+
     commandHandler.registerCommand("brightness", "Керування яскравістю: brightness 0-100", [](const String& args) {
         if (args.length() == 0) {
             Serial.println(F("Використання: brightness 0-100|auto"));
@@ -576,6 +575,7 @@ void setupBackgroundImage() {
 
 void setupConfigStorage() {
     configStorage.begin(PIO_PIOENV);
+    showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
     Serial.println("ConfigStorage init done");
 }
 
@@ -706,6 +706,7 @@ void setup() {
     setupLittleFS();
     setupDisplay();
     setupTouchScreen();
+
     setupWiFi();
     setupNtpService();
     setupBackgroundImage();
@@ -754,7 +755,7 @@ void loop() {
     display.clear();
     drawBackgroundImage();
     drawSystemInfo();
-    drawTime();
+    if (showClock) drawTime();
 
     // sendEmail();
 

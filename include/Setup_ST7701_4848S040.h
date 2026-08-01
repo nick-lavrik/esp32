@@ -95,7 +95,7 @@ public:
         // ---------- Підсвітка ----------
         auto light_cfg = _light.config();
         // light_cfg.pin_bl = 6;    // GPIO підсвітки — звірте зі схемою
-        light_cfg.pin_bl = 38;    // GPIO підсвітки — звірте зі схемою
+        light_cfg.pin_bl = TFT_BL;  // GPIO підсвітки — звірте зі схемою
         light_cfg.invert = false;
         // light_cfg.invert = true;
         // light_cfg.freq   = 44100;

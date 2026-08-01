@@ -47,6 +47,7 @@ public:
     const uint32_t loopFrameRate();
     size_t   fontHeight() { return sprite_.fontHeight(); }
 
+    void     setTextFont(uint8_t f)                    { sprite_.setTextFont(f); }
     void     setTextColor(uint16_t color)              { sprite_.setTextColor(color); }
     void     setTextColor(uint16_t color, uint16_t bg) { sprite_.setTextColor(color, bg); }
     void     setTextSize(uint8_t size)                 { sprite_.setTextSize(size); }
@@ -55,7 +56,7 @@ public:
     void     drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color)          { sprite_.drawCircle(x, y, r, color); }
     uint16_t drawString(const char *text, int32_t x, int32_t y)                   { return sprite_.drawString(text, x, y); }
 
-    int16_t textWidth(const char *string) { return sprite_.textWidth(string); }
+    int16_t  textWidth(const char *string) { return sprite_.textWidth(string); }
 
     size_t print(const char *string)   { return sprite_.print(string); }
     size_t println(const char *string) { return sprite_.println(string); }
