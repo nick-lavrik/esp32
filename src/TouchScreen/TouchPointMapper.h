@@ -11,7 +11,7 @@ class TouchPointMapper {
 public:
     explicit TouchPointMapper(const TouchScreenConfig &config = TouchScreenConfig());
 
-    void setConfig(const TouchScreenConfig &config);
+    // void setConfig(const TouchScreenConfig &config);
     const TouchScreenConfig &getConfig() const { return _config; }
 
     // Основний метод перетворення. Викликається бібліотекою TouchEvents
@@ -20,5 +20,5 @@ public:
     TouchPoint map(TouchPoint raw) const;
 
 private:
-    TouchScreenConfig _config;
+    const TouchScreenConfig &_config;
 };

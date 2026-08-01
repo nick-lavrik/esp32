@@ -16,6 +16,7 @@ public:
     void endWrite() { tft_.endWrite(); }
 
     explicit Display();
+    void flip();
 
     // Ініціалізація дисплея (обов'язково викликати в setup())
     void init();

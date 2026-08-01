@@ -15,8 +15,8 @@ struct TouchScreenConfig {
     int rawMinX = TOUCH_MIN_X, rawMaxX = TOUCH_MAX_X;
     int rawMinY = TOUCH_MIN_Y, rawMaxY = TOUCH_MAX_Y;
 
-    int screenWidth  = 320;
-    int screenHeight = 240;
+    int screenWidth  = TFT_WIDTH;
+    int screenHeight = TFT_HEIGHT;
 
     bool invertX = false;
     bool invertY = false;

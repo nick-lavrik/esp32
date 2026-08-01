@@ -70,6 +70,8 @@ const char* EVT_REBOOT PROGMEM = "reboot";
 const char* CFG_SYS_AUTOBRIGHTNESS PROGMEM = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS PROGMEM = "brightness";
 
+const int bootButtonPin = 0; // The BOOT button is tied to GPIO 0
+
 void setupSerial() {
     Serial.begin(115200);
     delay(200);
@@ -87,7 +89,7 @@ void setupDisplay() {
     Serial.println("Display setup done.");
 }
 
-static TouchScreenConfig makeTouchScreenConfig() {
+TouchScreenConfig makeTouchScreenConfig() {
     TouchScreenConfig c;
     // Приклад: контролер видає сирі 0..4095, екран фізично 320x240,
     // а сама панель ще й повернута (типова ситуація для дешевих SPI TFT).
@@ -95,6 +97,9 @@ static TouchScreenConfig makeTouchScreenConfig() {
     // c.rawMinY = 200;  c.rawMaxY = 3900;
 
     #ifdef BOARD_ST7789
+    c.rawMinX = 212; c.rawMaxX = 3714;
+    c.rawMinY = 329; c.rawMaxY = 3817;
+
     c.screenWidth  = 320;
     c.screenHeight = 240;
 
@@ -104,16 +109,22 @@ static TouchScreenConfig makeTouchScreenConfig() {
     #endif
 
     #ifdef BOARD_4848S040
-    c.screenWidth  = 480;
-    c.screenHeight = 480;
+    c.rawMinX = 0; c.rawMaxX = 480;
+    c.rawMinY = 0; c.rawMaxY = 480;
+
+    //c.screenWidth  = 480;
+    //c.screenHeight = 480;
+
+    c.invertX = false;
+    c.invertY = true;
+    c.swapXY = true;
+
     c.edgeZoneX = 40;
     c.edgeZoneY = 40;
     #endif
 
     return c;
 }
-// SPIClass hspiSD(HSPI);
-
 MqttConfig makeMqttConfig() {
     MqttConfig config;
     config.host = MQTT_HOST,
@@ -194,12 +205,14 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
     Serial.printf("\nONHOLD FRAME !!!\n\n");
 }
 
+void display_flip() {
+    touchScreenConfig.invertY = !touchScreenConfig.invertY;
+    touchScreenConfig.invertX = !touchScreenConfig.invertX;
+    display.flip();
+}
+
 void setupTouchScreen() {
-
-    #ifdef BOARD_ST7789
     touch.setTouchPointMapper(&mapper);
-    #endif
-
     touchController.setup(&touch);
     Serial.println("TouchScreen setup done");
 
@@ -505,6 +518,8 @@ void setupSerialCommander() {
         WiFi_scan();
     });
 
+    commandHandler.registerCommand("flip", "перевернути екран", [](const String& args) { display_flip(); });
+
     commandHandler.registerCommand("led", "Керування світлодіодом: led on|off", [](const String& args) {
         if (args.equalsIgnoreCase("on")) {
             Serial.println(F("LED увімкнено"));
@@ -681,16 +696,35 @@ void setup() {
 
     display.flush();
 
+    #if defined(BOOT_BUTTON_PIN)
+    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP); // Enable pull-up resistor
+    #endif
+
     Serial.println("\n> Ready. Введіть 'list' для перегляду команд.\n");
 }
 
 void loop() {
+    #if defined(BOOT_BUTTON_PIN)
+    static bool bootButtonPressed = false;
+    int buttonState = digitalRead(bootButtonPin);
+    if ((buttonState == LOW) && !bootButtonPressed) {
+        bootButtonPressed = true;
+        display_flip();
+        Serial.println("Button pressed!");
+    } else if (buttonState == LOW) {
+        // loop ....
+    } else {
+        bootButtonPressed = false;
+    }
+    #endif
+
     commandHandler.update();
     mqtt.loop();
 
     // display.startWrite();
     doPing();
-    drawBackgroundImage();
+    display.clear();
+    //drawBackgroundImage();
     drawSystemInfo();
     drawTime();
 

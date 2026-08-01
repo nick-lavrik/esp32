@@ -3,9 +3,9 @@
 TouchPointMapper::TouchPointMapper(const TouchScreenConfig &config)
     : _config(config) {}
 
-void TouchPointMapper::setConfig(const TouchScreenConfig &config) {
+/* void TouchPointMapper::setConfig(const TouchScreenConfig &config) {
     _config = config;
-}
+} */
 
 TouchPoint TouchPointMapper::map(int x, int y) const {
     return map(TouchPoint{x: x, y: y});

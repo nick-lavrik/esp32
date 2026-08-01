@@ -16,7 +16,7 @@ void Display::init() {
 
     tft_.init();
     tft_.setRotation(TFT_ROTATION);
-
+    
     width_  = tft_.width();
     height_ = tft_.height();
 
@@ -32,6 +32,11 @@ void Display::init() {
     sprite_.fillSprite(TFT_BLACK);
 
     flush(); // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
+}
+
+void Display::flip() {
+    Serial.printf("TFT.setRotation(%d)\n", (tft_.getRotation() + 2) % 4);
+    tft_.setRotation((tft_.getRotation() + 2) % 4);
 }
 
 void Display::clear(uint16_t color) {
