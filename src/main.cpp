@@ -70,8 +70,6 @@ const char* EVT_REBOOT PROGMEM = "reboot";
 const char* CFG_SYS_AUTOBRIGHTNESS PROGMEM = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS PROGMEM = "brightness";
 
-const int bootButtonPin = 0; // The BOOT button is tied to GPIO 0
-
 void setupSerial() {
     Serial.begin(115200);
     delay(200);
@@ -635,6 +633,7 @@ void sendEmail() {
 }
 
 void drawSystemInfo() {
+  uint8_t row = 0;
   // img.fillRect(0, 30, 320, 65, BG_COLOR);
 
   uint32_t freeHeap = ESP.getFreeHeap();
@@ -647,21 +646,24 @@ void drawSystemInfo() {
   display.setTextSize(1);
   display.setTextColor(TFT_DARKGREY);
 
-  display.setCursor(10, 10 + 0 * (5 +  display.fontHeight()));
+  display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
   display.printf("Uptime: %02d:%02d:%02d", uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
 
-  display.setCursor(10, 10 + 1 * (5 +  display.fontHeight()));
+  display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
   display.printf("CPU: %d MHz   Loop rate: %d/s", cpuFreq, display.loopFrameRate());
 
-  display.setCursor(10, 10 + 2 * (5 +  display.fontHeight()));
+  display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
   display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, heapPercent);
 
-  display.setCursor(10, 10 + 3 * (5 +  display.fontHeight()));
-  display.print(dumpPingStatsStr());
+  char* dumpPingStr = dumpPingStatsStr();
+  if (dumpPingStr) {
+    display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
+    display.print(dumpPingStatsStr());
+  }
 
   char brightnessStr[200];
   sprintf(brightnessStr, "Brigtness: %d%% %s", display.brightness(), isAutoBrightness ? "(auto)" : "");
-  display.setCursor(10, 10 + 4 * (5 +  display.fontHeight()));
+  display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
   display.print(brightnessStr);
 
   // Візуальний бар пам'яті
@@ -706,7 +708,7 @@ void setup() {
 void loop() {
     #if defined(BOOT_BUTTON_PIN)
     static bool bootButtonPressed = false;
-    int buttonState = digitalRead(bootButtonPin);
+    int buttonState = digitalRead(BOOT_BUTTON_PIN);
     if ((buttonState == LOW) && !bootButtonPressed) {
         bootButtonPressed = true;
         display_flip();
@@ -724,7 +726,7 @@ void loop() {
     // display.startWrite();
     doPing();
     display.clear();
-    //drawBackgroundImage();
+    drawBackgroundImage();
     drawSystemInfo();
     drawTime();
 

@@ -1,5 +1,12 @@
 #pragma once
 
+#if !__has_include(<ESPping.h>)
+
+void doPing() { ; }
+char* dumpPingStatsStr() { return nullptr; }
+
+#else
+
 #include <ESPping.h> 
 
 // --- Пінг ---
@@ -60,3 +67,4 @@ char* dumpPingStatsStr() {
 
   return pingDumpStr;
 }
+#endif
