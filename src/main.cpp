@@ -267,7 +267,7 @@ void setupTouchScreen() {
 }
 
 void setupLittleFS() {
-  #if BOARD_ESP8266
+  #if ESP8266
   bool mounted = LittleFS.begin();
   #else
   bool mounted = LittleFS.begin(true);
@@ -528,7 +528,7 @@ void dumpLittleFSInfo() {
     }
     #endif
 
-    #if BOARD_ESP8266
+    #if ESP8266
     FSInfo64 fsInfo64;
     LittleFS.info64(fsInfo64);
     int usedBytes = fsInfo64.usedBytes;
