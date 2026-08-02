@@ -1,18 +1,42 @@
 #pragma once
-#include <Preferences.h>
 #include <Arduino.h>
 #include <vector>
-#include <nvs.h>
-#include <nvs_flash.h>
 
-// Обгортка над ESP32 NVS (Non-Volatile Storage) для зберігання конфігурації
-// між перезавантаженнями / вимкненнями пристрою.
+#if defined(ESP32)
+    #include <Preferences.h>
+    #include <nvs.h>
+    #include <nvs_flash.h>
+#elif defined(ESP8266)
+    #include <LittleFS.h>
+
+    // ESP8266 не має заголовку nvs.h — визначаємо власний shim з тими самими
+    // іменами енумераторів, щоб публічний API (Entry::type, getType(),
+    // typeToString()) залишався ідентичним для обох платформ.
+    // Реальних "float"/"bool" типів у NVS немає (Preferences зберігає їх як blob),
+    // тому на ESP8266 такі файли теж мапляться в NVS_TYPE_BLOB.
+    typedef enum {
+        NVS_TYPE_U8   = 0x01,
+        NVS_TYPE_I8   = 0x11,
+        NVS_TYPE_U16  = 0x02,
+        NVS_TYPE_I16  = 0x12,
+        NVS_TYPE_U32  = 0x04,
+        NVS_TYPE_I32  = 0x14,
+        NVS_TYPE_U64  = 0x08,
+        NVS_TYPE_I64  = 0x18,
+        NVS_TYPE_STR  = 0x21,
+        NVS_TYPE_BLOB = 0x42,
+        NVS_TYPE_ANY  = 0xff
+    } nvs_type_t;
+#endif
+
+// Обгортка над персистентним key-value сховищем конфігурації.
+// ESP32   -> NVS (Preferences.h), namespace = NVS namespace.
+// ESP8266 -> LittleFS, namespace = каталог, кожен параметр = окремий файл
+//            "/.nvs/<namespace>/<key>.<type>", type in {str,i32,u32,f32,bool,bin}.
 //
-// Підтримує: int, float, String, масив float, довільні структури (з версією),
-// а також перелік всіх ключів у namespace та визначення їх типу.
+// Публічний API однаковий для обох платформ.
 class ConfigStorage {
 public:
-    // ---- допоміжні типи (nested, щоб не плодити окремі файли під невеликі POD) ----
     struct Entry {
         String key;
         nvs_type_t type;
@@ -28,24 +52,20 @@ public:
     };
 
     // Заголовок, що зберігається перед байтами довільної структури.
-    // Дозволяє при читанні перевірити, чи сумісна збережена структура
-    // з тією, яку очікує поточна версія прошивки.
     struct BlobHeader {
         uint32_t magic;
         uint16_t version;
         uint16_t size;
     };
 
-    // Обмеження NVS: і ключ, і ім'я namespace не можуть перевищувати 15 символів (ASCII)
+    // Обмеження ключа: ASCII, довжина 1..15 (успадковано від NVS, зберігається
+    // однаковим для обох платформ заради єдиної поведінки).
     static constexpr size_t MAX_KEY_LENGTH = 15;
 
-    // Перевіряє довжину ключа/namespace ще ДО звернення до NVS.
-    // Повертає false, якщо key == nullptr, порожній, або довший за MAX_KEY_LENGTH.
     static bool isKeyValid(const char* key);
 
     ConfigStorage();
 
-    // namespaceName обмежений 15 символами (обмеження NVS)
     bool begin(const char* namespaceName = "config", const char* partitionLabel = "nvs");
     void end();
 
@@ -71,14 +91,13 @@ public:
 
     // ---- масив String ----
     // Формат: [uint16_t count][uint16_t len1][bytes1][uint16_t len2][bytes2]...
-    // Зберігається одним blob-ключем через putBytes/getBytes.
     void setStringArray(const char* key, const std::vector<String>& arr);
     size_t getStringArray(const char* key, std::vector<String>& outArr);
 
-    // видаляє ВСІ ключі в поточному namespace (обережно!)
+    // видаляє ВСІ ключі в поточному namespace
     void clearAll();
 
-    // ---- перелік записів у поточному namespace ----
+    // перелік записів у поточному namespace
     std::vector<Entry> listEntries();
 
     // тип конкретного ключа (NVS_TYPE_ANY якщо не знайдено)
@@ -96,7 +115,7 @@ public:
         std::vector<uint8_t> buffer(sizeof(BlobHeader) + sizeof(T));
         memcpy(buffer.data(), &header, sizeof(BlobHeader));
         memcpy(buffer.data() + sizeof(BlobHeader), &value, sizeof(T));
-        size_t written = prefs_.putBytes(key, buffer.data(), buffer.size());
+        size_t written = writeBlob(key, buffer.data(), buffer.size());
         return written == buffer.size();
     }
 
@@ -106,12 +125,12 @@ public:
             warnInvalidKey(key, "getStruct");
             return StructReadResult::SIZE_MISMATCH;
         }
-        size_t storedLen = prefs_.getBytesLength(key);
+        size_t storedLen = blobLength(key);
         if (storedLen == 0) return StructReadResult::NOT_FOUND;
         if (storedLen < sizeof(BlobHeader)) return StructReadResult::SIZE_MISMATCH;
 
         std::vector<uint8_t> buffer(storedLen);
-        prefs_.getBytes(key, buffer.data(), storedLen);
+        readBlob(key, buffer.data(), storedLen);
 
         BlobHeader header;
         memcpy(&header, buffer.data(), sizeof(BlobHeader));
@@ -124,15 +143,31 @@ public:
         return StructReadResult::OK;
     }
 
-    // читає лише заголовок блоба (magic/version/size) без розпакування даних —
-    // корисно, щоб дізнатись версію ПЕРЕД тим, як обирати цільову структуру
+    // читає лише заголовок блоба без розпакування даних
     bool peekStructHeader(const char* key, BlobHeader& outHeader);
 
 private:
+#if defined(ESP32)
     Preferences prefs_;
+#endif
     String namespaceName_;
     String partitionLabel_;
 
-    // друкує попередження в Serial, якщо ключ не проходить валідацію
     static void warnInvalidKey(const char* key, const char* methodName);
+
+    // --- уніфіковані blob-примітиви (для setStruct/getStruct/масивів) ---
+    // ESP32:   зберігається одним NVS-ключем (putBytes/getBytes).
+    // ESP8266: зберігається у файлі "<key>.bin" в каталозі namespace.
+    size_t writeBlob(const char* key, const void* data, size_t len);
+    size_t readBlob(const char* key, void* outData, size_t maxLen);
+    size_t blobLength(const char* key);
+
+#if defined(ESP8266)
+    // допоміжні методи файлової реалізації
+    String pathFor(const char* key, const char* ext) const;
+    String namespaceDir() const;
+    bool ensureNamespaceDir() const;
+    bool writeFile(const String& path, const void* data, size_t len);
+    size_t readFile(const String& path, void* outData, size_t maxLen);
+#endif
 };

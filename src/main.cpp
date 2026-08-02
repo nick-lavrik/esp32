@@ -44,9 +44,8 @@
 #endif
 #include <LittleFS.h>
 #include <GmailSender.hpp>
-
+#include <ConfigStorage.hpp>
 #if !defined(BOARD_ESP8266)
-#include <ConfigStorage.hpp>         // NVS - відсутнє на ESP8266 core
 #include <SystemReset.hpp>           // esp_system.h/esp_task_wdt.h - відсутнє на ESP8266 core
 #include <EspPartitionInspector.hpp> // esp_partition.h - відсутнє на ESP8266 core
 #endif
@@ -142,9 +141,7 @@ bool isAutoBrightness = false;
 
 EventDispatcher dispatcher;
 TaskController scheduler;
-#if !defined(BOARD_ESP8266)
 ConfigStorage configStorage;
-#endif
 JpegImage spaceImage;
 SerialCommander commandHandler;
 WiFiClient wifiClient;
@@ -397,7 +394,6 @@ void dumpSystemInfo() {
     Serial.println("============================================================\n");
 }
 
-#if !defined(BOARD_ESP8266)
 void dumpConfigStorage() {
     Serial.println("\n====== ConfigStorage (NVS) =================================");
     auto entries = configStorage.listEntries();
@@ -421,7 +417,7 @@ void dumpConfigStorage() {
                 Serial.printf("  key: %-16s type: %-4s value: %d\n", e.key.c_str(), e.typeName.c_str(), configStorage.getInt(e.key.c_str()));
                 break;
             case NVS_TYPE_STR:
-                Serial.printf("  key: %-16s type: %-4s value: %s\n", e.key.c_str(), e.typeName.c_str(), configStorage.getString(e.key.c_str()));
+                Serial.printf("  key: %-16s type: %-4s value: %s\n", e.key.c_str(), e.typeName.c_str(), configStorage.getString(e.key.c_str()).c_str());
                 break;
             default:
                 Serial.printf("  key: %-16s type: %-4s\n", e.key.c_str(), e.typeName.c_str());
@@ -433,11 +429,6 @@ void dumpConfigStorage() {
     Serial.printf("Всього записів: %d\n", entries.size());
     Serial.println("============================================================\n");
 }
-#else
-void dumpConfigStorage() {
-    Serial.println(F("ConfigStorage (NVS) недоступний на ESP8266 - немає esp_idf/nvs.h."));
-}
-#endif
 
 #if BOARD_HAS_SD
 void dumpSDlistDir(const char* dirname, uint8_t levels) {
@@ -606,18 +597,10 @@ void setupSerialCommander() {
 
     commandHandler.registerCommand("clock", "Керування годинником: clock on|off", [](const String& args) {
         if (args.equalsIgnoreCase("on")) {
-            #if !defined(BOARD_ESP8266)
             configStorage.setBool(CFG_SHOW_CLOCK, showClock = true);
-            #else
-            showClock = true;
-            #endif
             Serial.println(F("clock ON"));
         } else if (args.equalsIgnoreCase("off")) {
-            #if !defined(BOARD_ESP8266)
             configStorage.setBool(CFG_SHOW_CLOCK, showClock = false);
-            #else
-            showClock = false;
-            #endif
             Serial.println(F("clock OFF"));
         } else {
             Serial.println(F("Керування годинником: clock on|off"));
@@ -642,12 +625,8 @@ void setupSerialCommander() {
             #endif
         } else {
             display.brightness(args.toInt());
-            #if !defined(BOARD_ESP8266)
             configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
             configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
-            #else
-            isAutoBrightness = false;
-            #endif
             Serial.printf("[SerialCommander] display.brightness(%d)\n", display.brightness());
         }
     });
@@ -662,29 +641,22 @@ void setupBackgroundImage() {
     #endif
 }
 
-#if !defined(BOARD_ESP8266)
 void setupConfigStorage() {
     configStorage.begin(PIO_PIOENV);
     showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
     Serial.println("ConfigStorage init done");
 }
-#else
-void setupConfigStorage() {
-    Serial.println("ConfigStorage (NVS) недоступний на ESP8266 - налаштування не зберігаються між перезавантаженнями.");
-}
-#endif
 
 void loadConfig() {
-    #if !defined(BOARD_ESP8266)
+    showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
     isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
     display.brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
     Serial.println("ConfigStorage load done");
+
+    Serial.printf("\t- %s = %s\n", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
     Serial.printf("\t- %s = %s\n", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
     Serial.printf("\t- %s = %d\n", CFG_DISPLAY_BRIGHTNESS, configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
     Serial.println();
-    #else
-    display.brightness(50); // дефолт - без персистентності (немає NVS на ESP8266)
-    #endif
 }
 
 void setupEventDispatcher() {

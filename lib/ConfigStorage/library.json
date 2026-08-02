@@ -2,9 +2,9 @@
   "name": "ConfigStorage",
   "version": "0.1.0",
   "description": "Обгортка над ESP32 NVS (Preferences.h) для зберігання конфігурації",
-  "keywords": ["esp32", "esp-idf", "nvs", "preferences", "config"],
+  "keywords": ["esp32", "esp8266", "esp-idf", "nvs", "preferences", "config"],
   "frameworks": ["espidf", "arduino"],
-  "platforms": ["espressif32"],
+  "platforms": ["espressif32", "espressif8266"],
   "build": {
     "flags": [
       "-std=gnu++17"
