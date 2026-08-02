@@ -15,8 +15,13 @@ extern Display display;
 void setupWiFi() {
   display.clear();
   display.setTextColor(TFT_WHITE);
+  #if BOARD_ESP8266
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  #else
   display.setTextSize(2);
   display.setCursor(10, 10);
+  #endif
   display.print("Connecting WiFi..");
   display.flush();
   

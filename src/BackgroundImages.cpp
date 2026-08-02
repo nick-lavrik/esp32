@@ -34,9 +34,7 @@ const uint16_t* const backgroundImages[BACKGROUND_IMAGES_COUNT] PROGMEM = {
 };
 
 const uint16_t* getBackgroundImage(uint16_t* width, uint16_t* height) {
-    static uint32_t lastUpdateMs = 0;
     static size_t currentIndex = 0;
-    uint32_t now = millis();
 
     if (_activeInstance != nullptr && _activeInstance->isLoaded()) {
         *width = _activeInstance->width();
@@ -53,6 +51,8 @@ const uint16_t* getBackgroundImage(uint16_t* width, uint16_t* height) {
     #endif
 
     #if BACKGROUND_IMAGES_COUNT > 0
+    uint32_t now = millis();
+    static uint32_t lastUpdateMs = 0;
     if (now - lastUpdateMs >= 5000) {
         currentIndex = (currentIndex + 1) % BACKGROUND_IMAGES_COUNT;
         lastUpdateMs = now;

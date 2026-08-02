@@ -17,6 +17,8 @@ public:
 
     explicit Display();
     void flip();
+    uint8_t getRotation() const { return tft_.getRotation(); }
+    void setRotation(uint8_t r) { tft_.setRotation(r);       }
 
     // Ініціалізація дисплея (обов'язково викликати в setup())
     void init();
@@ -60,6 +62,11 @@ public:
 
     size_t print(const char *string)   { return sprite_.print(string); }
     size_t println(const char *string) { return sprite_.println(string); }
+    /* void getTextBounds(const char *str, int16_t x, int16_t y,
+                    int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h)
+    {
+        sprite_.getTextBounds(str, x, y, x1, y1, w, h);
+    } */
 
     template <typename... Args>
     size_t printf(const __FlashStringHelper *ifsh, const Args&... args) {

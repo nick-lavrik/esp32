@@ -20,5 +20,6 @@
  * єдиний глобальний екземпляр, визначений в одному з
  * @see file://./../src-4848s040/TftInstance.cpp
  * @see file://./../src-st7789/TftInstance.cpp
+ * @see file://./../src-esp8266/TftInstance.cpp
  */
 extern TFT_eSPI tft; 

@@ -44,11 +44,13 @@
 #endif
 #include <LittleFS.h>
 #include <GmailSender.hpp>
+
 #if !defined(BOARD_ESP8266)
-#include <ConfigStorage.hpp>      // NVS - відсутнє на ESP8266 core
-#include <SystemReset.hpp>        // esp_system.h/esp_task_wdt.h - відсутнє на ESP8266 core
+#include <ConfigStorage.hpp>         // NVS - відсутнє на ESP8266 core
+#include <SystemReset.hpp>           // esp_system.h/esp_task_wdt.h - відсутнє на ESP8266 core
 #include <EspPartitionInspector.hpp> // esp_partition.h - відсутнє на ESP8266 core
 #endif
+
 #include <EventDispatcher.hpp>
 #include <SerialCommander.hpp>
 #include <JpegImage.hpp>
@@ -111,6 +113,12 @@ TouchScreenConfig makeTouchScreenConfig() {
 
     c.edgeZoneX = 40;
     c.edgeZoneY = 40;
+    #endif
+
+
+    #ifdef BOARD_ESP8266
+    c.screenWidth  = 128;
+    c.screenHeight = 64;
     #endif
 
     return c;
@@ -254,12 +262,12 @@ void setupTouchScreen() {
 
     Serial.println("TouchScreen controller done");
     #else
-    Serial.println("TouchScreen not found!");
+    Serial.println("TouchScreen not found (disabled)!");
     #endif
 }
 
 void setupLittleFS() {
-  #if defined(BOARD_ESP8266)
+  #if BOARD_ESP8266
   bool mounted = LittleFS.begin();
   #else
   bool mounted = LittleFS.begin(true);
@@ -506,16 +514,31 @@ void dumpLittleFSInfo() {
     Serial.println(F("\n========= LittleFS INFO ===================================="));
 
     // --- Список усіх файлів ---
+    #if BOARD_ESP8266
+    Dir root = LittleFS.openDir("/");
+    while (root.next()) {
+        Serial.printf("File: %-28s %8d bytes (%s)\n", root.fileName().c_str(), root.fileSize(), SizeFormatter::format(root.fileSize()).c_str());
+    }
+    #else
     File root = LittleFS.open("/");
     File file = root.openNextFile();
     while (file) {
-        Serial.printf("File: %-28s %8d bytes (%s)\n", file.name(), file.size(), SizeFormatter::format(file.size()));
+        Serial.printf("File: %-28s %8d bytes (%s)\n", file.name(), file.size(), SizeFormatter::format(file.size()).c_str());
         file = root.openNextFile();
     }
+    #endif
 
+    #if BOARD_ESP8266
+    FSInfo64 fsInfo64;
+    LittleFS.info64(fsInfo64);
+    int usedBytes = fsInfo64.usedBytes;
+    int totalBytes = fsInfo64.totalBytes;
+    double freePercent = ((totalBytes - usedBytes) * 100.00 / totalBytes);
+    #else
     size_t usedBytes = LittleFS.usedBytes();
     size_t totalBytes = LittleFS.totalBytes();
     double freePercent = ((totalBytes - usedBytes) * 100.00 / totalBytes);
+    #endif
 
     // --- Скільки місця залишилось ---
     Serial.printf("\nUsed: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
@@ -776,26 +799,7 @@ void drawSystemInfo() {
   // img.printf("Light: %d%%", lightPercent);
 }
 
-void setup() {
-    setupSerial();
-    setupSD();
-
-    setupEventDispatcher();
-    setupConfigStorage();
-    setupSerialCommander();
-    setupLittleFS();
-    setupDisplay();
-    setupTouchScreen();
-
-    setupWiFi();
-    setupNtpService();
-    setupBackgroundImage();
-    setupTaskCommander();
-    setupLightSensor();
-    setupMqttClient();
-    loadConfig();
-
-    display.flush();
+void setupFlipButton() {
 
     #if defined(BOOT_BUTTON_PIN)
     // GPIO - INPUT, OUTPUT, INPUT_PULLUP, or INPUT_PULLDOWN
@@ -821,8 +825,31 @@ void setup() {
             // loop (released) ...
         }
     });
+    Serial.printf("FlipButton GPIO PIN=%d\n", BOOT_BUTTON_PIN);
     #endif
+}
 
+void setup() {
+    setupSerial();
+    setupSD();
+
+    setupEventDispatcher();
+    setupConfigStorage();
+    setupSerialCommander();
+    setupLittleFS();
+    setupDisplay();
+    setupTouchScreen();
+
+    setupWiFi();
+    setupNtpService();
+    setupBackgroundImage();
+    setupTaskCommander();
+    setupLightSensor();
+    setupMqttClient();
+    setupFlipButton();
+    loadConfig();
+
+    display.flush();
     Serial.println("\n> Ready. Введіть 'list' для перегляду команд.\n");
 }
 
@@ -834,7 +861,7 @@ void loop() {
     doPing();
     display.clear();
     drawBackgroundImage();
-    drawSystemInfo();
+    // drawSystemInfo();
     if (showClock) drawTime();
 
     // sendEmail();

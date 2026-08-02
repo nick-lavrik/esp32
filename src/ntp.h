@@ -64,6 +64,29 @@ void drawTime() {
     display.print(dateStr);
 
     display.setTextFont(1);
+  #elif BOARD_ESP8266
+    // display.flip();
+    display.setTextSize(2);
+    display.setTextColor(SSD1306_WHITE);
+    int16_t x1, y1;
+    uint16_t textW, textH;
+
+    // display.getTextBounds(timeStr, 0, 0, &x1, &y1, &textW, &textH);
+    textW = display.textWidth(timeStr);
+    int x = (TFT_WIDTH - textW) / 2;
+    display.setCursor(x, 25);
+    display.print(timeStr);
+
+    // Менша дата під часом
+    char dateStr[16];
+    strftime(dateStr, sizeof(dateStr), "%d.%m.%Y", &timeinfo);
+
+    display.setTextSize(1);
+    // display.getTextBounds(dateStr, 0, 0, &x1, &y1, &textW, &textH);
+    textW = display.textWidth(dateStr);
+    x = (TFT_WIDTH - textW) / 2;
+    display.setCursor(x, 44);
+    // display.print(dateStr);
   #else
     display.setTextSize(2);
     display.setTextColor(TFT_LIGHTGREY);

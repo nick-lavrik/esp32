@@ -86,8 +86,14 @@ void Display::brightness(uint8_t percent) {
 
     #if defined(BOARD_ESP8266)
     // SSD1306 не має підсвітки - єдина доступна ручка яскравості це контраст пікселів (0..255)
-    tft_.ssd1306_command(SSD1306_SETCONTRAST);
-    tft_.ssd1306_command(map(percent, 0, 100, 0, 255));
+    //tft_.ssd1306_command(SSD1306_SETCONTRAST);
+    //tft_.ssd1306_command(map(percent, 0, 100, 0, 255));
+
+    Wire.beginTransmission(0x3C);
+    Wire.write(0x00);       // command mode
+    Wire.write(0x81);       // SETCONTRAST
+    Wire.write(map(percent, 0, 100, 0, 255));
+    Wire.endTransmission();
     #endif
 
     brightness_ = percent;

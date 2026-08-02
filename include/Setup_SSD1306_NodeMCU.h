@@ -37,15 +37,19 @@
 #define TL_DATUM 0
 #define MC_DATUM 4
 
+#define SDA_PIN 14  // D6
+#define SCL_PIN 12  // D5
+
 // "Пристрій" - сам OLED. Публічний API - підмножина bodmer/TFT_eSPI,
 // якою користується src/Display.h (init/setRotation/getRotation/width/
 // height/startWrite/endWrite).
 class TFT_eSPI : public Adafruit_SSD1306 {
 public:
-    TFT_eSPI() : Adafruit_SSD1306(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET_PIN) {}
+    TFT_eSPI() : Adafruit_SSD1306(TFT_WIDTH, TFT_HEIGHT, &Wire, OLED_RESET_PIN) {}
 
     void init() {
-        Wire.begin(); // NodeMCU: SDA=D2(GPIO4), SCL=D1(GPIO5) - типова розводка модуля
+        Wire.begin(SDA_PIN, SCL_PIN);
+        // Wire.begin(); // NodeMCU: SDA=D2(GPIO4), SCL=D1(GPIO5) - типова розводка модуля
 
         if (!begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
             Serial.println(F("[TFT_eSPI/SSD1306] begin() failed - перевір I2C адресу/проводку"));
@@ -103,7 +107,8 @@ public:
     // сумісності сигнатури з src/Display.h.
     void pushImage(int32_t, int32_t, int32_t, int32_t, const uint16_t*) {}
 
-    size_t fontHeight() { return 8 * textsize; } // вбудований шрифт Adafruit_GFX: комірка 8px по висоті
+    // size_t fontHeight() { return 8 * textsize_y; } // вбудований шрифт Adafruit_GFX: комірка 8px по висоті
+    size_t fontHeight() { return 8; } // вбудований шрифт Adafruit_GFX: комірка 8px по висоті
     void setTextFont(uint8_t) {}                 // альтернативних шрифтів на SSD1306 немає - no-op
     void setTextDatum(uint8_t datum) { _datum = datum; }
 
@@ -131,7 +136,12 @@ public:
     // як src/Display.h робить для bodmer/TFT_eSPI та LGFX_Sprite.
     template <typename... Args>
     size_t printf(const __FlashStringHelper* ifsh, const Args&... args) {
-        return this->printf(reinterpret_cast<const char*>(ifsh), args...);
+        return _tft->printf(reinterpret_cast<const char*>(ifsh), args...);
+    }
+
+    template <typename... Args>
+    size_t printf(const char* format, const Args&... args) {
+        return _tft->printf(format, args...); 
     }
 
 private:

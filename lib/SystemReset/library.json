@@ -1,0 +1,20 @@
+{
+  "name": "SystemReset",
+  "version": "0.1.0",
+  "description": "Програмний reset ESP32 та визначення причини останнього ресету (esp_system.h/esp_task_wdt.h)",
+  "keywords": ["esp32", "esp-idf", "reset", "watchdog"],
+  "frameworks": ["espidf", "arduino"],
+  "platforms": ["espressif32"],
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  },
+  "export": {
+    "include": [
+      "*.hpp",
+      "*.cpp",
+      "library.json"
+    ]
+  }
+}

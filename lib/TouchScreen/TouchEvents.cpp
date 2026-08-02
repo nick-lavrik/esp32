@@ -80,7 +80,7 @@ void TouchEvents::update(bool touched, TouchPoint point) {
         unsigned long duration = now - _startTime;
         int dx = _last.x - _start.x;
         int dy = _last.y - _start.y;
-        int distance = (int)sqrt((double)(dx * dx + dy * dy));
+        unsigned int distance = (int)sqrt((double)(dx * dx + dy * dy));
 
         if (!_holdFired) {
             if (distance >= _config.swipeMinDistancePx && duration <= _config.swipeMaxDurationMs) {
@@ -107,7 +107,7 @@ void TouchEvents::fireSwipe(int dx, int dy) {
     if (horizontal) {
         if (dx > 0) {
             // рух вправо: старт біля лівого краю -> "свайп від лівого краю"
-            if (_start.x <= _config.edgeZoneX)
+            if (abs(_start.x) <= _config.edgeZoneX)
                 _onSwipeFromLeft.invoke(_start, _last);
             else
                 _onSwipeRight.invoke(_start, _last);
