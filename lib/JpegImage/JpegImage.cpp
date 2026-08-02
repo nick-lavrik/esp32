@@ -90,8 +90,13 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
         return false;
     }
 
-    size_t bytesPerPixel = (depth == JpegColorDepth::RGB565) ? 2 : 1;
-    size_t bufferBytes = (size_t)jpegWidth * jpegHeight * bytesPerPixel;
+    size_t bufferBytes;
+    if (depth == JpegColorDepth::MONO1) {
+        bufferBytes = (size_t)((jpegWidth + 7) / 8) * jpegHeight;
+    } else {
+        size_t bytesPerPixel = (depth == JpegColorDepth::RGB565) ? 2 : 1;
+        bufferBytes = (size_t)jpegWidth * jpegHeight * bytesPerPixel;
+    }
 
     Serial.printf("[JpegImage] \"%s\" %dx%d (%d bytes) - free (%d)\n", path, jpegWidth, jpegHeight, bufferBytes, heap_caps_get_free_size(MALLOC_CAP_8BIT));
 
@@ -156,11 +161,19 @@ bool JpegImage::jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h,
         if (self->_depth == JpegColorDepth::RGB565) {
             uint16_t *destRow = (uint16_t *)self->_buffer + (destY * self->_width) + x;
             memcpy(destRow, srcRow, copyWidth * sizeof(uint16_t));
-        } else  {
+        } else if (self->_depth == JpegColorDepth::RGB332) {
             // RGB332 - конвертуємо піксель за пікселем
             uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->_width) + x;
             for (uint16_t col = 0; col < copyWidth; col++) {
                 destRow[col] = rgb565to332(srcRow[col]);
+            }
+        } else {
+            // MONO1 - поріг яскравості, пакування в біти (формат Adafruit_GFX::drawBitmap)
+            uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->rowStrideBytes());
+            for (uint16_t col = 0; col < copyWidth; col++) {
+                uint16_t destX = x + col;
+                bool white = rgb565toGray(srcRow[col]) >= self->_monoThreshold;
+                setMonoBit(destRow, destX, white);
             }
         }
     }
@@ -174,9 +187,21 @@ uint16_t JpegImage::height() const { return _height; }
 JpegColorDepth JpegImage::colorDepth() const { return _depth; }
 
 size_t JpegImage::bufferSizeBytes() const {
+    if (_depth == JpegColorDepth::MONO1) {
+        return rowStrideBytes() * _height;
+    }
     size_t bpp = (_depth == JpegColorDepth::RGB565) ? 2 : 1;
     return (size_t)_width * _height * bpp;
 }
+
+size_t JpegImage::rowStrideBytes() const {
+    if (_depth != JpegColorDepth::MONO1) {
+        return 0;
+    }
+    return (size_t)(_width + 7) / 8;
+}
+
+void JpegImage::setMonoThreshold(uint8_t threshold) { _monoThreshold = threshold; }
 
 void *JpegImage::buffer() const { return _buffer; }
 
@@ -190,6 +215,14 @@ const uint16_t *JpegImage::bufferRGB565() const {
 
 const uint8_t *JpegImage::bufferRGB332() const {
     if (_depth != JpegColorDepth::RGB332) {
+        return nullptr;
+    }
+
+    return static_cast<const uint8_t *>(_buffer);
+}
+
+const uint8_t *JpegImage::bufferMono1() const {
+    if (_depth != JpegColorDepth::MONO1) {
         return nullptr;
     }
 

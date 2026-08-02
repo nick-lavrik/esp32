@@ -48,7 +48,7 @@
 #include <ConfigStorage.hpp>
 #include <EspPartitionInspector.hpp>
 
-#if ESP32
+#if defined(ESP32)
 #include <SystemReset.hpp>           // esp_system.h/esp_task_wdt.h - відсутнє на ESP8266 core
 #endif
 
