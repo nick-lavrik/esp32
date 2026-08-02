@@ -2,9 +2,9 @@
   "name": "EspPartitionInspector",
   "version": "0.1.0",
   "description": "Огляд таблиці розділів флеш-пам'яті ESP32 (esp_partition.h)",
-  "keywords": ["esp32", "esp-idf", "partition", "flash"],
+  "keywords": ["esp32", "esp8266", "esp-idf", "partition", "flash"],
   "frameworks": ["espidf", "arduino"],
-  "platforms": ["espressif32"],
+  "platforms": ["espressif32", "espressif8266"],
   "build": {
     "flags": [
       "-std=gnu++17"

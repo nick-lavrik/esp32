@@ -41,21 +41,21 @@
 #include <SPI.h>
 #if BOARD_HAS_SD
 #include <SD.h>
+#include <SDCardInspector.hpp>
 #endif
 #include <LittleFS.h>
 #include <GmailSender.hpp>
 #include <ConfigStorage.hpp>
-#if !defined(BOARD_ESP8266)
+#include <EspPartitionInspector.hpp>
+
+#if ESP32
 #include <SystemReset.hpp>           // esp_system.h/esp_task_wdt.h - відсутнє на ESP8266 core
-#include <EspPartitionInspector.hpp> // esp_partition.h - відсутнє на ESP8266 core
 #endif
 
 #include <EventDispatcher.hpp>
 #include <SerialCommander.hpp>
 #include <JpegImage.hpp>
-#if BOARD_HAS_SD
-#include <SDCardInspector.hpp>
-#endif
+
 #include "wifi.h"
 #include "ntp.h"
 #include "ping.h"
@@ -543,12 +543,10 @@ void dumpStatus(const String& section) {
         dumpConfigStorage();
     } else if (section.equals("littlefs")) {
         dumpLittleFSInfo();
-    #if !defined(BOARD_ESP8266)
     } else if (section.equals("flash")) {
         EspPartitionInspector::printAll(Serial);
     } else if (section.equals("flash+")) {
         EspPartitionInspector::printAll(Serial, true);
-    #endif
     #if BOARD_HAS_SD
     } else if (section.equals("sd")) {
         SDCardInspector::printAll(SD, Serial);

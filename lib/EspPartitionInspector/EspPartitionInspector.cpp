@@ -1,8 +1,12 @@
 #include "EspPartitionInspector.hpp"
 
-#include <esp_partition.h>
 #include <cstdio>
 #include <cstring>
+
+// ============================================================================
+// ESP32 / ESP32-S3: реальна таблиця розділів через esp_partition_* (ESP-IDF)
+// ============================================================================
+#if !defined(ESP8266)
 
 namespace {
 
@@ -141,18 +145,7 @@ bool EspPartitionInspector::readSha256(const esp_partition_t *partition, uint8_t
     return esp_partition_get_sha256(partition, out32) == ESP_OK;
 }
 
-std::string EspPartitionInspector::sha256ToHex(const uint8_t *sha256) {
-    static const char *kHex = "0123456789abcdef";
-    std::string result;
-    result.reserve(64);
-    for (int i = 0; i < 32; ++i) {
-        result.push_back(kHex[sha256[i] >> 4]);
-        result.push_back(kHex[sha256[i] & 0x0F]);
-    }
-    return result;
-}
-
-std::vector<EspPartitionInfo> EspPartitionInspector::collectAll(bool computeSha256) {
+std::vector<EspPartitionInfo> EspPartitionInspector::collectAllEsp32(bool computeSha256) {
     std::vector<EspPartitionInfo> result;
 
     esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, nullptr);
@@ -186,8 +179,126 @@ std::vector<EspPartitionInfo> EspPartitionInspector::collectAll(bool computeSha2
     return result;
 }
 
+#else
+// ============================================================================
+// ESP8266: таблиці розділів немає. Розкладка фіксована лінкер-скриптом
+// (eagle.flash.*.ld). Тут будуємо синтетичний список регіонів з лінкер-
+// символів та Arduino ESP8266 core API (Esp.h).
+// ============================================================================
+
+#include <Arduino.h>
+#include <Esp.h>
+
+extern "C" {
+    // _FS_start/_FS_end/_FS_page/_FS_block — актуальні назви символів у
+    // сучасних версіях ESP8266 Arduino core (LittleFS/SPIFFS регіон).
+    // У старіших core ці ж символи називались _SPIFFS_start/_SPIFFS_end.
+    extern uint32_t _FS_start;
+    extern uint32_t _FS_end;
+    extern uint32_t _EEPROM_start;
+}
+
+namespace {
+    // Базова адреса, з якої лінкер-символи (вказівники в адресному просторі
+    // 0x40200000+) мапляться назад у фізичний offset у flash. Те саме
+    // обчислення використовує офіційний приклад FSBrowser з ESP8266 core.
+    constexpr uint32_t kFlashMapBase = 0x40200000;
+
+    // EEPROM-емуляція на ESP8266 (бібліотека EEPROM.h) завжди резервує
+    // рівно один сектор флеш — 4096 байт, незалежно від EEPROM.begin(size).
+    constexpr uint32_t kEepromSectorSize = 4096;
+}
+
+std::vector<EspPartitionInfo> EspPartitionInspector::collectAllEsp8266() {
+    std::vector<EspPartitionInfo> result;
+
+    const uint32_t flashChipSize = ESP.getFlashChipSize();
+    const uint32_t flashChipRealSize = ESP.getFlashChipRealSize();
+    const uint32_t sketchSize = ESP.getSketchSize();
+    const uint32_t freeSketchSpace = ESP.getFreeSketchSpace();
+    const uint32_t fsStart = reinterpret_cast<uint32_t>(&_FS_start) - kFlashMapBase;
+    const uint32_t fsEnd = reinterpret_cast<uint32_t>(&_FS_end) - kFlashMapBase;
+    const uint32_t eepromStart = reinterpret_cast<uint32_t>(&_EEPROM_start) - kFlashMapBase;
+
+    EspPartitionInfo sketch;
+    sketch.label = "sketch";
+    sketch.typeName = "app";
+    sketch.subtypeName = "current";
+    sketch.offset = 0x0;
+    sketch.size = sketchSize;
+    sketch.state = "valid-app-image"; // якщо це виконується - образ вже валідний
+    result.push_back(sketch);
+
+    EspPartitionInfo otaFree;
+    otaFree.label = "ota-free-space";
+    otaFree.typeName = "app";
+    // ESP8266 не має окремого OTA-розділу як такого: eboot просто пише новий
+    // образ у вільний простір після поточного скетчу (ESP.getFreeSketchSpace()),
+    // це не фізична партиція, а обчислене вільне місце.
+    otaFree.subtypeName = "computed-free";
+    otaFree.offset = sketchSize;
+    otaFree.size = freeSketchSpace;
+    otaFree.state = "free-space";
+    result.push_back(otaFree);
+
+    EspPartitionInfo filesystem;
+    filesystem.label = "filesystem";
+    filesystem.typeName = "data";
+    filesystem.subtypeName = "littlefs/spiffs"; // фактичний тип визначає board_build.filesystem
+    filesystem.offset = fsStart;
+    filesystem.size = fsEnd - fsStart;
+    filesystem.state = "present";
+    result.push_back(filesystem);
+
+    EspPartitionInfo eeprom;
+    eeprom.label = "eeprom";
+    eeprom.typeName = "data";
+    eeprom.subtypeName = "eeprom";
+    eeprom.offset = eepromStart;
+    eeprom.size = kEepromSectorSize;
+    eeprom.state = "present";
+    result.push_back(eeprom);
+
+    EspPartitionInfo flashTotal;
+    flashTotal.label = "flash-chip";
+    flashTotal.typeName = "info";
+    flashTotal.subtypeName = (flashChipSize == flashChipRealSize) ? "size-matches-real" : "size-mismatch";
+    flashTotal.offset = 0;
+    flashTotal.size = flashChipSize;
+    flashTotal.state = "n/a";
+    result.push_back(flashTotal);
+
+    return result;
+}
+
+#endif // !defined(ESP8266)
+
+// ============================================================================
+// Спільна частина для обох платформ
+// ============================================================================
+
+std::string EspPartitionInspector::sha256ToHex(const uint8_t *sha256) {
+    static const char *kHex = "0123456789abcdef";
+    std::string result;
+    result.reserve(64);
+    for (int i = 0; i < 32; ++i) {
+        result.push_back(kHex[sha256[i] >> 4]);
+        result.push_back(kHex[sha256[i] & 0x0F]);
+    }
+    return result;
+}
+
+std::vector<EspPartitionInfo> EspPartitionInspector::collectAll(bool computeSha256) {
+#if defined(ESP8266)
+    (void)computeSha256; // SHA-256 для синтетичних регіонів ESP8266 не рахується
+    return collectAllEsp8266();
+#else
+    return collectAllEsp32(computeSha256);
+#endif
+}
+
 void EspPartitionInspector::printOne(const EspPartitionInfo &info, Print &out) {
-    out.printf("%-12s %-6s %-10s 0x%08X 0x%08X %-5s %-9s %s\n",
+    out.printf("%-14s %-6s %-17s 0x%08X 0x%08X %-5s %-9s %s\n",
                info.label.c_str(),
                info.typeName.c_str(),
                info.subtypeName.c_str(),
@@ -198,7 +309,7 @@ void EspPartitionInspector::printOne(const EspPartitionInfo &info, Print &out) {
                info.state.c_str());
 
     if (info.sha256Valid) {
-        out.printf("             sha256: %s\n", sha256ToHex(info.sha256).c_str());
+        out.printf("               sha256: %s\n", sha256ToHex(info.sha256).c_str());
     }
 }
 
@@ -206,18 +317,22 @@ void EspPartitionInspector::printAll(Print &out, bool computeSha256) {
     char line[] = "-----------------------------------";
     auto partitions = collectAll(computeSha256);
 
+#if defined(ESP8266)
+    out.println(F("=== ESP8266 Flash Layout (synthetic, no partition table) ==="));
+#else
     out.println(F("=== Flash Partition Table ==="));
-    out.printf("%-12s %-6s %-10s %-10s %-10s %-5s %-9s %s\n",
+#endif
+    out.printf("%-14s %-6s %-17s %-10s %-10s %-5s %-9s %s\n",
                "label", "type", "subtype", "offset", "size", "encr", "readonly", "state");
-    out.printf("%.12s %.6s %.10s %.10s %.10s %.5s %.9s %s\n",
+    out.printf("%.14s %.6s %.17s %.10s %.10s %.5s %.9s %s\n",
                line, line, line, line, line, line, line, line);
 
     for (const auto &info : partitions) {
         printOne(info, out);
     }
 
-    out.printf("%.12s-%.6s-%.10s-%.10s-%.10s-%.5s-%.9s-%s\n",
+    out.printf("%.14s-%.6s-%.17s-%.10s-%.10s-%.5s-%.9s-%s\n",
                line, line, line, line, line, line, line, line);
 
-    out.printf("Total: %u partitions\n", static_cast<unsigned int>(partitions.size()));
+    out.printf("Total: %u entries\n", static_cast<unsigned int>(partitions.size()));
 }
