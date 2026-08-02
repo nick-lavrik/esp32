@@ -2,7 +2,19 @@
 
 #include <LittleFS.h>
 #include <TJpg_Decoder.h>
+
+#if defined(ESP32)
 #include <esp_heap_caps.h>
+#else
+// ESP8266 core не має esp_heap_caps.h (це ESP-IDF API) і не має PSRAM -
+// підміняємо тими самими іменами, що зводяться до звичайних malloc/free.
+static inline void* heap_caps_malloc(size_t size, uint32_t) { return malloc(size); }
+static inline void heap_caps_free(void* ptr) { free(ptr); }
+static inline size_t heap_caps_get_free_size(uint32_t) { return ESP.getFreeHeap(); }
+static inline size_t heap_caps_get_largest_free_block(uint32_t) { return ESP.getFreeHeap(); }
+#define MALLOC_CAP_SPIRAM 0
+#define MALLOC_CAP_8BIT   0
+#endif
 
 JpegImage *JpegImage::_activeInstance = nullptr;
 

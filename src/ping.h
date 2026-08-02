@@ -1,13 +1,23 @@
 #pragma once
 
-#if !__has_include(<ESPping.h>)
+#if defined(BOARD_ESP8266)
+  #define HAS_PING_LIB __has_include(<ESP8266Ping.h>)
+#else
+  #define HAS_PING_LIB __has_include(<ESPping.h>)
+#endif
+
+#if !HAS_PING_LIB
 
 void doPing() { ; }
 char* dumpPingStatsStr() { return nullptr; }
 
 #else
 
-#include <ESPping.h> 
+#if defined(BOARD_ESP8266)
+#include <ESP8266Ping.h> // вбудований в ESP8266 Arduino core, окремий lib_dep не потрібен
+#else
+#include <ESPping.h>
+#endif
 
 // --- Пінг ---
 const char* pingHost = "8.8.8.8";

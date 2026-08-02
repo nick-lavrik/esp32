@@ -39,16 +39,22 @@
 #include <Arduino.h>
 #include "Display.h"
 #include <SPI.h>
+#if BOARD_HAS_SD
 #include <SD.h>
+#endif
 #include <LittleFS.h>
 #include <GmailSender.hpp>
-#include <ConfigStorage.hpp>
+#if !defined(BOARD_ESP8266)
+#include <ConfigStorage.hpp>      // NVS - відсутнє на ESP8266 core
+#include <SystemReset.hpp>        // esp_system.h/esp_task_wdt.h - відсутнє на ESP8266 core
+#include <EspPartitionInspector.hpp> // esp_partition.h - відсутнє на ESP8266 core
+#endif
 #include <EventDispatcher.hpp>
 #include <SerialCommander.hpp>
 #include <JpegImage.hpp>
-#include <SystemReset.hpp>
-#include <EspPartitionInspector.hpp>
+#if BOARD_HAS_SD
 #include <SDCardInspector.hpp>
+#endif
 #include "wifi.h"
 #include "ntp.h"
 #include "ping.h"
@@ -128,7 +134,9 @@ bool isAutoBrightness = false;
 
 EventDispatcher dispatcher;
 TaskController scheduler;
+#if !defined(BOARD_ESP8266)
 ConfigStorage configStorage;
+#endif
 JpegImage spaceImage;
 SerialCommander commandHandler;
 WiFiClient wifiClient;
@@ -251,8 +259,13 @@ void setupTouchScreen() {
 }
 
 void setupLittleFS() {
-  if (!LittleFS.begin(true)) {
-  // if (!LittleFS.begin(true, "/littlefs", 10, "littlefs")) {
+  #if defined(BOARD_ESP8266)
+  bool mounted = LittleFS.begin();
+  #else
+  bool mounted = LittleFS.begin(true);
+  #endif
+
+  if (!mounted) {
     Serial.println("LittleFS mount failed!");
   } else {
     Serial.println("LittleFS mounted successfully (done)");
@@ -322,23 +335,36 @@ void dumpSystemInfo() {
     Serial.printf("PlatformIO: %s\n", PIO_PIOENV);
 
     // --- Модель чипа ---
+    #if defined(BOARD_ESP8266)
+    Serial.printf("Chip: ESP8266 (chipId=0x%06X)\n", ESP.getChipId());
+    Serial.printf("CPU freq: %d MHz\n", ESP.getCpuFreqMHz());
+    #else
     Serial.printf("Chip model: %s\n", ESP.getChipModel());
     Serial.printf("Chip revision: %d\n", ESP.getChipRevision());
     Serial.printf("CPU cores: %d\n", ESP.getChipCores());
     Serial.printf("CPU freq: %d MHz\n", ESP.getCpuFreqMHz());
+    #endif
 
     //  возвращает общее количество тактов процессора (CPU cycles), прошедших с момента запуска
     // Serial.printf("Cycle Count: %d\n", ESP.getCycleCount());
 
     // --- ESP-IDF ---
     Serial.printf("SDK version:  %s\n", ESP.getSdkVersion());
+    #if defined(BOARD_ESP8266)
+    Serial.printf("Core version: %s\n", ESP.getCoreVersion().c_str()); // на ESP8266 core - String
+    #else
     Serial.printf("Core version: %s\n", ESP.getCoreVersion());
+    #endif
 
     // --- Flash ---
     Serial.printf("Flash size:  %d bytes (%.2f MB)\n", ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1024.0 / 1024.0);
     Serial.printf("Flash speed: %d Hz\n", ESP.getFlashChipSpeed());
 
     // --- Внутрішня RAM (SRAM) ---
+    #if defined(BOARD_ESP8266)
+    Serial.printf("Free heap:   %d bytes\n", ESP.getFreeHeap());
+    // ESP8266 не має getHeapSize()/PSRAM - пропускаємо
+    #else
     Serial.printf("Total heap:  %d bytes\n", ESP.getHeapSize());
     Serial.printf("Free heap:   %d bytes\n", ESP.getFreeHeap());
 
@@ -348,16 +374,22 @@ void dumpSystemInfo() {
         Serial.printf("Total PSRAM: %d bytes (%.2f Mb)\n", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
         Serial.printf("Free PSRAM:  %d bytes (%.2f Mb)\n", ESP.getFreePsram() / 1024.0 / 1024.0);
     }
+    #endif
 
     Serial.println();
     // Serial.printf("WiFi: %s", WiFi.SSID);
+    #if defined(BOARD_ESP8266)
+    Serial.printf("Last reset reason: %s\n", ESP.getResetReason().c_str());
+    #else
     Serial.printf("Last reset reason: %s\n", SystemReset::getLastResetReason());
+    #endif
     Serial.printf("display.brightness = %d\n", display.brightness());
     /* Serial.println("\n======= ESP32 HEAP INFO ========");
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
     Serial.println("============================================================\n");
 }
 
+#if !defined(BOARD_ESP8266)
 void dumpConfigStorage() {
     Serial.println("\n====== ConfigStorage (NVS) =================================");
     auto entries = configStorage.listEntries();
@@ -393,7 +425,13 @@ void dumpConfigStorage() {
     Serial.printf("Всього записів: %d\n", entries.size());
     Serial.println("============================================================\n");
 }
+#else
+void dumpConfigStorage() {
+    Serial.println(F("ConfigStorage (NVS) недоступний на ESP8266 - немає esp_idf/nvs.h."));
+}
+#endif
 
+#if BOARD_HAS_SD
 void dumpSDlistDir(const char* dirname, uint8_t levels) {
     Serial.printf("Вміст директорії: %s\n", dirname);
 
@@ -462,6 +500,7 @@ void dumpSDInfo() {
 
   Serial.println(F("============================================================\n"));
 }
+#endif // BOARD_HAS_SD
 
 void dumpLittleFSInfo() {
     Serial.println(F("\n========= LittleFS INFO ===================================="));
@@ -490,15 +529,19 @@ void dumpStatus(const String& section) {
         dumpConfigStorage();
     } else if (section.equals("littlefs")) {
         dumpLittleFSInfo();
+    #if !defined(BOARD_ESP8266)
     } else if (section.equals("flash")) {
         EspPartitionInspector::printAll(Serial);
     } else if (section.equals("flash+")) {
         EspPartitionInspector::printAll(Serial, true);
+    #endif
+    #if BOARD_HAS_SD
     } else if (section.equals("sd")) {
         SDCardInspector::printAll(SD, Serial);
         // SDCardInspector::printAll(SD_MMC, Serial);
     } else if (section.equals("sd+")) {
         dumpSDInfo();
+    #endif
     } else {
         Serial.println(F("Використання: status sys|cfg|sd|sd+|flash|flash+|littlefs"));
     }
@@ -512,7 +555,14 @@ void setupSerialCommander() {
 
     commandHandler.registerCommand("reboot", "Перезавантажити пристрій", [](const String& args) {
         dispatcher.dispatch(EVT_REBOOT);
+        #if defined(BOARD_ESP8266)
+        Serial.println("[SystemReset] Rebooting...");
+        Serial.flush();
+        delay(100);
+        ESP.restart();
+        #else
         SystemReset::reboot();
+        #endif
     });
 
     commandHandler.registerCommand("scan", "Сканувати wi-fi мережі", [](const String& args) {
@@ -533,10 +583,18 @@ void setupSerialCommander() {
 
     commandHandler.registerCommand("clock", "Керування годинником: clock on|off", [](const String& args) {
         if (args.equalsIgnoreCase("on")) {
+            #if !defined(BOARD_ESP8266)
             configStorage.setBool(CFG_SHOW_CLOCK, showClock = true);
+            #else
+            showClock = true;
+            #endif
             Serial.println(F("clock ON"));
         } else if (args.equalsIgnoreCase("off")) {
+            #if !defined(BOARD_ESP8266)
             configStorage.setBool(CFG_SHOW_CLOCK, showClock = false);
+            #else
+            showClock = false;
+            #endif
             Serial.println(F("clock OFF"));
         } else {
             Serial.println(F("Керування годинником: clock on|off"));
@@ -549,16 +607,24 @@ void setupSerialCommander() {
         } else if (args.equalsIgnoreCase("auto")) {
             #if LIGHT_SENSOR_PIN > 0
             display.brightness(lightSensor.value());
+            #if !defined(BOARD_ESP8266)
             configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
             configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+            #else
+            isAutoBrightness = true;
+            #endif
             Serial.printf("[SerialCommander] isAutoBrighness = %s\n", isAutoBrightness ? "true" : "false");
             #else
             Serial.printf("[SerialCommander] isAutoBrighness **disabled**\n");
             #endif
         } else {
             display.brightness(args.toInt());
+            #if !defined(BOARD_ESP8266)
             configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
             configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
+            #else
+            isAutoBrightness = false;
+            #endif
             Serial.printf("[SerialCommander] display.brightness(%d)\n", display.brightness());
         }
     });
@@ -573,19 +639,29 @@ void setupBackgroundImage() {
     #endif
 }
 
+#if !defined(BOARD_ESP8266)
 void setupConfigStorage() {
     configStorage.begin(PIO_PIOENV);
     showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
     Serial.println("ConfigStorage init done");
 }
+#else
+void setupConfigStorage() {
+    Serial.println("ConfigStorage (NVS) недоступний на ESP8266 - налаштування не зберігаються між перезавантаженнями.");
+}
+#endif
 
 void loadConfig() {
+    #if !defined(BOARD_ESP8266)
     isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
     display.brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
     Serial.println("ConfigStorage load done");
     Serial.printf("\t- %s = %s\n", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
     Serial.printf("\t- %s = %d\n", CFG_DISPLAY_BRIGHTNESS, configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
     Serial.println();
+    #else
+    display.brightness(50); // дефолт - без персистентності (немає NVS на ESP8266)
+    #endif
 }
 
 void setupEventDispatcher() {
@@ -655,9 +731,6 @@ void drawSystemInfo() {
   // img.fillRect(0, 30, 320, 65, BG_COLOR);
 
   uint32_t freeHeap = ESP.getFreeHeap();
-  uint32_t totalHeap = ESP.getHeapSize();
-  int heapPercent = (freeHeap * 100) / totalHeap;
-
   uint32_t cpuFreq = ESP.getCpuFreqMHz();
   uint32_t uptimeSec = millis() / 1000;
 
@@ -670,8 +743,15 @@ void drawSystemInfo() {
   display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
   display.printf(F("CPU: %d MHz   Loop rate: %d/s"), cpuFreq, display.loopFrameRate());
 
+  #if defined(BOARD_ESP8266)
+  // ESP8266 не має ESP.getHeapSize() - показуємо лише вільну пам'ять
+  display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
+  display.printf("Heap free: %d KB", freeHeap / 1024);
+  #else
+  uint32_t totalHeap = ESP.getHeapSize();
   display.setCursor(10, 10 + row++ * (5 +  display.fontHeight()));
   display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, (freeHeap * 100) / totalHeap);
+  #endif
 
   char* dumpPingStr = dumpPingStatsStr();
   if (dumpPingStr) {

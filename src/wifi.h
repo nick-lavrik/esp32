@@ -1,5 +1,9 @@
 #include <Arduino.h>
+#if defined(BOARD_ESP8266)
+#include <ESP8266WiFi.h>
+#else
 #include <WiFi.h>
+#endif
 #include "Display.h"
 
 // --- WiFi / NTP ---
@@ -16,6 +20,9 @@ void setupWiFi() {
   display.print("Connecting WiFi..");
   display.flush();
   
+  #if defined(BOARD_ESP8266)
+  WiFi.mode(WIFI_STA);
+  #endif
   WiFi.begin(ssid, password);
   // WiFi.setSleep(false); // вирішуємо проблему сміття в моніторі (ttgo-t1)
   int attempts = 0;
@@ -42,6 +49,21 @@ void setupWiFi() {
   }
 }
 
+#if defined(BOARD_ESP8266)
+// ESP8266 не має wifi_auth_mode_t/WIFI_AUTH_* (це ESP32 API) - тут ENC_TYPE_*
+// з ESP8266WiFiType.h (те, що повертає WiFi.encryptionType(i) на ESP8266)
+String WiFi_getAuthTypeName(uint8_t encryptionType) {
+    switch (encryptionType) {
+        case ENC_TYPE_NONE: return String("OPEN");
+        case ENC_TYPE_WEP:  return String("WEP");
+        case ENC_TYPE_TKIP: return String("WPA_PSK (TKIP)");
+        case ENC_TYPE_CCMP: return String("WPA2_PSK (CCMP)");
+        case ENC_TYPE_AUTO: return String("AUTO");
+        default:            return String("UNKNOWN");
+    }
+}
+// ESP8266 core не надає API для визначення бітмаски протоколів (802.11b/g/n) - немає аналога.
+#else
 // Функція повертає об'єкт String, використовуючи C++17 string_view для оптимізації
 String WiFi_getAuthTypeName(wifi_auth_mode_t authMode) {
     switch (authMode) {
@@ -73,6 +95,7 @@ String WiFi_getProtocolName(uint8_t protocol_bitmap) {
     protocols.trim(); // Прибираємо зайві пробіли на кінці
     return protocols;
 }
+#endif
 
 void WiFi_scan() {
     // Переведення Wi-Fi у режим станції та відключення від поточних мереж
@@ -94,6 +117,14 @@ void WiFi_scan() {
         Serial.println("==================================================");
 
         for (int16_t i = 0; i < networkCount; ++i) {
+            #if defined(BOARD_ESP8266)
+            // ESP8266 не має WiFi.getNetworkInfo() (це ESP32 API) - окремі геттери
+            String ssid = WiFi.SSID(i);
+            uint8_t encryptionType = WiFi.encryptionType(i);
+            int32_t rssi = WiFi.RSSI(i);
+            uint8_t* bssid = WiFi.BSSID(i);
+            int32_t channel = WiFi.channel(i);
+            #else
             // Змінні для збереження інформації через посилання
             String ssid;
             uint8_t encryptionType;
@@ -103,6 +134,7 @@ void WiFi_scan() {
 
             // Витягуємо всі базові дані за один виклик за допомогою вбудованого методу
             WiFi.getNetworkInfo(i, ssid, encryptionType, rssi, bssid, channel);
+            #endif
 
             if (ssid.length() == 0) {
                 ssid = "[Hidden Network]";
@@ -114,7 +146,11 @@ void WiFi_scan() {
                      bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
 
             String signalStr = String(rssi) + " dBm";
+            #if defined(BOARD_ESP8266)
+            String securityStr = WiFi_getAuthTypeName(encryptionType);
+            #else
             String securityStr = WiFi_getAuthTypeName(static_cast<wifi_auth_mode_t>(encryptionType));
+            #endif
             String channelStr = String(channel);
 
             // Виведення зібраних String-даних

@@ -84,6 +84,12 @@ void Display::brightness(uint8_t percent) {
     // tft_.setBrightness(map(percent, 0, 100, 10, 255)); // делегуємо в LGFX Light_PWM, пін вже сконфігурований у Setup_ST7701_4848S040.h
     #endif
 
+    #if defined(BOARD_ESP8266)
+    // SSD1306 не має підсвітки - єдина доступна ручка яскравості це контраст пікселів (0..255)
+    tft_.ssd1306_command(SSD1306_SETCONTRAST);
+    tft_.ssd1306_command(map(percent, 0, 100, 0, 255));
+    #endif
+
     brightness_ = percent;
 }
 

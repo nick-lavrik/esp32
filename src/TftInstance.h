@@ -6,9 +6,12 @@
 //
 //   env:esp32-st7789      -> нічого додаткового не треба (за замовчуванням)
 //   env:esp32-4848s040    -> build_flags: -DBOARD_4848S040
+//   env:esp8266           -> build_flags: -DBOARD_ESP8266
 
 #if defined(BOARD_4848S040)
   #include "Setup_ST7701_4848S040.h" // визначає клас LGFX + alias TFT_eSPI
+#elif defined(BOARD_ESP8266)
+  #include "Setup_SSD1306_NodeMCU.h" // TFT_eSPI/TFT_eSprite-сумісна обгортка над Adafruit_SSD1306
 #else
   #include <TFT_eSPI.h>              // справжній bodmer/TFT_eSPI (ST7789, SPI)
 #endif
