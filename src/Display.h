@@ -70,7 +70,8 @@ public:
 
     template <typename... Args>
     size_t printf(const __FlashStringHelper *ifsh, const Args&... args) {
-        return sprite_.printf(ifsh, args...); 
+        // return sprite_.printf(reinterpret_cast<const char*>(ifsh), args...); 
+        return sprite_.printf((PGM_P)ifsh, args...); 
     }
 
     template <typename... Args>

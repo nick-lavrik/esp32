@@ -50,7 +50,7 @@ public:
 
     // Повертає причину останнього ресету у вигляді рядка
     static const char* getLastResetReason() {
-        #if ESP32
+        #if defined(ESP32)
         esp_reset_reason_t reason = esp_reset_reason();
         switch (reason) {
             case ESP_RST_POWERON:   return "Power-on reset";
@@ -67,13 +67,13 @@ public:
         }
         #endif
 
-        #if ESP8266
+        #if defined(ESP8266)
         static char buff[32];
         snprintf(buff, sizeof(buff), "%s", ESP.getResetReason().c_str());
         return buff;
         #endif
 
-        return nullptr;
+        return "Unknown reset reason*";
     }
 
     // Зручний метод для логування причини ресету при старті

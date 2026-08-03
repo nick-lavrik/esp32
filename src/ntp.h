@@ -1,5 +1,5 @@
 #include <time.h>
-#if ESP32
+#if defined(ESP32)
 #include "esp_sntp.h"
 #endif
 #include "Display.h"

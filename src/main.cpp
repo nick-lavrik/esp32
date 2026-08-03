@@ -262,7 +262,7 @@ void setupTouchScreen() {
 }
 
 void setupLittleFS() {
-  #if ESP8266
+  #if defined(ESP8266)
   bool mounted = LittleFS.begin();
   #else
   bool mounted = LittleFS.begin(true);
@@ -513,7 +513,7 @@ void dumpLittleFSInfo() {
     }
     #endif
 
-    #if ESP8266
+    #if defined(ESP8266)
     FSInfo64 fsInfo64;
     LittleFS.info64(fsInfo64);
     int usedBytes = fsInfo64.usedBytes;
@@ -825,7 +825,7 @@ void loop() {
     doPing();
     display.clear();
     drawBackgroundImage();
-    // drawSystemInfo();
+    drawSystemInfo();
     if (showClock) drawTime();
 
     // sendEmail();
