@@ -1,5 +1,6 @@
 #include "NtpService.hpp"
 #include <algorithm>
+#include <stdio.h>
 #include <time.h>
 
 #if defined(ESP8266)
@@ -120,4 +121,80 @@ void NtpService::_notifyAll(struct timeval* tv) {
             entry.callback(tv);
         }
     }
+}
+
+const char* NtpService::_formatTime(const char* format, char* buffer, size_t max,
+                                     time_t sec, long usec, bool applyTimeZone) {
+    if (buffer == nullptr || max == 0) {
+        return buffer;
+    }
+    if (format == nullptr) {
+        buffer[0] = '\0';
+        return buffer;
+    }
+
+    // Нормалізація usec про всяк випадок (не довіряємо викликачу).
+    if (usec < 0) usec = 0;
+    if (usec > 999999) usec = 999999;
+
+    char msDigits[4]; // "000".."999" + '\0'
+    char usDigits[7]; // "000000".."999999" + '\0'
+    snprintf(msDigits, sizeof(msDigits), "%03ld", usec / 1000);
+    snprintf(usDigits, sizeof(usDigits), "%06ld", usec);
+
+    // Крок 1: розгортаємо власні плейсхолдери %Q (мс) і %q (мкс) у проміжний
+    // формат-рядок на стеку - strftime() їх не знає і в кращому разі
+    // проігнорує, а в гіршому - скопіює як є.
+    constexpr size_t kMaxExpandedFormat = 160;
+    char expanded[kMaxExpandedFormat];
+    size_t out = 0;
+
+    for (const char* p = format; *p != '\0' && out < kMaxExpandedFormat - 1; ++p) {
+        if (p[0] == '%' && p[1] == 'Q') {
+            for (const char* d = msDigits; *d != '\0' && out < kMaxExpandedFormat - 1; ++d) {
+                expanded[out++] = *d;
+            }
+            ++p;
+        } else if (p[0] == '%' && p[1] == 'q') {
+            for (const char* d = usDigits; *d != '\0' && out < kMaxExpandedFormat - 1; ++d) {
+                expanded[out++] = *d;
+            }
+            ++p;
+        } else {
+            expanded[out++] = *p;
+        }
+    }
+    expanded[out] = '\0';
+
+    // Крок 2: решту (%Y %H %M %S ...) віддаємо стандартному strftime().
+    // localtime_r/gmtime_r - реентерабельні (thread-safe), на відміну від
+    // localtime()/gmtime(), які використовують внутрішній static-буфер.
+    struct tm ti;
+    if (applyTimeZone) {
+        localtime_r(&sec, &ti);
+    } else {
+        gmtime_r(&sec, &ti);
+    }
+
+    if (strftime(buffer, max, expanded, &ti) == 0) {
+        buffer[0] = '\0'; // strftime() повертає 0 і при порожньому результаті, і при переповненні
+    }
+    return buffer;
+}
+
+const char* NtpService::ftime(const char* format, char* buffer, size_t max, const struct timeval* tv) {
+    if (tv == nullptr) {
+        struct timeval _tv;
+        gettimeofday(&_tv, nullptr);
+        return _formatTime(format, buffer, max, _tv.tv_sec, _tv.tv_usec,  /*applyTimeZone=*/true);
+    }
+
+    return _formatTime(format, buffer, max, tv->tv_sec, tv->tv_usec, /*applyTimeZone=*/true);
+}
+
+const char* NtpService::ftime(const char* format, char* buffer, size_t max, uint64_t uptimeMs) {
+    time_t sec = static_cast<time_t>(uptimeMs / 1000);
+    long usec = static_cast<long>((uptimeMs % 1000) * 1000);
+
+    return _formatTime(format, buffer, max, sec, usec, /*applyTimeZone=*/false);
 }

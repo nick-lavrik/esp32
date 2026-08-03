@@ -17,22 +17,27 @@ void onTimeSync(struct timeval *tv) {
     localtime_r(&now, &ti);
     char buf[32];
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
-    Serial.printf("[NTP] Синхронізовано: %s.%08ld\n", buf, tv->tv_usec); // usewc - 6 digits (!)
+    Serial.printf("[NTP^] Синхронізовано: %s.%08ld\n", buf, tv->tv_usec); // usewc - 6 digits (!)
 }
 
 extern NtpService ntp;
 void setupNtpService() {
     // Callback викликається при кожній успішній синхронізації.
     ntp.addCallback([](struct timeval* tv) {
-        time_t now = tv->tv_sec;
-        struct tm ti;
-        localtime_r(&now, &ti);
-        char buf[48] = "";
-        strftime(buf+strlen(buf), sizeof(buf)-strlen(buf), "%Y-%m-%d %H:%M:%S", &ti);
-        snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), ".%06ld", tv->tv_usec);
+        // time_t now = tv->tv_sec;
+        // struct tm ti;
+        // localtime_r(&now, &ti);
+
+        char buf[80] = "";
+        // strftime(buf+strlen(buf), sizeof(buf)-strlen(buf), "%Y-%m-%d %H:%M:%S", &ti);
+        // snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), ".%06ld", tv->tv_usec);
         // snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), " %03d-%03d", static_cast<uint16_t>(tv->tv_usec / 1000), static_cast<uint16_t>(tv->tv_usec % 1000));
-        strftime(buf+strlen(buf), sizeof(buf)-strlen(buf), " %Z", &ti);
-        Serial.printf("[NTP] Синхронізовано: %s\n", buf);
+        // strftime(buf+strlen(buf), sizeof(buf)-strlen(buf), " %Z", &ti);
+        // Serial.printf("[NTP] Синхронізовано: %s\n", buf); buf[0] = 0;
+        // strftime(buf+strlen(buf), sizeof(buf)-strlen(buf), "[NTP#2] %Y-%m-%d %H:%M:%S", &ti);
+        // Serial.printf("[NTP2] Синхронізовано: %s\n", buf); buf[0] = 0;
+        // Serial.printf("[NTP] Синхронізовано: %s\n", ntp.ftime("%Y-%m-%d %H:%M:%S.%q", buf, sizeof(buf)));  // millis() - ще не оновлено в перший раз (!)
+        Serial.printf("[NTP] Синхронізовано: %s\n", ntp.ftime("%Y-%m-%d %H:%M:%S.%q", buf, sizeof(buf), tv));
     });
 
     // --- Варіант 1: POSIX TZ-рядок (рекомендовано, DST рахується автоматично) ---
@@ -44,14 +49,14 @@ void setupNtpService() {
 
     ntp.beginTz("EET-2EEST,M3.5.0/3,M10.5.0/4",   // Europe/Kyiv
                 "pool.ntp.org", "ua.pool.ntp.org", "time.cloudflare.com",
-                600000); // 60 sec - (default: 3600000)
+                600000); // 60 sec - (default: 3_600_000)
 }
 
 extern Display display;
 
 void drawTime() {
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo, 1)) { 
+  if (!ntp.isSynced()) { 
     display.setTextSize(2);
     display.setTextColor(TFT_RED);
     display.setCursor(max(0, display.width() - 10 - display.textWidth("Time sync failed!")), 8);
@@ -62,7 +67,7 @@ void drawTime() {
   }
 
   char timeStr[9];
-  strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+  ntp.ftime("%H:%M:%S", timeStr, sizeof(timeStr));
 
   #if BOARD_TTGO_T1
   // time
@@ -84,7 +89,7 @@ void drawTime() {
 
     // date
     char dateStr[16];
-    strftime(dateStr, sizeof(dateStr), "%d.%m.%Y", &timeinfo);
+    ntp.ftime("%d.%m.%Y", dateStr, sizeof(dateStr));
 
     display.setTextFont(4);
     display.setTextSize(1);
@@ -117,7 +122,7 @@ void drawTime() {
 
     // Менша дата під часом
     char dateStr[16];
-    strftime(dateStr, sizeof(dateStr), "%d.%m.%Y", &timeinfo);
+    ntp.ftime("%d.%m.%Y", dateStr, sizeof(dateStr));
 
     display.setTextSize(1);
     // display.getTextBounds(dateStr, 0, 0, &x1, &y1, &textW, &textH);

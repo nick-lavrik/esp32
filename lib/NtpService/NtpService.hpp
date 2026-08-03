@@ -58,6 +58,22 @@ public:
     // true, якщо системний час вже було синхронізовано хоча б раз.
     bool isSynced() const { return _synced; }
 
+    // Форматує реальний (wall-clock) час з struct timeval - результат буде
+    // локальним (враховує TZ, встановлений через begin()/beginTz()/setTimeZone()).
+    // Розширює стандартний strftime() двома плейсхолдерами:
+    //   %Q - мілісекунди (3 цифри, 000-999)
+    //   %q - мікросекунди (6 цифр, 000000-999999)
+    // Не використовує heap/String, лише стек - безпечно викликати з будь-якого
+    // FreeRTOS-таску. buffer/format можуть співпадати з локальним стек-масивом
+    // викликача. Повертає buffer (для зручного inline-використання).
+    static const char* ftime(const char* format, char* buffer, size_t max,
+                            const struct timeval* tv = nullptr); // nullptr -> gettimeofday() всередині
+
+    // Форматує "аптайм" (час від старту пристрою, за замовчуванням millis()).
+    // Ті самі %Q/%q плейсхолдери підтримуються.
+    static const char* ftime(const char* format, char* buffer, size_t max,
+                            uint64_t uptimeMs); // без default - аптайм лише явно, напр. ftime(fmt, buf, max, millis())
+
 private:
     struct CallbackEntry {
         NtpCallbackHandle handle;
@@ -76,6 +92,11 @@ private:
     void _notifyAll(struct timeval* tv);
 
     void _subscribeSyncCallback(uint32_t syncIntervalMs);
+
+    // Спільна реалізація для обох ftime()-overload-ів.
+    // applyTimeZone=true -> localtime_r (реальний час), false -> gmtime_r (тривалість).
+    static const char* _formatTime(const char* format, char* buffer, size_t max,
+                                    time_t sec, long usec, bool applyTimeZone);
 
     std::vector<CallbackEntry> _callbacks;
     NtpCallbackHandle _nextHandle = 1;
@@ -102,33 +123,30 @@ void setup() {
 
     // Callback викликається при кожній успішній синхронізації.
     ntp.addCallback([](struct timeval* tv) {
-        time_t now = tv->tv_sec;
-        struct tm ti;
-        localtime_r(&now, &ti);
-        char buf[32];
-        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", &ti);
-        Serial.printf("[NTP] Синхронізовано: %s\n", buf);
+        char buf[40];
+        Serial.printf("[NTP] Синхронізовано: %s\n",
+                      NtpService::ftime("%Y-%m-%d %H:%M:%S.%Q", buf, sizeof(buf), *tv));
     });
 
     // --- Варіант 1: POSIX TZ-рядок (рекомендовано, DST рахується автоматично) ---
-    // Список готових рядків для будь-якого міста:
-    //   https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
-    // Специфікація формату TZ:
-    //   https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
     ntp.beginTz("EET-2EEST,M3.5.0/3,M10.5.0/4",   // Europe/Kyiv
                 "pool.ntp.org", "ua.pool.ntp.org", "time.cloudflare.com");
 
     // --- Варіант 2: ручний offset (без DST) ---
     // ntp.begin(2 * 3600, 0, "pool.ntp.org", "ua.pool.ntp.org");
-
-    // Зміна зони пізніше "на льоту" (наприклад, юзер обрав інший регіон в UI):
-    // NtpService::setTimeZone("EST5EDT,M3.2.0,M11.1.0"); // America/New_York
 }
 
 void loop() {
     if (ntp.isSynced()) {
-        // ...
+        struct timeval tv;
+        gettimeofday(&tv, nullptr);
+        char buf[40];
+        Serial.println(NtpService::ftime("%H:%M:%S.%q", buf, sizeof(buf), tv));
     }
+
+    // Аптайм (з мікросекундною роздільністю до 000, бо джерело - millis()):
+    char up[32];
+    Serial.println(NtpService::ftime("%H:%M:%S.%Q", up, sizeof(up))); // час за замовч. - millis()
 }
 
 =============================================================================
