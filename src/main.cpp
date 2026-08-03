@@ -47,11 +47,7 @@
 #include <GmailSender.hpp>
 #include <ConfigStorage.hpp>
 #include <EspPartitionInspector.hpp>
-
-#if defined(ESP32)
 #include <SystemReset.hpp>           // esp_system.h/esp_task_wdt.h - відсутнє на ESP8266 core
-#endif
-
 #include <EventDispatcher.hpp>
 #include <SerialCommander.hpp>
 #include <JpegImage.hpp>
@@ -66,6 +62,7 @@
 #include <PubSubClient.h>
 #include <AnalogSensor.hpp>
 #include <MqttClient.hpp>
+#include <NtpService.hpp>
 #include "setup.h"
 
 #if BOARD_HAS_TOUCH
@@ -139,6 +136,7 @@ MqttConfig makeMqttConfig() {
 bool showClock = true;
 bool isAutoBrightness = false;
 
+NtpService ntp;
 EventDispatcher dispatcher;
 TaskController scheduler;
 ConfigStorage configStorage;
@@ -383,11 +381,7 @@ void dumpSystemInfo() {
 
     Serial.println();
     // Serial.printf("WiFi: %s", WiFi.SSID);
-    #if defined(BOARD_ESP8266)
-    Serial.printf("Last reset reason: %s\n", ESP.getResetReason().c_str());
-    #else
-    Serial.printf("Last reset reason: %s\n", SystemReset::getLastResetReason());
-    #endif
+    Serial.printf("Last Reset Reason: %s\n", SystemReset::getLastResetReason());
     Serial.printf("display.brightness = %d\n", display.brightness());
     /* Serial.println("\n======= ESP32 HEAP INFO ========");
     heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */

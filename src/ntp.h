@@ -1,28 +1,63 @@
 #include <time.h>
+#if ESP32
+#include "esp_sntp.h"
+#endif
 #include "Display.h"
-
+#include <NtpService.hpp>
 const char* ntpServer1 = "1.pool.ntp.org";
 const char* ntpServer2 = "ua.pool.ntp.org";
 const char* ntpServer3 = "pool.ntp.org";
+
 const long  gmtOffset_sec = 2 * 3600;
 const int   daylightOffset_sec = 3600;
 
+void onTimeSync(struct timeval *tv) {
+    time_t now = tv->tv_sec;
+    struct tm ti;
+    localtime_r(&now, &ti);
+    char buf[32];
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
+    Serial.printf("[NTP] Синхронізовано: %s.%08ld\n", buf, tv->tv_usec); // usewc - 6 digits (!)
+}
+
+extern NtpService ntp;
 void setupNtpService() {
-    // Serial.printf("setupNtpService() %d\n", millis());
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3);
-    // Serial.printf("setupNtpService() %d done\n", millis());
+    // Callback викликається при кожній успішній синхронізації.
+    ntp.addCallback([](struct timeval* tv) {
+        time_t now = tv->tv_sec;
+        struct tm ti;
+        localtime_r(&now, &ti);
+        char buf[48] = "";
+        strftime(buf+strlen(buf), sizeof(buf)-strlen(buf), "%Y-%m-%d %H:%M:%S", &ti);
+        snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), ".%06ld", tv->tv_usec);
+        // snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), " %03d-%03d", static_cast<uint16_t>(tv->tv_usec / 1000), static_cast<uint16_t>(tv->tv_usec % 1000));
+        strftime(buf+strlen(buf), sizeof(buf)-strlen(buf), " %Z", &ti);
+        Serial.printf("[NTP] Синхронізовано: %s\n", buf);
+    });
+
+    // --- Варіант 1: POSIX TZ-рядок (рекомендовано, DST рахується автоматично) ---
+    // Список готових рядків для будь-якого міста:
+    //   https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
+    //
+    // Специфікація формату TZ:
+    //   https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
+
+    ntp.beginTz("EET-2EEST,M3.5.0/3,M10.5.0/4",   // Europe/Kyiv
+                "pool.ntp.org", "ua.pool.ntp.org", "time.cloudflare.com",
+                600000); // 60 sec - (default: 3600000)
 }
 
 extern Display display;
 
 void drawTime() {
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) { 
+  if (!getLocalTime(&timeinfo, 1)) { 
     display.setTextSize(2);
     display.setTextColor(TFT_RED);
     display.setCursor(max(0, display.width() - 10 - display.textWidth("Time sync failed!")), 8);
     display.print("Time sync failed");
-    Serial.println("Time sync failed!");
+    display.setTextSize(1);
+    Serial.printf("[ntp:%ld] Time sync failed!\n", millis());
     return;
   }
 
@@ -32,6 +67,7 @@ void drawTime() {
   #if BOARD_TTGO_T1
   // time
     display.setTextFont(7); // великий "цифровий" шрифт (тільки цифри та ":")
+    // display.setTextSize(1);
 
     int textW = display.textWidth(timeStr);
     int textH = display.fontHeight();
@@ -51,10 +87,11 @@ void drawTime() {
     strftime(dateStr, sizeof(dateStr), "%d.%m.%Y", &timeinfo);
 
     display.setTextFont(4);
+    display.setTextSize(1);
 
     textW = display.textWidth(dateStr);
     x = (display.width() - textW) / 2;
-    y = 100;
+    y = 95;
 
     // tft.fillRect(0, y, tft.width(), tft.fontHeight(), TFT_BLACK);
 
@@ -63,6 +100,7 @@ void drawTime() {
     display.setCursor(x, y);
     display.print(dateStr);
 
+    display.setTextSize(1);
     display.setTextFont(1);
   #elif BOARD_ESP8266
     // display.flip();

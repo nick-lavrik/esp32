@@ -1,0 +1,24 @@
+# Кастомна partition-таблиця для ttgo-t1 (без OTA)
+#
+# Flash: 4 MB (0x400000)
+# OTA не використовується — один app-розділ замість двох (ota_0/ota_1).
+#
+# ВАЖЛИВО: app-розділ навмисно розташований на стандартній адресі 0x10000,
+# бо PlatformIO (platform-espressif32) у поточній версії ігнорує
+# board_upload.offset_address і завжди пише firmware.bin саме на 0x10000.
+#
+# Розділ під LittleFS названо (і типізовано) як 'spiffs' — стандартна
+# назва за замовчуванням для LittleFS.begin() без додаткових параметрів.
+#
+# Розділ 'coredump' потрібен esp_core_dump (Arduino-ESP32), щоб зберігати
+# дамп пам'яті після краху для подальшого аналізу через espcoredump.py.
+# Без нього застосунок працює нормально, лише пише попередження при бут.
+#
+# Ідентична розбивка до partitions_st7789.csv (той самий чіп/flash).
+#
+# Name,      Type,  SubType,   Offset,    Size,      Flags
+phy_init,    data,  phy,       0x009000,  0x001000,
+app,         app,   factory,   0x010000,  0x1E3000,
+coredump,    data,  coredump,  0x1F3000,  0x010000,
+nvs,         data,  nvs,       0x203000,  0x07D000,
+spiffs,      data,  spiffs,    0x280000,  0x180000,

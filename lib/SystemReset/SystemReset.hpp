@@ -1,8 +1,10 @@
 #pragma once
 
 #include <Arduino.h>
+#if defined(ESP32)
 #include "esp_system.h"
 #include "esp_task_wdt.h"
+#endif
 
 // SystemReset — статичний клас-утиліта для програмного перезавантаження ESP32
 // та визначення причини останнього ресету.
@@ -20,6 +22,7 @@ public:
     // і треба гарантовано перезавантажити його навіть без штатного шляху.
     // API відповідає esp_task_wdt_config_t (ESP-IDF v5+).
     static inline void rebootViaWatchdog(uint32_t timeoutMs = 1000) {
+        #if defined(ESP32)
         Serial.println("[SystemReset] Rebooting via watchdog...");
         Serial.flush();
 
@@ -42,10 +45,12 @@ public:
         while (true) {
             // навмисно нічого не робимо, чекаємо на спрацювання watchdog
         }
+        #endif
     }
 
     // Повертає причину останнього ресету у вигляді рядка
-    static inline const char* getLastResetReason() {
+    static const char* getLastResetReason() {
+        #if ESP32
         esp_reset_reason_t reason = esp_reset_reason();
         switch (reason) {
             case ESP_RST_POWERON:   return "Power-on reset";
@@ -60,6 +65,15 @@ public:
             case ESP_RST_SDIO:      return "SDIO reset";
             default:                return "Unknown reset reason";
         }
+        #endif
+
+        #if ESP8266
+        static char buff[32];
+        snprintf(buff, sizeof(buff), "%s", ESP.getResetReason().c_str());
+        return buff;
+        #endif
+
+        return nullptr;
     }
 
     // Зручний метод для логування причини ресету при старті
