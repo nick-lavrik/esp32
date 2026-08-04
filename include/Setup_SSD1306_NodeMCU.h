@@ -19,6 +19,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Logger.hpp>
 
 // Кольори (SSD1306_BLACK=0 / SSD1306_WHITE=1 - тому конвертація "кольору"
 // у монохромний піксель звичайним booleanʼом (color != 0) без табличного мапінгу)

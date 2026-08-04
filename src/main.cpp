@@ -265,7 +265,7 @@ void setupTouchScreen() {
 
     Logger::info("TouchScreen controller done");
     #else
-    Logger::info()"TouchScreen not found (disabled)!");
+    Logger::info("TouchScreen not found (disabled)!");
     #endif
 }
 
