@@ -47,5 +47,5 @@ private:
     static String trim(const String& s);
     static void splitFirstToken(const String& line, String& outName, String& outArgs);
 
-    TLogger _logger{"cmd"};
+    const TLogger _logger{"cmd"};
 };

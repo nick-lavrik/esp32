@@ -9,5 +9,5 @@ public:
     explicit EspLogger(const char* tag);
 
 protected:
-    void log(LogLevel level, const char* fmt, va_list args) override;
+    void log(LogLevel level, const char* fmt, va_list args) const override;
 };

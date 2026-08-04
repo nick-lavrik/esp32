@@ -6,7 +6,7 @@
 
 namespace {
 
-TLogger& backend() {
+const TLogger& backend() {
   static TLogger instance(LOGGER_DEFAULT_TAG);
   return instance;
 }

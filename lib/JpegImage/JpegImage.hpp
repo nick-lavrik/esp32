@@ -88,7 +88,7 @@ private:
     bool _usedPsram;
     uint8_t _monoThreshold = 128;
 
-    TLogger _logger{"jpeg"};
+    const TLogger _logger{"jpeg"};
 
     static JpegImage *_activeInstance;
 };

@@ -4,6 +4,7 @@
 #define HAS_GMAIL_SENDER 1
 #include <Arduino.h>
 #include <ESP_Mail_Client.h>
+#include <TLogger.hpp>
 
 // Клас-обгортка над ESP-Mail-Client для відправки email через Gmail SMTP.
 // Використовується однаково в обох проектах: esp32-st7789 та esp32-4848s040.
@@ -31,6 +32,8 @@ private:
     SMTPSession _smtp;
 
     static void smtpCallback(SMTP_Status status);
+
+    const TLogger _logger{"gmail"};
 };
 #else
 #define HAS_GMAIL_SENDER 0

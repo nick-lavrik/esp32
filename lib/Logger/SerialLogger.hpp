@@ -11,7 +11,7 @@ public:
     explicit SerialLogger(const char* tag, Print& output = Serial);
 
 protected:
-    void log(LogLevel level, const char* fmt, va_list args) override;
+    void log(LogLevel level, const char* fmt, va_list args) const override;
 
 private:
     static const char* levelName(LogLevel level);

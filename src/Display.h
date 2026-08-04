@@ -91,5 +91,5 @@ private:
     int height_ = 0;
     uint8_t brightness_ = 50; // percent!
 
-    TLogger _logger{"tft"};
+    const TLogger _logger{"tft"};
 };

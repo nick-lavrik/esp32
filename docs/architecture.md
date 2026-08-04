@@ -46,7 +46,7 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 Власні внутрішні бібліотеки в `lib/`: `EventDispatcher`, `TaskController` (cron/job scheduler),
 `ConfigStorage` (NVS-конфіг), `TouchScreen` (events/swipe/hold + point mapping),
 `JpegImage`, `AnalogSensor`, `MqttClient`, `NtpService`, `HttpServer`, `SDCardInspector`,
-`EspPartitionInspector`, `SystemReset`, `SerialCommander`, `Logger`, `HeapMonitor`.
+`EspPartitionInspector`, `SystemReset`, `SerialCommander`, `Logger`, `HeapMonitor`, `RwLock`.
 
 ## Функціонал (актуальний, за `src/main.cpp`)
 

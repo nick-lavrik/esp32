@@ -62,5 +62,5 @@ private:
     uint32_t _lastPrintMs;
 
     bool _psramAvailable() const;
-    TLogger _logger{"heapmonitor"};
+    const TLogger _logger{"heapmonitor"};
 };

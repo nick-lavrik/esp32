@@ -17,7 +17,7 @@ const char* SerialLogger::levelName(LogLevel level) {
     }
 }
 
-void SerialLogger::log(LogLevel level, const char* fmt, va_list args) {
+void SerialLogger::log(LogLevel level, const char* fmt, va_list args) const {
     if (level > LogLevelManager::instance().getLevel(_tag)) {
         return;
     }

@@ -4,7 +4,7 @@
 
 EspLogger::EspLogger(const char* tag) : ILogger(tag) {}
 
-void EspLogger::log(LogLevel level, const char* fmt, va_list args) {
+void EspLogger::log(LogLevel level, const char* fmt, va_list args) const {
     if (level > LogLevelManager::instance().getLevel(_tag)) {
         return;
     }

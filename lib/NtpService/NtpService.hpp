@@ -149,7 +149,7 @@ private:
     NtpCallbackHandle _nextHandle = 1;
     bool _synced = false;
 
-    TLogger _logger{"ntp"};
+    const TLogger _logger{"ntp"};
 
     // Singleton-вказівник потрібен, бо C-callback API (esp_sntp / settimeofday_cb)
     // не підтримує передачу user-контексту (this).

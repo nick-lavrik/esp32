@@ -17,6 +17,11 @@ void GmailSender::begin() {
 
     _smtp.debug(0); // 0 = без детального логу бібліотеки, 1 - з логом
     _smtp.callback(smtpCallback);
+
+    /* auto l = &_logger;
+    _smtp.callback(+[l](SMTP_Status status) -> void { 
+        l.debug(status.info());
+    }); */
 }
 
 void GmailSender::smtpCallback(SMTP_Status status) {
@@ -43,12 +48,12 @@ bool GmailSender::sendEmail(const char* recipientEmail, const char* subject, con
     msg.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
 
     if (!_smtp.connect(&config)) {
-        Logger::error("SMTP connect failed: %s\n", _smtp.errorReason().c_str());
+        _logger.error("SMTP connect failed: %s\n", _smtp.errorReason().c_str());
         return false;
     }
 
     if (!MailClient.sendMail(&_smtp, &msg)) {
-        Logger::error("Send failed: %s\n", _smtp.errorReason().c_str());
+        _logger.error("Send failed: %s\n", _smtp.errorReason().c_str());
         return false;
     }
 

@@ -90,7 +90,7 @@ private:
     bool _holdFired = false;
     unsigned long _lastTapTime = 0;
 
-    TLogger _logger{"touch"};
+    const TLogger _logger{"touch"};
 
     // Списки колбеків - динамічні (std::vector), без обмеження кількості
     // підписників на один івент.
