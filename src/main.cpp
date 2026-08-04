@@ -513,7 +513,7 @@ void dumpLittleFSInfo() {
     Logger::info("========= LittleFS INFO ====================================");
 
     // --- Список усіх файлів ---
-    #if BOARD_ESP8266
+    #if defined(ESP8266)
     Dir root = LittleFS.openDir("/");
     while (root.next()) {
         Logger::info("File: %-28s %8d bytes (%s)", root.fileName().c_str(), root.fileSize(), SizeFormatter::format(root.fileSize()).c_str());
