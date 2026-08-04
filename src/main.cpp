@@ -65,6 +65,7 @@
 #include <NtpService.hpp>
 #include <HttpServer.hpp>
 #include <LittleFsStaticSource.hpp>
+#include <RwLock.hpp>
 
 #include "setup.h"
 
@@ -800,8 +801,23 @@ void setupFlipButton() {
 }
 
 void setup() {
+    rwlock::registerObject(Serial);
     setupSerial();
     setupSD();
+    auto h = rwlock::wlock(Serial, 10);
+    if (h) {
+        Serial.println("Hello, rwlock::aquared");
+        if (rwlock::wlock(Serial, 5)) {
+            Serial.println("something went wrong.....");
+        } else {
+            Serial.println("exclusive lock as expected!");
+        }
+        rwlock::unlock(h);
+    } else {
+        Serial.println("exclusive lock fail!");
+    }
+
+    delay(10000);
 
     setupEventDispatcher();
     setupConfigStorage();
