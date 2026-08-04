@@ -1,7 +1,7 @@
 #if __has_include(<XPT2046_Touchscreen.h>)
 #include <XPT2046_Touchscreen.h>
 #include <TouchController.h>
-
+#include <Logger.hpp>
 
 // --- Тач ---
 #define TOUCH_CS   33
@@ -28,7 +28,8 @@ void TouchController::setup(TouchEvents* events) {
   touchSPI.begin(25, 39, 32, TOUCH_CS);
   ts.begin(touchSPI);
   ts.setRotation(TFT_ROTATION); // 3
-  Serial.println(F("TouchController::XPT2046 setup done"));
+
+  Logger::info("TouchController::XPT2046 setup done");
 
   _events = events;
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
+#include <TLogger.hpp>
 #include "TouchScreenConfig.h"
 #include "CallbackList.h"
 #include "TouchPointMapper.h"
@@ -64,7 +65,7 @@ public:
             auto p = ts.getPoint();
             TouchPoint raw{p.x, p.y};
             TouchPoint point = _mapper ? _mapper->map(raw) : raw;
-            Serial.printf("touch raw{x: %d y:%d} screen{x: %d y: %d}\n", raw.x, raw.y, point.x, point.y);
+            _logger.debug("raw{x: %d y:%d} screen{x: %d y: %d}", raw.x, raw.y, point.x, point.y);
 
             update(true, point);
         } else {
@@ -88,6 +89,8 @@ private:
     unsigned long _startTime = 0;
     bool _holdFired = false;
     unsigned long _lastTapTime = 0;
+
+    TLogger _logger{"touch"};
 
     // Списки колбеків - динамічні (std::vector), без обмеження кількості
     // підписників на один івент.

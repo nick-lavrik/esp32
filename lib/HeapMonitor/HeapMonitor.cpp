@@ -43,14 +43,14 @@ void HeapMonitor::printNow() {
     multi_heap_info_t internalInfo;
     heap_caps_get_info(&internalInfo, MALLOC_CAP_INTERNAL);
 
-    Serial.println(F("---- HeapMonitor ----"));
+    _logger.info("---- HeapMonitor ----");
 
-    Serial.printf("Default   | free: %8u | largest block: %8u | min ever: %8u\n",
+    _logger.info("Default   | free: %8u | largest block: %8u | min ever: %8u",
                   (unsigned)defaultInfo.total_free_bytes,
                   (unsigned)defaultInfo.largest_free_block,
                   (unsigned)defaultInfo.minimum_free_bytes);
 
-    Serial.printf("Internal  | free: %8u | largest block: %8u | min ever: %8u\n",
+    _logger.info("Internal  | free: %8u | largest block: %8u | min ever: %8u",
                   (unsigned)internalInfo.total_free_bytes,
                   (unsigned)internalInfo.largest_free_block,
                   (unsigned)internalInfo.minimum_free_bytes);
@@ -59,13 +59,13 @@ void HeapMonitor::printNow() {
         multi_heap_info_t psramInfo;
         heap_caps_get_info(&psramInfo, MALLOC_CAP_SPIRAM);
 
-        Serial.printf("PSRAM     | free: %8u | largest block: %8u | min ever: %8u\n",
+        _logger.info("PSRAM     | free: %8u | largest block: %8u | min ever: %8u",
                       (unsigned)psramInfo.total_free_bytes,
                       (unsigned)psramInfo.largest_free_block,
                       (unsigned)psramInfo.minimum_free_bytes);
     } else {
-        Serial.println(F("PSRAM     | not available"));
+        _logger.info("PSRAM     | not available");
     }
 
-    Serial.println(F("---------------------"));
+    _logger.info("---------------------");
 }

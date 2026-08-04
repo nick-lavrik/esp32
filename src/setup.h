@@ -1,21 +1,27 @@
 #pragma once
 
 #include <Arduino.h>
+#include <RwLock.hpp>
+#include <Logger.hpp>
 #include "Display.h"
 
 extern Display display;
 
 void setupSerial() {
+    rwlock::registerObject(Serial);
     Serial.begin(115200);
     delay(200);
-    Serial.printf("\n\n-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*\n");
+    Logger::info("");
+    Logger::info("");
+    Logger::info("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
     #if defined(BOARD_ESP8266)
     // ESP8266 не має ESP.getChipModel() (це ESP32 API) - виводимо ChipId замість нього
-    Serial.printf(" ESP8266 (chipId=0x%06X) (%s)\n", ESP.getChipId(), PIO_PIOENV);
+    Logger::info(" ESP8266 (chipId=0x%06X) (%s)\n", ESP.getChipId(), PIO_PIOENV);
     #else
-    Serial.printf(" %s (%s)\n", ESP.getChipModel(), PIO_PIOENV );
+    Logger::info(" %s (%s)", ESP.getChipModel(), PIO_PIOENV );
     #endif
-    Serial.printf("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*\n\n");
+    Logger::info("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
+    Logger::info("");
 }
 
 void setupDisplay() {
@@ -25,5 +31,5 @@ void setupDisplay() {
 
     display.init();
     //display.autobrightness(true);
-    Serial.println("Display setup done.");
+    Logger::info("Display setup done.");
 }

@@ -1,5 +1,6 @@
 #include "ConfigStorage.hpp"
 #include <cstring>
+#include <Logger.hpp>
 
 ConfigStorage::ConfigStorage() {}
 
@@ -10,7 +11,7 @@ bool ConfigStorage::isKeyValid(const char* key) {
 }
 
 void ConfigStorage::warnInvalidKey(const char* key, const char* methodName) {
-    Serial.printf("[ConfigStorage::%s] Некоректний ключ \"%s\" (довжина %d, максимум %d символів)\n",
+    Logger::info("[ConfigStorage::%s] Некоректний ключ \"%s\" (довжина %d, максимум %d символів)",
                   methodName,
                   key ? key : "(nullptr)",
                   key ? strlen(key) : 0,
@@ -183,7 +184,7 @@ bool ConfigStorage::ensureNamespaceDir() const {
 bool ConfigStorage::writeFile(const String& path, const void* data, size_t len) {
     File f = LittleFS.open(path, "w");
     if (!f) {
-        Serial.printf("[ConfigStorage] INFO: не вдалось відкрити \"%s\" на запис\n", path.c_str());
+        Logger::warn("[ConfigStorage] INFO: не вдалось відкрити \"%s\" на запис", path.c_str());
         return false;
     }
     size_t written = f.write(reinterpret_cast<const uint8_t*>(data), len);
@@ -193,12 +194,12 @@ bool ConfigStorage::writeFile(const String& path, const void* data, size_t len) 
 
 size_t ConfigStorage::readFile(const String& path, void* outData, size_t maxLen) {
     if (!LittleFS.exists(path)) {
-        Serial.printf("[ConfigStorage] INFO: файл \"%s\" відсутній, повертаю значення за замовчуванням\n", path.c_str());
+        Logger::info("[ConfigStorage] INFO: файл \"%s\" відсутній, повертаю значення за замовчуванням", path.c_str());
         return 0;
     }
     File f = LittleFS.open(path, "r");
     if (!f) {
-        Serial.printf("[ConfigStorage] INFO: не вдалось відкрити \"%s\" на читання\n", path.c_str());
+        Logger::info("[ConfigStorage] INFO: не вдалось відкрити \"%s\" на читання", path.c_str());
         return 0;
     }
     size_t available = f.size();
@@ -217,9 +218,9 @@ bool ConfigStorage::begin(const char* namespaceName, const char* partitionLabel)
     partitionLabel_ = partitionLabel; // на ESP8266 не використовується, зберігаємо для сумісності API
 
     if (!LittleFS.begin()) {
-        Serial.println("[ConfigStorage] INFO: LittleFS.begin() не вдався, форматую...");
+        Logger::warn("[ConfigStorage] INFO: LittleFS.begin() не вдався, форматую...");
         if (!LittleFS.format() || !LittleFS.begin()) {
-            Serial.println("[ConfigStorage] Помилка: LittleFS недоступна");
+            Logger::error("[ConfigStorage] Помилка: LittleFS недоступна");
             return false;
         }
     }
@@ -263,7 +264,7 @@ String ConfigStorage::getString(const char* key, const String& defaultValue) {
     if (!isKeyValid(key)) { warnInvalidKey(key, "getString"); return defaultValue; }
     String path = pathFor(key, "str");
     if (!LittleFS.exists(path)) {
-        Serial.printf("[ConfigStorage] INFO: файл \"%s\" відсутній, повертаю значення за замовчуванням\n", path.c_str());
+        Logger::warn("[ConfigStorage] INFO: файл \"%s\" відсутній, повертаю значення за замовчуванням", path.c_str());
         return defaultValue;
     }
     File f = LittleFS.open(path, "r");

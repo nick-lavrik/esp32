@@ -33,7 +33,7 @@ void SerialCommander::update() {
             buffer_ += c;
             if (buffer_.length() > maxLineLength_) {
                 // захист від переповнення буфера, якщо термінатор не прийшов
-                serial_.println(F("[SerialCommandHandler] Рядок занадто довгий, буфер очищено"));
+                _logger.warn("Рядок занадто довгий, буфер очищено");
                 buffer_ = "";
             }
         }
@@ -54,16 +54,15 @@ void SerialCommander::processLine(const String& line) {
     printUnknown(name);
 }
 
-void SerialCommander::printUnknown(const String& name) const {
-    serial_.print(F("Невідома команда: "));
-    serial_.println(name);
-    serial_.println(F("Введіть 'list' для перегляду доступних команд"));
+void SerialCommander::printUnknown(const String& name) {
+    _logger.warn("Невідома команда: %s", name);
+    _logger.info("Введіть 'list' для перегляду доступних команд");
 }
 
-void SerialCommander::printList() const {
-    serial_.println(F("Доступні команди:"));
+void SerialCommander::printList() {
+    _logger.info("Доступні команди:");
     for (const auto& cmd : commands_) {
-        serial_.printf("  %-10s - %s\n", cmd.name.c_str(), cmd.description.c_str());
+        _logger.info("  %-12s - %s", cmd.name.c_str(), cmd.description.c_str());
     }
 }
 

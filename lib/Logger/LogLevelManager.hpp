@@ -22,5 +22,9 @@ private:
     LogLevelManager() = default;
 
     std::map<std::string, LogLevel> _levels;
+    #ifdef DEFAULT_LOG_LEVEL
+    LogLevel _defaultLevel = static_cast<LogLevel>(DEFAULT_LOG_LEVEL);
+    #else
     LogLevel _defaultLevel = LogLevel::Info;
+    #endif
 };

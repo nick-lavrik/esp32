@@ -21,8 +21,8 @@ void Display::init() {
     sprite_.setSwapBytes(true);
     void* buf = sprite_.createSprite(width_, height_);
     if (buf == nullptr) {
-        Serial.println("[Display] ПОМИЛКА: createSprite() не зміг виділити пам'ять!");
-        Serial.printf("[Display] Потрібно: %d байт, вільно (heap): %u байт\n", width_ * height_ * 2, ESP.getFreeHeap());
+        _logger.error("ПОМИЛКА: createSprite() не зміг виділити пам'ять!");
+        _logger.error("Потрібно: %d байт, вільно (heap): %u байт", width_ * height_ * 2, ESP.getFreeHeap());
     }
 
     sprite_.fillSprite(TFT_BLACK);
@@ -31,7 +31,7 @@ void Display::init() {
 }
 
 void Display::flip() {
-    Serial.printf("TFT.setRotation(%d)\n", (tft_.getRotation() + 2) % 4);
+    _logger.info("TFT.setRotation(%d)", (tft_.getRotation() + 2) % 4);
     tft_.setRotation((tft_.getRotation() + 2) % 4);
 }
 

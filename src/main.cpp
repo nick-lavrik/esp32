@@ -47,7 +47,7 @@
 #include <GmailSender.hpp>
 #include <ConfigStorage.hpp>
 #include <EspPartitionInspector.hpp>
-#include <SystemReset.hpp>           // esp_system.h/esp_task_wdt.h - відсутнє на ESP8266 core
+#include <SystemReset.hpp>
 #include <EventDispatcher.hpp>
 #include <SerialCommander.hpp>
 #include <JpegImage.hpp>
@@ -66,6 +66,7 @@
 #include <HttpServer.hpp>
 #include <LittleFsStaticSource.hpp>
 #include <RwLock.hpp>
+#include <Logger.hpp>
 
 #include "setup.h"
 
@@ -173,19 +174,19 @@ AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 3);
 #endif
 
 #if BOARD_HAS_TOUCH
-void onTouchLog(TouchPoint p)                              { Serial.printf("Touch: %d, %d\n", p.x, p.y); }
-void onHoldHandler(TouchPoint p, unsigned long ms)         { Serial.printf("Hold at %d,%d for %lu ms\n", p.x, p.y, ms); }
-void onDblClickHandler(TouchPoint p)                       { Serial.printf("Double click: %d, %d\n", p.x, p.y); }
+void onTouchLog(TouchPoint p)                              { Logger::debug("Touch: %d, %d", p.x, p.y); }
+void onHoldHandler(TouchPoint p, unsigned long ms)         { Logger::debug("Hold at %d,%d for %lu ms", p.x, p.y, ms); }
+void onDblClickHandler(TouchPoint p)                       { Logger::debug("Double click: %d, %d\n", p.x, p.y); }
 
-void onSwipeLeftHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe LEFT"); }
-void onSwipeRightHandler(TouchPoint start, TouchPoint end) { Serial.println("Swipe RIGHT"); }
-void onSwipeUpHandler(TouchPoint start, TouchPoint end)    { Serial.println("Swipe UP"); }
-void onSwipeDownHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe DOWN"); }
+void onSwipeLeftHandler(TouchPoint start, TouchPoint end)  { Logger::debug("Swipe LEFT"); }
+void onSwipeRightHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe RIGHT"); }
+void onSwipeUpHandler(TouchPoint start, TouchPoint end)    { Logger::debug("Swipe UP"); }
+void onSwipeDownHandler(TouchPoint start, TouchPoint end)  { Logger::debug("Swipe DOWN"); }
 
-void onSwipeFromBottomHandler(TouchPoint start, TouchPoint end) { Serial.println("Swipe FROM BOTTOM (напр., відкрити меню)"); }
-void onSwipeFromTopHandler(TouchPoint start, TouchPoint end)    { Serial.println("Swipe FROM TOP (напр., шторка сповіщень)"); }
-void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end)   { Serial.println("Swipe FROM LEFT (напр., назад)"); }
-void onSwipeFromRightHandler(TouchPoint start, TouchPoint end)  { Serial.println("Swipe FROM RIGHT (напр., бокова панель)"); }
+void onSwipeFromBottomHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe FROM BOTTOM (напр., відкрити меню)"); }
+void onSwipeFromTopHandler(TouchPoint start, TouchPoint end)    { Logger::debug("Swipe FROM TOP (напр., шторка сповіщень)"); }
+void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end)   { Logger::debug("Swipe FROM LEFT (напр., назад)"); }
+void onSwipeFromRightHandler(TouchPoint start, TouchPoint end)  { Logger::debug("Swipe FROM RIGHT (напр., бокова панель)"); }
 
 void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
     // TODO: restore brightness before trigger autobrightness = off (!)
@@ -212,7 +213,7 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
         1 // з інтервалом 1 мілісекунда, а не на кожному tick()
     );
 
-    Serial.printf("\nONHOLD FRAME !!!\n\n");
+    Logger::info(" ------ !!! ONHOLD FRAME !!! ------ ");
 }
 #endif
 
@@ -226,7 +227,7 @@ void setupTouchScreen() {
     #if BOARD_HAS_TOUCH
     touch.setTouchPointMapper(&mapper);
     touchController.setup(&touch);
-    Serial.println("TouchScreen setup done");
+    Logger::debug("TouchScreen setup done");
 
     touchController.events().onHold(onHoldDrawPoints);
 
@@ -238,7 +239,7 @@ void setupTouchScreen() {
         } else {
             display.brightness(min(100, display.brightness() + 10)); 
         }
-        Serial.printf(F("Brightness: %d%% (increase)\n"), display.brightness());
+        Logger::debug("Brightness: %d%% (increase)", display.brightness());
     });
 
     touchController.events().onSwipeDown([](TouchPoint s, TouchPoint e) { 
@@ -247,7 +248,7 @@ void setupTouchScreen() {
         } else {
             display.brightness(max(1, display.brightness() - 10));
         }
-        Serial.printf(F("Brightness: %d%% (decrease)\n"), display.brightness());
+        Logger::debug("Brightness: %d%% (decrease)", display.brightness());
     });
 
     touchController.events().onTouch(onTouchLog);
@@ -262,9 +263,9 @@ void setupTouchScreen() {
     touchController.events().onSwipeFromLeft(onSwipeFromLeftHandler);
     touchController.events().onSwipeFromRight(onSwipeFromRightHandler);
 
-    Serial.println("TouchScreen controller done");
+    Logger::info("TouchScreen controller done");
     #else
-    Serial.println("TouchScreen not found (disabled)!");
+    Logger::info()"TouchScreen not found (disabled)!");
     #endif
 }
 
@@ -276,20 +277,21 @@ void setupLittleFS() {
   #endif
 
   if (!mounted) {
-    Serial.println("LittleFS mount failed!");
+    Logger::error("LittleFS mount failed!");
   } else {
-    Serial.println("LittleFS mounted successfully (done)");
+    Logger::info("LittleFS mounted successfully (done)");
   }
 }
 
 void setupMqttClient() {
+    static TLogger _logger{"mqtt"};
     mqtt.begin();
 
-    mqtt.publish(MQTT_LWT_TOPIC, "156");
+    mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message");
 
     // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
-    mqtt.addStringListener("mykola-lavryk:devices/+/status", [](const char* topic, const char* payload) -> bool {
-        Serial.printf("[MQTT] topic:%s payload:%s\n", topic, payload);
+    mqtt.addStringListener("mykola-lavryk/devices/+/status", [](const char* topic, const char* payload) -> bool {
+        _logger.info("topic:%s payload:%s", topic, payload);
         return true;
     });
 
@@ -306,15 +308,14 @@ void setupMqttClient() {
 
     scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
     commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
-        Serial.printf("[MQTT] isConnected = %s\n", mqtt.isConnected() ? "yes" : "no");
-        Serial.println();
+        _logger.info("isConnected = %s", mqtt.isConnected() ? "yes" : "no");
     });
 
     static uint32_t i = 0;
-    mqtt.addNumberListener<uint32_t>("mykola-lavrik:int32/#", [](const char* t, uint32_t v) { Serial.printf("[MQTT] %s int32=%d\n", t, v); });
-    scheduler.addCronTask(1 * 60 * 1000UL, []() { mqtt.publishNumber<uint32_t>("mykola-lavrik:int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
+    mqtt.addNumberListener<uint32_t>("mykola-lavrik/int32/#", [](const char* t, uint32_t v) {_logger.info("topic:%s int32:%d", t, v); });
+    scheduler.addCronTask(1 * 60 * 1000UL, []() { mqtt.publishNumber<uint32_t>("mykola-lavrik/int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
 
-    Serial.printf("[MQTT] %s:%d (%s)\n", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID);
+    _logger.info("%s:%d (%s) ...", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID);
 }
 
 void setupSD() {
@@ -324,89 +325,96 @@ void setupSD() {
 
     for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
         if (SD.begin(SD_CS, SPI, 4000000)) {
-        Serial.printf(F("SD card init done (%d/%d)\n"), attempt, maxAttempts);
+        Logger::info("SD card init done (%d/%d)", attempt, maxAttempts);
         return;
         }
         delay(100);
     }
 
-    Serial.println(F("SD init fail."));
+    Logger::error("SD init fail.");
   #else
-    Serial.println(F("SD disabled."));
+    Logger::warn("SD disabled.");
   #endif
 
   return;
 }
 
 void dumpSystemInfo() {
-    Serial.println("\n======== ESP32 CHIP INFO ==================================");
+    Logger::info("======== ESP32 CHIP INFO ==================================");
 
     // --- PlatformIO environment ---
-    Serial.printf("PlatformIO: %s\n", PIO_PIOENV);
+    Logger::info("PlatformIO: %s", PIO_PIOENV);
 
     // --- Модель чипа ---
     #if defined(BOARD_ESP8266)
-    Serial.printf("Chip: ESP8266 (chipId=0x%06X)\n", ESP.getChipId());
-    Serial.printf("CPU freq: %d MHz\n", ESP.getCpuFreqMHz());
+    Logger::info("Chip: ESP8266 (chipId=0x%06X)", ESP.getChipId());
+    Logger::info("CPU freq: %d MHz", ESP.getCpuFreqMHz());
     #else
-    Serial.printf("Chip model: %s\n", ESP.getChipModel());
-    Serial.printf("Chip revision: %d\n", ESP.getChipRevision());
-    Serial.printf("CPU cores: %d\n", ESP.getChipCores());
-    Serial.printf("CPU freq: %d MHz\n", ESP.getCpuFreqMHz());
+    Logger::info("Chip model: %s", ESP.getChipModel());
+    Logger::info("Chip revision: %d", ESP.getChipRevision());
+    Logger::info("CPU cores: %d", ESP.getChipCores());
+    Logger::info("CPU freq: %d MHz", ESP.getCpuFreqMHz());
     #endif
 
     //  возвращает общее количество тактов процессора (CPU cycles), прошедших с момента запуска
-    // Serial.printf("Cycle Count: %d\n", ESP.getCycleCount());
+    // Logger::info("Cycle Count: %d", ESP.getCycleCount());
 
     // --- ESP-IDF ---
-    Serial.printf("SDK version:  %s\n", ESP.getSdkVersion());
+    Logger::info("SDK version:  %s", ESP.getSdkVersion());
     #if defined(BOARD_ESP8266)
-    Serial.printf("Core version: %s\n", ESP.getCoreVersion().c_str()); // на ESP8266 core - String
+    Logger::info("Core version: %s", ESP.getCoreVersion().c_str()); // на ESP8266 core - String
     #else
-    Serial.printf("Core version: %s\n", ESP.getCoreVersion());
+    Logger::info("Core version: %s", ESP.getCoreVersion());
     #endif
 
     // --- Flash ---
-    Serial.printf("Flash size:  %d bytes (%.2f MB)\n", ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1024.0 / 1024.0);
-    Serial.printf("Flash speed: %d Hz\n", ESP.getFlashChipSpeed());
+    Logger::info("Flash size:  %d bytes (%.2f MB)", ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1024.0 / 1024.0);
+    Logger::info("Flash speed: %d Hz", ESP.getFlashChipSpeed());
 
     // --- Внутрішня RAM (SRAM) ---
     #if defined(BOARD_ESP8266)
-    Serial.printf("Free heap:   %d bytes\n", ESP.getFreeHeap());
+    Logger::info("Free heap:   %d bytes", ESP.getFreeHeap());
     // ESP8266 не має getHeapSize()/PSRAM - пропускаємо
     #else
-    Serial.printf("Total heap:  %d bytes\n", ESP.getHeapSize());
-    Serial.printf("Free heap:   %d bytes\n", ESP.getFreeHeap());
+    Logger::info("Total heap:  %d bytes", ESP.getHeapSize());
+    Logger::info("Free heap:   %d bytes", ESP.getFreeHeap());
 
     // --- PSRAM ---
-    Serial.printf("PSRAM found: %s\n", psramFound() ? "YES" : "NO");
+    Logger::info("PSRAM found: %s", psramFound() ? "YES" : "NO");
     if (psramFound()) {
-        Serial.printf("Total PSRAM: %d bytes (%.2f Mb)\n", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
-        Serial.printf("Free PSRAM:  %d bytes (%.2f Mb)\n", ESP.getFreePsram() / 1024.0 / 1024.0);
+        Logger::info("Total PSRAM: %d bytes (%.2f Mb)", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
+        Logger::info("Free PSRAM:  %d bytes (%.2f Mb)", ESP.getFreePsram() / 1024.0 / 1024.0);
     }
     #endif
 
-    Serial.println();
-    // Serial.printf("WiFi: %s", WiFi.SSID);
-    Serial.printf("Last Reset Reason: %s\n", SystemReset::getLastResetReason());
-    Serial.printf("display.brightness = %d\n", display.brightness());
-    /* Serial.println("\n======= ESP32 HEAP INFO ========");
-    heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді */
-    Serial.println("============================================================\n");
+    Logger::info("");
+    Logger::info("WiFi SSID:%s", WiFi.SSID().c_str());
+    if (WiFi.status() == WL_CONNECTED) {
+        Logger::info("WiFi   IP: %s", WiFi.localIP().toString());
+    } else {
+        Logger::info("WiFi disconnected....");
+    }
+    Logger::info("Last Reset Reason: %s", SystemReset::getLastResetReason());
+    Logger::info("display.brightness = %d", display.brightness());
+    /*
+    Logger::info("======= ESP32 HEAP INFO ========");
+    heap_caps_print_heap_info(MALLOC_CAP_DEFAULT); // друкує все одразу у форматованому вигляді
+    */
+    Logger::info("============================================================");
 }
 
 void dumpConfigStorage() {
-    Serial.println("\n====== ConfigStorage (NVS) =================================");
+    Logger::info("====== ConfigStorage (NVS) =================================");
     auto entries = configStorage.listEntries();
  
     if (entries.empty()) {
-        Serial.println(F("(empty.)"));
+        Logger::info("(empty.)");
     }
  
     for (const auto& e : entries) {
         switch (e.type) {
             case NVS_TYPE_U8:
-                Serial.printf("  key: %-16s type: %-4s value: %s\n", e.key.c_str(), e.typeName.c_str(), configStorage.getBool(e.key.c_str()) ? "true" : "false");
+                Logger::info("  key: %-16s type: %-4s value: %s", e.key.c_str(), e.typeName.c_str(), configStorage.getBool(e.key.c_str()) ? "true" : "false");
                 break;
             case NVS_TYPE_I8:
             case NVS_TYPE_U16:
@@ -415,29 +423,29 @@ void dumpConfigStorage() {
             case NVS_TYPE_I32:
             case NVS_TYPE_U64:
             case NVS_TYPE_I64:
-                Serial.printf("  key: %-16s type: %-4s value: %d\n", e.key.c_str(), e.typeName.c_str(), configStorage.getInt(e.key.c_str()));
+                Logger::info("  key: %-16s type: %-4s value: %d", e.key.c_str(), e.typeName.c_str(), configStorage.getInt(e.key.c_str()));
                 break;
             case NVS_TYPE_STR:
-                Serial.printf("  key: %-16s type: %-4s value: %s\n", e.key.c_str(), e.typeName.c_str(), configStorage.getString(e.key.c_str()).c_str());
+                Logger::info("  key: %-16s type: %-4s value: %s", e.key.c_str(), e.typeName.c_str(), configStorage.getString(e.key.c_str()).c_str());
                 break;
             default:
-                Serial.printf("  key: %-16s type: %-4s\n", e.key.c_str(), e.typeName.c_str());
+                Logger::info("  key: %-16s type: %-4s", e.key.c_str(), e.typeName.c_str());
                 break;
         }
     }
 
-    Serial.println();
-    Serial.printf("Всього записів: %d\n", entries.size());
-    Serial.println("============================================================\n");
+    Logger::info("");
+    Logger::info("Всього записів: %d", entries.size());
+    Logger::info("============================================================");
 }
 
 #if BOARD_HAS_SD
 void dumpSDlistDir(const char* dirname, uint8_t levels) {
-    Serial.printf("Вміст директорії: %s\n", dirname);
+    Logger::info("Вміст директорії: %s", dirname);
 
     File root = SD.open(dirname);
     if (!root || !root.isDirectory()) {
-        Serial.println("  (не вдалось відкрити директорію)");
+        Logger::info("  (не вдалось відкрити директорію)");
         return;
     }
 
@@ -445,17 +453,17 @@ void dumpSDlistDir(const char* dirname, uint8_t levels) {
     int maxFiles = 50;
     while (file && --maxFiles) {
         if (file.isDirectory()) {
-            Serial.printf("  DIR : %-30s       ****\n", file.name());
+            Logger::info("  DIR : %-30s       ****", file.name());
             if (levels) {
                 dumpSDlistDir(file.path(), levels - 1);
             }
         } else {
-            Serial.printf("  FILE: %-30s SIZE: %u\n", file.name(), file.size());
+            Logger::info("  FILE: %-30s SIZE: %u", file.name(), file.size());
         }
         file = root.openNextFile();
     }
     if (file && !maxFiles) {
-        Serial.println("  ...");
+        Logger::info("  ...");
     }
 }
 
@@ -465,57 +473,56 @@ void dumpSDInfo() {
   //digitalWrite(33, HIGH); // Отключаем TOUCH_CS
   //digitalWrite(5, HIGH);  // SD_CS = HIGH (пока отключен)
 
-  Serial.println(F("\n========= SD Card Info ====================================="));
+  Logger::info("========= SD Card Info =====================================");
 
   uint8_t cardType = SD.cardType();
 
   if (cardType == CARD_NONE) {
-    Serial.println(F("❌ Картку не вставлено (або тип не визначено)."));
-    Serial.println(F("============================================================\n"));
+    Logger::info("❌ Картку не вставлено (або тип не визначено).");
+    Logger::info("============================================================");
     return;
   }
 
-  Serial.println(F("✅ Картку успішно знайдено!"));
+  Logger::info("✅ Картку успішно знайдено!");
 
   // Виводимо тип для деталізації
-  Serial.print("Тип картки: ");
-  if (cardType == CARD_MMC) Serial.println("MMC");
-  else if (cardType == CARD_SD) Serial.println("SDSC");
-  else if (cardType == CARD_SDHC) Serial.println("SDHC");
-  else Serial.println(F("Невідомий тип"));
+  if (cardType == CARD_MMC) Logger::info("Тип картки: %s", "MMC");
+  else if (cardType == CARD_SD) Logger::info("Тип картки: %s", "SDSC");
+  else if (cardType == CARD_SDHC) Logger::info("Тип картки: %s", "SDHC");
+  else Logger::info("Тип картки: %s", "Невідомий тип");
 
-  Serial.println(F("------------------------------------------------------------\n"));
+  Logger::info("------------------------------------------------------------");
   dumpSDlistDir("/", 2);
-  Serial.println(F("------------------------------------------------------------\n"));
+  Logger::info("------------------------------------------------------------");
 
   // Виводимо розмір картки
   uint64_t cardSize = SD.cardSize() / (1024 * 1024);
   // Serial.printf(F("Розмір картки: %llu MB\n"), cardSize);
-  Serial.printf(F("Розмір картки: %s\n"), SizeFormatter::format(SD.cardSize()));
-  Serial.printf(F("Зайнято місця: %s (%.2f%%)\n"), SizeFormatter::format(SD.usedBytes()), SD.usedBytes() * 100.0 / SD.cardSize());
-  Serial.printf(F("Вільно місця:  %s (%.2f%%)\n"), 
+  Logger::info("Розмір картки: %s", SizeFormatter::format(SD.cardSize()));
+  Logger::info("Зайнято місця: %s (%.2f%%)", SizeFormatter::format(SD.usedBytes()), SD.usedBytes() * 100.0 / SD.cardSize());
+  Logger::info("Вільно місця:  %s (%.2f%%)", 
     SizeFormatter::format(SD.cardSize() - SD.usedBytes()),
     (SD.cardSize() - SD.usedBytes()) * 100.0 / SD.cardSize()
   );
 
-  Serial.println(F("============================================================\n"));
+  Logger::info("============================================================");
 }
 #endif // BOARD_HAS_SD
 
 void dumpLittleFSInfo() {
-    Serial.println(F("\n========= LittleFS INFO ===================================="));
+    Logger::info("========= LittleFS INFO ====================================");
 
     // --- Список усіх файлів ---
     #if BOARD_ESP8266
     Dir root = LittleFS.openDir("/");
     while (root.next()) {
-        Serial.printf("File: %-28s %8d bytes (%s)\n", root.fileName().c_str(), root.fileSize(), SizeFormatter::format(root.fileSize()).c_str());
+        Logger::info("File: %-28s %8d bytes (%s)", root.fileName().c_str(), root.fileSize(), SizeFormatter::format(root.fileSize()).c_str());
     }
     #else
     File root = LittleFS.open("/");
     File file = root.openNextFile();
     while (file) {
-        Serial.printf("File: %-28s %8d bytes (%s)\n", file.name(), file.size(), SizeFormatter::format(file.size()).c_str());
+        Logger::info("File: %-28s %8d bytes (%s)", file.name(), file.size(), SizeFormatter::format(file.size()).c_str());
         file = root.openNextFile();
     }
     #endif
@@ -533,8 +540,9 @@ void dumpLittleFSInfo() {
     #endif
 
     // --- Скільки місця залишилось ---
-    Serial.printf("\nUsed: %d / Total: %d / Free: %d bytes | Free: %.3f%%\n", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
-    Serial.println(F("============================================================\n"));
+    Logger::info("");
+    Logger::info("Used: %d / Total: %d / Free: %d bytes | Free: %.3f%%", usedBytes, totalBytes, totalBytes - usedBytes, freePercent);
+    Logger::info("============================================================");
 }
 
 void dumpStatus(const String& section) {
@@ -556,13 +564,12 @@ void dumpStatus(const String& section) {
         dumpSDInfo();
     #endif
     } else {
-        Serial.println(F("Використання: status sys|cfg|sd|sd+|flash|flash+|littlefs"));
+        Logger::warn("Використання: status sys|cfg|sd|sd+|flash|flash+|littlefs");
     }
-    Serial.print("> ");
 }
 
 void setupSerialCommander() {
-    commandHandler.registerCommand("status", "Показати статус пристрою: status sys|cfg|sd|flash|flash+|littlefs", [](const String& args) {
+    commandHandler.registerCommand("status", "Показати статус пристрою: status sys|cfg|sd|sd+|flash|flash+|littlefs", [](const String& args) {
         dumpStatus(args);
     });
 
@@ -586,29 +593,29 @@ void setupSerialCommander() {
 
     commandHandler.registerCommand("led", "Керування світлодіодом: led on|off", [](const String& args) {
         if (args.equalsIgnoreCase("on")) {
-            Serial.println(F("LED увімкнено"));
+            Logger::info("LED увімкнено");
         } else if (args.equalsIgnoreCase("off")) {
-            Serial.println(F("LED вимкнено"));
+            Logger::info("LED вимкнено");
         } else {
-            Serial.println(F("Використання: led on|off"));
+            Logger::info("Використання: led on|off");
         }
     });
 
     commandHandler.registerCommand("clock", "Керування годинником: clock on|off", [](const String& args) {
         if (args.equalsIgnoreCase("on")) {
             configStorage.setBool(CFG_SHOW_CLOCK, showClock = true);
-            Serial.println(F("clock ON"));
+            Logger::info("clock ON");
         } else if (args.equalsIgnoreCase("off")) {
             configStorage.setBool(CFG_SHOW_CLOCK, showClock = false);
-            Serial.println(F("clock OFF"));
+            Logger::info("clock OFF");
         } else {
-            Serial.println(F("Керування годинником: clock on|off"));
+            Logger::info("Керування годинником: clock on|off");
         }
     });
 
     commandHandler.registerCommand("brightness", "Керування яскравістю: brightness 0-100", [](const String& args) {
         if (args.length() == 0) {
-            Serial.println(F("Використання: brightness 0-100|auto"));
+            Logger::info("Використання: brightness 0-100|auto");
         } else if (args.equalsIgnoreCase("auto")) {
             #if LIGHT_SENSOR_PIN > 0
             display.brightness(lightSensor.value());
@@ -618,19 +625,19 @@ void setupSerialCommander() {
             #else
             isAutoBrightness = true;
             #endif
-            Serial.printf("[SerialCommander] isAutoBrighness = %s\n", isAutoBrightness ? "true" : "false");
+            Logger::info(" isAutoBrighness = %s", isAutoBrightness ? "true" : "false");
             #else
-            Serial.printf("[SerialCommander] isAutoBrighness **disabled**\n");
+            Logger::info(" isAutoBrighness **disabled**");
             #endif
         } else {
             display.brightness(args.toInt());
             configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
             configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
-            Serial.printf("[SerialCommander] display.brightness(%d)\n", display.brightness());
+            Logger::info("display.brightness(%d)", display.brightness());
         }
     });
 
-    Serial.println("SerialCommander setup done");
+    Logger::info("SerialCommander setup done");
  }
 
 void setupBackgroundImage() {
@@ -643,23 +650,23 @@ void setupBackgroundImage() {
 void setupConfigStorage() {
     configStorage.begin(PIO_PIOENV);
     showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
-    Serial.println("ConfigStorage init done");
+    Logger::info("ConfigStorage init done");
 }
 
 void loadConfig() {
     showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
     isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
     display.brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
-    Serial.println("ConfigStorage load done");
+    Logger::info("ConfigStorage load done");
 
-    Serial.printf("\t- %s = %s\n", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
-    Serial.printf("\t- %s = %s\n", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
-    Serial.printf("\t- %s = %d\n", CFG_DISPLAY_BRIGHTNESS, configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
-    Serial.println();
+    Logger::info("\t- %s = %s", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
+    Logger::info("\t- %s = %s", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
+    Logger::info("\t- %s = %d", CFG_DISPLAY_BRIGHTNESS, configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
+    Logger::info("");
 }
 
 void setupEventDispatcher() {
-    Serial.println("EventDispatcher setup done");
+    Logger::info("EventDispatcher setup done");
 }
 
 void setupTaskCommander() {
@@ -672,12 +679,12 @@ void setupLightSensor() {
         scheduler.addCronTask(0, []() { lightSensor.update(); });
 
         lightSensor.addListener([]() {
-            Serial.printf("lightSensor.value() = %4d (%3d%%)", lightSensor.read(), lightSensor.value());
+            Logger::info("lightSensor.value() = %4d (%3d%%)", lightSensor.read(), lightSensor.value());
             if (isAutoBrightness) {
                 display.brightness(lightSensor.value());
-                Serial.printf(" / display.brightness(%d)", lightSensor.value());
+                Logger::info("display.brightness(%d) *auto*", lightSensor.value());
             }
-            Serial.println();
+            Logger::info("");
         });
 
         scheduler.addCronTask(0, []() {
@@ -785,40 +792,24 @@ void setupFlipButton() {
         if ((buttonState == LOW) && !bootButtonPressed) {
             bootButtonPressed = true;
             display_flip();
-            Serial.println("Button pressed!");
+            Logger::info("Button pressed!");
         } else if (buttonState == LOW) {
             // loop (pressed) ....
         } else if (bootButtonPressed) {
             // button release
             bootButtonPressed = false;
-            Serial.println("Button released!");
+            Logger::info("Button released!");
         } else {
             // loop (released) ...
         }
     });
-    Serial.printf("FlipButton GPIO PIN=%d\n", BOOT_BUTTON_PIN);
+    Logger::info("FlipButton GPIO PIN=%d", BOOT_BUTTON_PIN);
     #endif
 }
 
 void setup() {
-    rwlock::registerObject(Serial);
     setupSerial();
     setupSD();
-    auto h = rwlock::wlock(Serial, 10);
-    if (h) {
-        Serial.println("Hello, rwlock::aquared");
-        if (rwlock::wlock(Serial, 5)) {
-            Serial.println("something went wrong.....");
-        } else {
-            Serial.println("exclusive lock as expected!");
-        }
-        rwlock::unlock(h);
-    } else {
-        Serial.println("exclusive lock fail!");
-    }
-
-    delay(10000);
-
     setupEventDispatcher();
     setupConfigStorage();
     setupSerialCommander();
@@ -838,12 +829,12 @@ void setup() {
     httpServer.setStaticSource(&littleFsSource);
     // httpServer.setEventDispatcher(&dispatcher);
     httpServer.begin();
-    Serial.println("HttpServer::begin()");
-    Serial.printf("LittlFS::exists('/convert.c') = %s\n", littleFsSource.exists("/convert.c") ? "yes" : "no");
-    Serial.println("LittleFS test done.");
+    Logger::info("HttpServer::begin()");
+    Logger::info("LittlFS::exists('/convert.c') = %s", littleFsSource.exists("/convert.c") ? "yes" : "no");
+    Logger::info("LittleFS test done.");
 
     display.flush();
-    Serial.println("\n> Ready. Введіть 'list' для перегляду команд.\n");
+    Logger::info("> Ready. Введіть 'list' для перегляду команд.");
 }
 
 void loop() {

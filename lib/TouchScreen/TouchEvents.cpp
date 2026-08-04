@@ -107,30 +107,34 @@ void TouchEvents::fireSwipe(int dx, int dy) {
     if (horizontal) {
         if (dx > 0) {
             // рух вправо: старт біля лівого краю -> "свайп від лівого краю"
-            if (abs(_start.x) <= _config.edgeZoneX)
+            if (abs(_start.x) <= _config.edgeZoneX) {
                 _onSwipeFromLeft.invoke(_start, _last);
-            else
+            } else {
                 _onSwipeRight.invoke(_start, _last);
+            }
         } else {
             // рух вліво: старт біля правого краю -> "свайп від правого краю"
-            if (abs(_start.x) >= _config.screenWidth - _config.edgeZoneX)
+            if (abs(_start.x) >= _config.screenWidth - _config.edgeZoneX) {
                 _onSwipeFromRight.invoke(_start, _last);
-            else
+            } else {
                 _onSwipeLeft.invoke(_start, _last);
+            }
         }
     } else {
         if (dy < 0) {
             // рух вгору: старт біля низу -> "свайп від низу"
-            if (abs(_start.y) >= _config.screenHeight - _config.edgeZoneY)
+            if (abs(_start.y) >= _config.screenHeight - _config.edgeZoneY) {
                 _onSwipeFromBottom.invoke(_start, _last);
-            else
+            } else {
                 _onSwipeUp.invoke(_start, _last);
+            }
         } else {
             // рух вниз: старт біля верху -> "свайп від верху"
-            if (abs(_start.y) <= _config.edgeZoneY)
+            if (abs(_start.y) <= _config.edgeZoneY) {
                 _onSwipeFromTop.invoke(_start, _last);
-            else
+            } else {
                 _onSwipeDown.invoke(_start, _last);
+            }
         }
     }
 }

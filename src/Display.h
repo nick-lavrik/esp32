@@ -3,6 +3,7 @@
 
 #include <stdarg.h> // Обов'язково для роботи з трикрапкою (...)
 #include <atomic>
+#include <TLogger.hpp>
 #include "TftInstance.h"
 // Для env:esp32-st7789     -> це справжній bodmer/TFT_eSPI (SPI, ST7789)
 // Для env:esp32-4848s040   -> TFT_eSPI тут є alias'ом на LGFX (LovyanGFX,
@@ -89,4 +90,6 @@ private:
     int width_  = 0;
     int height_ = 0;
     uint8_t brightness_ = 50; // percent!
+
+    TLogger _logger{"tft"};
 };

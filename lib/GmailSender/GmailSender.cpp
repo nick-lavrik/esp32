@@ -1,4 +1,5 @@
 #include "GmailSender.hpp"
+#include <Logger.hpp>
 
 #if HAS_GMAIL_SENDER
 static const char* SMTP_HOST = "smtp.gmail.com";
@@ -19,7 +20,7 @@ void GmailSender::begin() {
 }
 
 void GmailSender::smtpCallback(SMTP_Status status) {
-    Serial.println(status.info());
+    Logger::debug(status.info());
 }
 
 bool GmailSender::sendEmail(const char* recipientEmail, const char* subject, const char* message) {
@@ -42,12 +43,12 @@ bool GmailSender::sendEmail(const char* recipientEmail, const char* subject, con
     msg.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
 
     if (!_smtp.connect(&config)) {
-        Serial.printf("SMTP connect failed: %s\n", _smtp.errorReason().c_str());
+        Logger::error("SMTP connect failed: %s\n", _smtp.errorReason().c_str());
         return false;
     }
 
     if (!MailClient.sendMail(&_smtp, &msg)) {
-        Serial.printf("Send failed: %s\n", _smtp.errorReason().c_str());
+        Logger::error("Send failed: %s\n", _smtp.errorReason().c_str());
         return false;
     }
 

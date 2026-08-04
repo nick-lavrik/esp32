@@ -11,15 +11,6 @@ const char* ntpServer3 = "pool.ntp.org";
 const long  gmtOffset_sec = 2 * 3600;
 const int   daylightOffset_sec = 3600;
 
-void onTimeSync(struct timeval *tv) {
-    time_t now = tv->tv_sec;
-    struct tm ti;
-    localtime_r(&now, &ti);
-    char buf[32];
-    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
-    Serial.printf("[NTP^] Синхронізовано: %s.%08ld\n", buf, tv->tv_usec); // usewc - 6 digits (!)
-}
-
 extern NtpService ntp;
 void setupNtpService() {
     // Callback викликається при кожній успішній синхронізації.
@@ -37,7 +28,7 @@ void setupNtpService() {
         // strftime(buf+strlen(buf), sizeof(buf)-strlen(buf), "[NTP#2] %Y-%m-%d %H:%M:%S", &ti);
         // Serial.printf("[NTP2] Синхронізовано: %s\n", buf); buf[0] = 0;
         // Serial.printf("[NTP] Синхронізовано: %s\n", ntp.ftime("%Y-%m-%d %H:%M:%S.%q", buf, sizeof(buf)));  // millis() - ще не оновлено в перший раз (!)
-        Serial.printf("[NTP] Синхронізовано: %s\n", ntp.ftime("%Y-%m-%d %H:%M:%S.%q", buf, sizeof(buf), tv));
+        Logger::info("NTP Синхронізовано: %s", ntp.ftime("%Y-%m-%d %H:%M:%S.%q", buf, sizeof(buf), tv));
     });
 
     // --- Варіант 1: POSIX TZ-рядок (рекомендовано, DST рахується автоматично) ---
@@ -62,7 +53,7 @@ void drawTime() {
     display.setCursor(max(0, display.width() - 10 - display.textWidth("Time sync failed!")), 8);
     display.print("Time sync failed");
     display.setTextSize(1);
-    Serial.printf("[ntp:%ld] Time sync failed!\n", millis());
+    Logger::warn("Time sync failed!");
     return;
   }
 

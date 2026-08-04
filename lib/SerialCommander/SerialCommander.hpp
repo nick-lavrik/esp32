@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <functional>
 #include <vector>
-
+#include <TLogger.hpp>
 
 // Неблокуючий обробник команд, що надходять через Serial.
 // Викликайте update() у loop() на кожній ітерації — метод НЕ блокує
@@ -41,9 +41,11 @@ private:
     std::vector<Command> commands_;
 
     void processLine(const String& line);
-    void printUnknown(const String& name) const;
-    void printList() const;
+    void printUnknown(const String& name);
+    void printList();
 
     static String trim(const String& s);
     static void splitFirstToken(const String& line, String& outName, String& outArgs);
+
+    TLogger _logger{"cmd"};
 };

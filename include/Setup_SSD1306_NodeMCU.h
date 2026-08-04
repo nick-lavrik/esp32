@@ -52,7 +52,7 @@ public:
         // Wire.begin(); // NodeMCU: SDA=D2(GPIO4), SCL=D1(GPIO5) - типова розводка модуля
 
         if (!begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
-            Serial.println(F("[TFT_eSPI/SSD1306] begin() failed - перевір I2C адресу/проводку"));
+            Logger::error("[TFT_eSPI/SSD1306] begin() failed - перевір I2C адресу/проводку");
             return;
         }
 

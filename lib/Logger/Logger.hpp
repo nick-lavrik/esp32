@@ -1,23 +1,33 @@
 #pragma once
 
-// Вибір бекенду логера. За замовчуванням - автовизначення платформи
-// (ESP8266/ESP32 - стандартні platform defines).
+// Глобальний статичний логер - без явного тега, для швидкого логування
+// у main.cpp/загальному коді, коли не потрібна ієрархія тегів.
 //
-// Можна форсувати конкретну реалізацію незалежно від платформи через
-// build_flags, напр.:
-//   build_flags = -D USE_SERIAL_LOGGER
-// або
-//   build_flags = -D USE_ESP_LOGGER
-#if defined(USE_SERIAL_LOGGER)
-    #include "SerialLogger.hpp"
-    using Logger = SerialLogger;
-#elif defined(USE_ESP_LOGGER)
-    #include "EspLogger.hpp"
-    using Logger = EspLogger;
-#elif defined(ESP8266)
-    #include "SerialLogger.hpp"
-    using Logger = SerialLogger;
-#else
-    #include "EspLogger.hpp"
-    using Logger = EspLogger;
+// Приклад:
+//   Logger::info("wifi connected, ip=%s", ip.c_str());
+//   Logger::warn("mqtt reconnect attempt %d", attempt);
+//   Logger::error("sd mount failed, rc=%d", rc);
+//
+// Тег за замовчуванням - LOGGER_DEFAULT_TAG ("app"), перевизначається через
+// build_flags, напр.: -D LOGGER_DEFAULT_TAG=\"main\"
+//
+// Для тегованого логування з ієрархією тегів (mqtt -> mqtt.send -> ...)
+// і фільтрацією рівня через LogLevelManager - використовуйте TLogger
+// напряму (див. TLogger.hpp), напр.:
+//   static TLogger _log{"mqtt.send"};
+//   _log.info("heartbeat sent");
+
+#ifndef LOGGER_DEFAULT_TAG
+#define LOGGER_DEFAULT_TAG "app"
 #endif
+
+class Logger {
+public:
+  static void error(const char* fmt, ...);
+  static void warn(const char* fmt, ...);
+  static void info(const char* fmt, ...);
+  static void debug(const char* fmt, ...);
+  static void verbose(const char* fmt, ...);
+
+  Logger() = delete;
+};

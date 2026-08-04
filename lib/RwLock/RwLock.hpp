@@ -18,7 +18,7 @@
 #pragma once
 
 #include <cstdint>
-
+#include <functional>
 #include "RwLockHandle.hpp"
 
 namespace rwlock {
@@ -44,5 +44,29 @@ RwLockHandle wlock(T& obj, uint32_t timeoutMs) {
 }
 
 void unlock(RwLockHandle& handle);
+
+using RwLockCallback = std::function<void()>;
+
+template <typename T>
+bool write(T& obj, uint32_t timeoutMs, RwLockCallback callback) {
+  auto h = rwlock::wlock(obj, timeoutMs);
+  if (h) {
+    callback();
+    rwlock::unlock(h);
+    return true;
+  }
+  return false;
+}
+
+template <typename T>
+bool read(T& obj, uint32_t timeoutMs, RwLockCallback callback) {
+  auto h = rwlock::rlock(obj, timeoutMs);
+  if (h) {
+    callback();
+    rwlock::unlock(h);
+    return true;
+  }
+  return false;
+}
 
 }  // namespace rwlock

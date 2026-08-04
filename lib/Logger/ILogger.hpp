@@ -49,6 +49,13 @@ public:
         va_end(args);
     }
 
+    // Публічний прохід до log() з готовим va_list - потрібен для фасадів
+    // (напр. Logger), які самі приймають "..." і не можуть прокинути його
+    // напряму (C++ не дозволяє форвардити "...", лише va_list).
+    void logv(LogLevel level, const char* fmt, va_list args) {
+        log(level, fmt, args);
+    }
+
 protected:
     virtual void log(LogLevel level, const char* fmt, va_list args) = 0;
 

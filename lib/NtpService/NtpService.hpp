@@ -4,6 +4,53 @@
 #include <functional>
 #include <sys/time.h>
 #include <vector>
+#include <TLogger.hpp>
+
+
+/*
+=============================================================================
+ Приклад використання NtpService
+=============================================================================
+
+#include "NtpService.hpp"
+
+NtpService ntp;
+
+void setup() {
+    Serial.begin(115200);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) delay(100);
+
+    // Callback викликається при кожній успішній синхронізації.
+    ntp.addCallback([](struct timeval* tv) {
+        char buf[40];
+        Serial.printf("[NTP] Синхронізовано: %s\n",
+                      NtpService::ftime("%Y-%m-%d %H:%M:%S.%Q", buf, sizeof(buf), *tv));
+    });
+
+    // --- Варіант 1: POSIX TZ-рядок (рекомендовано, DST рахується автоматично) ---
+    ntp.beginTz("EET-2EEST,M3.5.0/3,M10.5.0/4",   // Europe/Kyiv
+                "pool.ntp.org", "ua.pool.ntp.org", "time.cloudflare.com");
+
+    // --- Варіант 2: ручний offset (без DST) ---
+    // ntp.begin(2 * 3600, 0, "pool.ntp.org", "ua.pool.ntp.org");
+}
+
+void loop() {
+    if (ntp.isSynced()) {
+        struct timeval tv;
+        gettimeofday(&tv, nullptr);
+        char buf[40];
+        Serial.println(NtpService::ftime("%H:%M:%S.%q", buf, sizeof(buf), tv));
+    }
+
+    // Аптайм (з мікросекундною роздільністю до 000, бо джерело - millis()):
+    char up[32];
+    Serial.println(NtpService::ftime("%H:%M:%S.%Q", up, sizeof(up))); // час за замовч. - millis()
+}
+
+=============================================================================
+*/
 
 // Callback викликається після кожної успішної синхронізації часу.
 // tv завжди валідний: на ESP32 приходить напряму з esp_sntp,
@@ -61,8 +108,8 @@ public:
     // Форматує реальний (wall-clock) час з struct timeval - результат буде
     // локальним (враховує TZ, встановлений через begin()/beginTz()/setTimeZone()).
     // Розширює стандартний strftime() двома плейсхолдерами:
-    //   %Q - мілісекунди (3 цифри, 000-999)
-    //   %q - мікросекунди (6 цифр, 000000-999999)
+    //   %Q - мілісекунди  (3 цифри, 000-999)
+    //   %q - мікросекунди (6 цифр,  000000-999999)
     // Не використовує heap/String, лише стек - безпечно викликати з будь-якого
     // FreeRTOS-таску. buffer/format можуть співпадати з локальним стек-масивом
     // викликача. Повертає buffer (для зручного inline-використання).
@@ -102,52 +149,9 @@ private:
     NtpCallbackHandle _nextHandle = 1;
     bool _synced = false;
 
+    TLogger _logger{"ntp"};
+
     // Singleton-вказівник потрібен, бо C-callback API (esp_sntp / settimeofday_cb)
     // не підтримує передачу user-контексту (this).
     static NtpService* _instance;
 };
-
-/*
-=============================================================================
- Приклад використання NtpService
-=============================================================================
-
-#include "NtpService.hpp"
-
-NtpService ntp;
-
-void setup() {
-    Serial.begin(115200);
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) delay(100);
-
-    // Callback викликається при кожній успішній синхронізації.
-    ntp.addCallback([](struct timeval* tv) {
-        char buf[40];
-        Serial.printf("[NTP] Синхронізовано: %s\n",
-                      NtpService::ftime("%Y-%m-%d %H:%M:%S.%Q", buf, sizeof(buf), *tv));
-    });
-
-    // --- Варіант 1: POSIX TZ-рядок (рекомендовано, DST рахується автоматично) ---
-    ntp.beginTz("EET-2EEST,M3.5.0/3,M10.5.0/4",   // Europe/Kyiv
-                "pool.ntp.org", "ua.pool.ntp.org", "time.cloudflare.com");
-
-    // --- Варіант 2: ручний offset (без DST) ---
-    // ntp.begin(2 * 3600, 0, "pool.ntp.org", "ua.pool.ntp.org");
-}
-
-void loop() {
-    if (ntp.isSynced()) {
-        struct timeval tv;
-        gettimeofday(&tv, nullptr);
-        char buf[40];
-        Serial.println(NtpService::ftime("%H:%M:%S.%q", buf, sizeof(buf), tv));
-    }
-
-    // Аптайм (з мікросекундною роздільністю до 000, бо джерело - millis()):
-    char up[32];
-    Serial.println(NtpService::ftime("%H:%M:%S.%Q", up, sizeof(up))); // час за замовч. - millis()
-}
-
-=============================================================================
-*/

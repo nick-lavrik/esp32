@@ -54,13 +54,13 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     _depth = depth;
 
     if (!LittleFS.exists(path)) {
-        Serial.printf("[JpegImage] Файл не знайдено: %s\n", path);
+        _logger.error("Файл не знайдено: %s", path);
         return false;
     }
 
     File file = LittleFS.open(path, "r");
     if (!file) {
-        Serial.printf("[JpegImage] Не вдалось відкрити файл: %s\n", path);
+        _logger.error("Не вдалось відкрити файл: %s", path);
         return false;
     }
 
@@ -68,7 +68,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     bool jpegBufPsram = false;
     uint8_t *jpegData = (uint8_t *)allocPreferPsram(fileSize, &jpegBufPsram);
     if (jpegData == nullptr) {
-        Serial.println("[JpegImage] Недостатньо пам'яті для читання jpg-файлу");
+        _logger.error("Недостатньо пам'яті для читання jpg-файлу");
         file.close();
         return false;
     }
@@ -77,7 +77,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     file.close();
 
     if (bytesRead != fileSize) {
-        Serial.println("[JpegImage] Розмір прочитаних даних не збігається з розміром файлу");
+        _logger.error("Розмір прочитаних даних не збігається з розміром файлу");
         heap_caps_free(jpegData);
         return false;
     }
@@ -85,7 +85,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     uint16_t jpegWidth = 0;
     uint16_t jpegHeight = 0;
     if (TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, fileSize) != JDR_OK) {
-        Serial.println("[JpegImage] Не вдалось розпарсити заголовок jpg");
+        _logger.error("Не вдалось розпарсити заголовок jpg");
         heap_caps_free(jpegData);
         return false;
     }
@@ -98,11 +98,11 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
         bufferBytes = (size_t)jpegWidth * jpegHeight * bytesPerPixel;
     }
 
-    Serial.printf("[JpegImage] \"%s\" %dx%d (%d bytes) - free (%d)\n", path, jpegWidth, jpegHeight, bufferBytes, heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    _logger.info("\"%s\" %dx%d (%d bytes) - free (%d)", path, jpegWidth, jpegHeight, bufferBytes, heap_caps_get_free_size(MALLOC_CAP_8BIT));
 
     _buffer = allocPreferPsram(bufferBytes, &_usedPsram);
     if (_buffer == nullptr) {
-        Serial.printf("[JpegImage] Недостатньо пам'яті для декодованого зображення (%d / %d)\n", bufferBytes, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) );
+        _logger.error("Недостатньо пам'яті для декодованого зображення (%d / %d)", bufferBytes, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) );
         heap_caps_free(jpegData);
         return false;
     }
@@ -123,13 +123,13 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     heap_caps_free(jpegData);
 
     if (decodeResult != JDR_OK) {
-        Serial.println("[JpegImage] Помилка декодування jpg");
+        _logger.error("Помилка декодування jpg \"%s\"", path);
         freeBuffer();
         return false;
     }
 
     _loaded = true;
-    Serial.printf("[JpegImage] Завантажено %dx%d, глибина: %d біт, розмір буфера: %u байт, пам'ять: %s\n",
+    _logger.info("Завантажено %dx%d, глибина: %d біт, розмір буфера: %u байт, пам'ять: %s\n",
                   _width, _height, (int)depth, (unsigned)bufferBytes,
                   _usedPsram ? "PSRAM" : "внутрішня RAM");
     return true;

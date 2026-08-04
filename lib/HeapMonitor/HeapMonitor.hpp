@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <TLogger.hpp>
 #include "esp_heap_caps.h"
 
 /**
@@ -61,4 +62,5 @@ private:
     uint32_t _lastPrintMs;
 
     bool _psramAvailable() const;
+    TLogger _logger{"heapmonitor"};
 };

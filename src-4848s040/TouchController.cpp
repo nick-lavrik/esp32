@@ -1,6 +1,8 @@
 #include "GT911Touch.h"
 #include <TouchEvents.h>
 #include <TouchController.h>
+#include <Logger.hpp>
+
 /*
 #define TOUCH_SDA 19 - SDA (Serial Data) I²C
 #define TOUCH_SCL 45 - SCL (Serial Clock) I²C
@@ -30,7 +32,7 @@ void TouchController::setup(TouchEvents* events) {
   // #define ROTATION_RIGHT     (uint8_t)2
   // #define ROTATION_NORMAL    (uint8_t)3
   ts.setRotation(TFT_ROTATION); // ROTATION_NORMAL
-  Serial.println(F("TouchController::GT911 setup done"));
+  Logger::info("TouchController::GT911 setup done");
   _events = events;
 }
 

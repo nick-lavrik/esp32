@@ -188,6 +188,7 @@ std::vector<EspPartitionInfo> EspPartitionInspector::collectAllEsp32(bool comput
 
 #include <Arduino.h>
 #include <Esp.h>
+#include <ILogger.hpp>
 
 extern "C" {
     // _FS_start/_FS_end/_FS_page/_FS_block — актуальні назви символів у
@@ -297,8 +298,8 @@ std::vector<EspPartitionInfo> EspPartitionInspector::collectAll(bool computeSha2
 #endif
 }
 
-void EspPartitionInspector::printOne(const EspPartitionInfo &info, Print &out) {
-    out.printf("%-14s %-6s %-17s 0x%08X 0x%08X %-5s %-9s %s\n",
+void EspPartitionInspector::printOne(const EspPartitionInfo &info, Print& out) {
+    out.printf("%-14s %-6s %-17s 0x%08X 0x%08X %-4s %-8s %s\n",
                info.label.c_str(),
                info.typeName.c_str(),
                info.subtypeName.c_str(),
@@ -318,20 +319,20 @@ void EspPartitionInspector::printAll(Print &out, bool computeSha256) {
     auto partitions = collectAll(computeSha256);
 
 #if defined(ESP8266)
-    out.println(F("=== ESP8266 Flash Layout (synthetic, no partition table) ==="));
+    out.println("=== ESP8266 Flash Layout (synthetic, no partition table) ===");
 #else
-    out.println(F("=== Flash Partition Table ==="));
+    out.println("=== Flash Partition Table ===");
 #endif
-    out.printf("%-14s %-6s %-17s %-10s %-10s %-5s %-9s %s\n",
+    out.printf("%-14s %-6s %-17s %-10s %-10s %-4s %-8s %s\n",
                "label", "type", "subtype", "offset", "size", "encr", "readonly", "state");
-    out.printf("%.14s %.6s %.17s %.10s %.10s %.5s %.9s %s\n",
+    out.printf("%.14s %.6s %.17s %.10s %.10s %.4s %.8s %s\n",
                line, line, line, line, line, line, line, line);
 
     for (const auto &info : partitions) {
         printOne(info, out);
     }
 
-    out.printf("%.14s-%.6s-%.17s-%.10s-%.10s-%.5s-%.9s-%s\n",
+    out.printf("%.14s-%.6s-%.17s-%.10s-%.10s-%.4s-%.8s-%s\n",
                line, line, line, line, line, line, line, line);
 
     out.printf("Total: %u entries\n", static_cast<unsigned int>(partitions.size()));

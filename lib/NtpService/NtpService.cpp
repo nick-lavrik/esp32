@@ -26,7 +26,7 @@ void NtpService::begin(long gmtOffsetSec,
         // sntp_stop()/sntp_init() всередині, тож повторний виклик безпечний
         // і коректно перенастроює сервери. Попереджаємо лише про те, що це
         // навмисний ре-конфіг, а не помилка ініціалізації.
-        Serial.println("[NtpService] begin() викликано повторно - перенастроюю сервери");
+        _logger.warn("[NtpService] begin() викликано повторно - перенастроюю сервери");
     }
     _instance = this;
 
@@ -41,7 +41,7 @@ void NtpService::beginTz(const char* tzString,
                           const char* ntpServer3,
                           uint32_t syncIntervalMs) {
     if (_instance != nullptr) {
-        Serial.println("[NtpService] beginTz() викликано повторно - перенастроюю сервери");
+        _logger.warn("[NtpService] beginTz() викликано повторно - перенастроюю сервери");
     }
     _instance = this;
 

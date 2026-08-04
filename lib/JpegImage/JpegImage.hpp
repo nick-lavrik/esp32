@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <TLogger.hpp>
 
 // Глибина кольору, з якою зберігається декодоване зображення в пам'яті
 enum class JpegColorDepth : uint8_t
@@ -86,6 +87,8 @@ private:
     bool _loaded;
     bool _usedPsram;
     uint8_t _monoThreshold = 128;
+
+    TLogger _logger{"jpeg"};
 
     static JpegImage *_activeInstance;
 };

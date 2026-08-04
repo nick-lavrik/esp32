@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #endif
 #include "Display.h"
+#include <Logger.hpp>
 
 // --- WiFi / NTP ---
 const char* ssid = WIFI_SSID;
@@ -42,7 +43,7 @@ void setupWiFi() {
     // display.setCursor(10, 10 + 3 + display.fontHeight());
     display.println("\nWiFi connected!");
     display.flush();
-    Serial.println("WiFi connected, IP: " + WiFi.localIP().toString());
+    Logger::info("WiFi connected, IP: %s", WiFi.localIP().toString());
     // setLed(false, true, false);
   } else {
     display.setTextColor(TFT_RED);
@@ -108,18 +109,18 @@ void WiFi_scan() {
     // WiFi.disconnect();
     // delay(100);
 
-    Serial.println("Starting full Wi-Fi network scan...");
+    Logger::info("Starting full Wi-Fi network scan...");
 
     // Скануємо також і приховані мережі (async = false, show_hidden = true)
     int16_t networkCount = WiFi.scanNetworks(false, true);
 
     if (networkCount == WIFI_SCAN_FAILED) {
-        Serial.println("Scan failed!");
+        Logger::warn("Scan failed!");
     } else if (networkCount == 0) {
-        Serial.println("No networks found.");
+        Logger::warn("No networks found.");
     } else {
-        Serial.printf("\nFound %d networks with detailed parameters:\n", networkCount);
-        Serial.println("==================================================");
+        Logger::info("Found %d networks with detailed parameters:", networkCount);
+        Logger::info("==================================================");
 
         for (int16_t i = 0; i < networkCount; ++i) {
             #if defined(BOARD_ESP8266)
@@ -150,7 +151,7 @@ void WiFi_scan() {
             snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X",
                      bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
 
-            String signalStr = String(rssi) + " dBm";
+            String signalStr = String(rssi) + String(" dBm");
             #if defined(BOARD_ESP8266)
             String securityStr = WiFi_getAuthTypeName(encryptionType);
             #else
@@ -159,16 +160,16 @@ void WiFi_scan() {
             String channelStr = String(channel);
 
             // Виведення зібраних String-даних
-            Serial.println("SSID:       " + ssid);
-            Serial.println("BSSID (MAC):" + String(bssidStr));
-            Serial.println("Signal:     " + signalStr);
-            Serial.println("Channel:    " + channelStr);
-            Serial.println("Security:   " + securityStr);
-            Serial.println("==================================================");
+            Logger::info("SSID:       %s", ssid.c_str());
+            Logger::info("BSSID (MAC):%s", bssidStr);
+            Logger::info("Signal:     %s", signalStr.c_str());
+            Logger::info("Channel:    %s", channelStr);
+            Logger::info("Security:   %s", securityStr);
+            Logger::info("==================================================");
         }
     }
 
     // Очищення пам'яті після сканування
     WiFi.scanDelete();
-    Serial.println("Wi-Fi Scan done.");
+    Logger::info("Wi-Fi Scan done.");
 }

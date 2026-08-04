@@ -1,6 +1,7 @@
 #include "SerialLogger.hpp"
 #include "LogLevelManager.hpp"
 #include <cstdio>
+#include <RwLock.hpp>
 
 SerialLogger::SerialLogger(const char* tag, Print& output)
     : ILogger(tag), _output(output) {}
@@ -34,5 +35,11 @@ void SerialLogger::log(LogLevel level, const char* fmt, va_list args) {
         buf[sizeof(buf) - 1] = '\0';
     }
 
-    _output.printf("[%s][%s] %s\n", levelName(level), _tag, buf);
+    if (!rwlock::write(_output, 10, [this, level, buf]() { 
+            // TODO: output queue (cache)
+            _output.printf("[%s][%-5s] %s\n", levelName(level), _tag, buf); 
+        }))
+    {
+        // TODO: push <buf> into queue (cache)
+    };
 }
