@@ -63,6 +63,9 @@
 #include <AnalogSensor.hpp>
 #include <MqttClient.hpp>
 #include <NtpService.hpp>
+#include <HttpServer.hpp>
+#include <LittleFsStaticSource.hpp>
+
 #include "setup.h"
 
 #if BOARD_HAS_TOUCH
@@ -145,6 +148,9 @@ SerialCommander commandHandler;
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 MqttClient mqtt(makeMqttConfig());
+
+LittleFsStaticSource littleFsSource(LittleFS);
+HttpServer httpServer(HttpServerConfig{});
 
 #if BOARD_HAS_DISPLAY
 Display display;
@@ -812,6 +818,13 @@ void setup() {
     setupMqttClient();
     setupFlipButton();
     loadConfig();
+
+    httpServer.setStaticSource(&littleFsSource);
+    // httpServer.setEventDispatcher(&dispatcher);
+    httpServer.begin();
+    Serial.println("HttpServer::begin()");
+    Serial.printf("LittlFS::exists('/convert.c') = %s\n", littleFsSource.exists("/convert.c") ? "yes" : "no");
+    Serial.println("LittleFS test done.");
 
     display.flush();
     Serial.println("\n> Ready. Введіть 'list' для перегляду команд.\n");
