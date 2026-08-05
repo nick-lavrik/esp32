@@ -761,14 +761,43 @@ void drawSystemInfo() {
 #endif
 
 #if defined(ESP8266)
-  display.setCursor(0, 0 + row++ * (3 + display.fontHeight()));
+  display.setCursor(0, 1 + row++ * (2 + display.fontHeight()));
   snprintf(buf, 120, "CPU: %dMHz\nLoop rate: %d/s", cpuFreq, display.loopFrameRate());
+  display.print(buf);
+
+  enum ScreenMode { HEAP, NETWORK, UPTIME };
+  static ScreenMode currentScreen = HEAP;
+  static uint32_t currentScreenTs = millis();
+  const uint32_t screenDelayMs = 5 * 1000UL;
+  uint32_t hfree; uint32_t hmax; uint8_t hfrag;
+  
+  switch (currentScreen) {
+    case HEAP:
+      ESP.getHeapStats(&hfree, &hmax, &hfrag);
+      snprintf(buf, sizeof(buf), "\nHeap: %d KB / %d KB", hfree / 1024, freeHeap / 1024 /*hmax / 1024*/);
+      break;
+    case NETWORK:
+      snprintf(buf, sizeof(buf), "WiFi: %s\nIP:   %s", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+      break;
+    case UPTIME:
+      snprintf(buf, sizeof(buf), "\nUptime: %02d:%02d:%02d", uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
+      break;
+  }
+
+  display.setCursor(0, TFT_HEIGHT - 2 * (0 + display.fontHeight()));
+  display.print(buf);
+
+  if (millis() - currentScreenTs > screenDelayMs) {
+    currentScreen = (ScreenMode)((currentScreen + 1) % 3);
+    currentScreenTs = millis();
+  }
+
 #else
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
   snprintf(buf, 120, "CPU: %d MHz   Loop rate: %d/s", cpuFreq, display.loopFrameRate());
+  display.print(buf);
 #endif
 
-  display.print(buf);
 
 #if defined(ESP8266)
   // ESP8266 не має ESP.getHeapSize() - показуємо лише вільну пам'ять
