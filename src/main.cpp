@@ -67,6 +67,7 @@
 #include <LittleFsStaticSource.hpp>
 #include <RwLock.hpp>
 #include <Logger.hpp>
+#include <PrintQueue.hpp>
 
 #include "setup.h"
 
@@ -74,10 +75,10 @@
 #include <TouchController.h>
 #endif
 
-const char* EVT_REBOOT PROGMEM = "reboot";
-const char* CFG_SHOW_CLOCK PROGMEM = "clock";
-const char* CFG_SYS_AUTOBRIGHTNESS PROGMEM = "auto-brightness";
-const char* CFG_DISPLAY_BRIGHTNESS PROGMEM = "brightness";
+const char* EVT_REBOOT = "reboot";
+const char* CFG_SHOW_CLOCK = "clock";
+const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
+const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 
 TouchScreenConfig makeTouchScreenConfig() {
     TouchScreenConfig c;
@@ -838,6 +839,7 @@ void setup() {
 }
 
 void loop() {
+    PrintQueue::flush();
     commandHandler.update();
     mqtt.loop();
 

@@ -1,7 +1,7 @@
 #include "SerialLogger.hpp"
 #include "LogLevelManager.hpp"
+#include "PrintQueueRegistry.hpp"
 #include <cstdio>
-#include <RwLock.hpp>
 
 SerialLogger::SerialLogger(const char* tag, Print& output)
     : ILogger(tag), _output(output) {}
@@ -22,11 +22,10 @@ void SerialLogger::log(LogLevel level, const char* fmt, va_list args) const {
         return;
     }
 
-    static constexpr size_t BUF_SIZE = 160;
+    static constexpr size_t BUF_SIZE = PrintQueue::kLineSize;
     char buf[BUF_SIZE];
 
     int len = vsnprintf(buf, sizeof(buf), fmt, args);
-
     if (len >= static_cast<int>(sizeof(buf))) {
         // рядок обрізано vsnprintf - позначаємо явно
         buf[sizeof(buf) - 4] = '.';
@@ -35,11 +34,15 @@ void SerialLogger::log(LogLevel level, const char* fmt, va_list args) const {
         buf[sizeof(buf) - 1] = '\0';
     }
 
-    if (!rwlock::write(_output, 10, [this, level, buf]() { 
-            // TODO: output queue (cache)
-            _output.printf("[%s][%-5s] %s\n", levelName(level), _tag, buf); 
-        }))
-    {
-        // TODO: push <buf> into queue (cache)
-    };
+    char line[BUF_SIZE];
+    int lineLen = snprintf(line, sizeof(line), "[%s][%-5s] %s\n", levelName(level), _tag, buf);
+    if (lineLen >= static_cast<int>(sizeof(line))) {
+        line[sizeof(line) - 2] = '\n';
+        line[sizeof(line) - 1] = '\0';
+    }
+
+    // Пряме write з таймаутом 10мс; якщо _output зайнятий - рядок піде
+    // в per-output чергу (PrintQueueRegistry) і буде відправлений пізніше
+    // наступним log()-викликом або періодичним PrintQueue::flush().
+    PrintQueueRegistry::instance().forOutput(_output).tryWrite(line, /*timeoutMs=*/10);
 }
