@@ -15,14 +15,14 @@ void setupSerial() {
   delay(200);
   Logger::info("");
   Logger::info("");
-  Logger::info("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
+  Logger::info("*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
 #if defined(BOARD_ESP8266)
   // ESP8266 не має ESP.getChipModel() (це ESP32 API) - виводимо ChipId замість нього
   Logger::info(" ESP8266 (chipId=0x%06X) (%s)", ESP.getChipId(), PIO_PIOENV);
 #else
   Logger::info(" %s (%s)", ESP.getChipModel(), PIO_PIOENV);
 #endif
-  Logger::info("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
+  Logger::info("*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
   Logger::info("");
 }
 

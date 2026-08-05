@@ -60,7 +60,7 @@ void drawTime() {
     return;
   }
 
-  char timeStr[9];
+  char timeStr[12];
   ntp.ftime("%H:%M:%S", timeStr, sizeof(timeStr));
 
 #if BOARD_TTGO_T1
@@ -115,15 +115,14 @@ void drawTime() {
   display.print(timeStr);
 
   // Менша дата під часом
-  char dateStr[16];
-  ntp.ftime("%d.%m.%Y", dateStr, sizeof(dateStr));
+  ntp.ftime("%d.%m.%Y", timeStr, sizeof(timeStr));
 
   display.setTextSize(1);
   // display.getTextBounds(dateStr, 0, 0, &x1, &y1, &textW, &textH);
-  textW = display.textWidth(dateStr);
-  x = (TFT_WIDTH - textW) / 2;
-  display.setCursor(x, 44);
-  // display.print(dateStr);
+  textW = display.textWidth(timeStr);
+  // x = (TFT_WIDTH - textW) / 2;
+  display.setCursor(TFT_WIDTH - textW, 0);
+  display.print(timeStr);
 #else
   display.setTextSize(2);
   display.setTextColor(TFT_LIGHTGREY);

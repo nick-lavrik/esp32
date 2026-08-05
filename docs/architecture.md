@@ -19,10 +19,10 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 
 | env | Плата | Дисплей | Особливості |
 |---|---|---|---|
-| `esp32-4848s040` | GUITION/Sunton ESP32-4848S040C (ESP32-S3) | RGB-панель ST7701, 480×480, LovyanGFX | touch (GT911), SD, PSRAM |
-| `esp32-st7789` | ESP32 Dev Module + ST7789 SPI | 240×320, `bodmer/TFT_eSPI` | touch (XPT2046), SD, light sensor |
-| `ttgo-t1` | LilyGO T-Display (класична, ESP32) | 135×240, `bodmer/TFT_eSPI` | без SD, без touch |
-| `esp8266` | NodeMCU ESP8266 + SSD1306 OLED | 128×64, монохром, `Adafruit SSD1306` | окрема `src-esp8266/`, без SD/touch |
+| `esp32-4848s040` | GUITION/Sunton ESP32-4848S040C (ESP32-S3) | RGB-панель ST7701, 480×480, LovyanGFX | touch (GT911), SD, PSRAM, 320KB RAM, 16MB Flash |
+| `esp32-st7789` | ESP32 Dev Module + ST7789 SPI | 240×320, `bodmer/TFT_eSPI` | touch (XPT2046), SD, light sensor, 320KB RAM, 4MB Flash |
+| `ttgo-t1` | LilyGO T-Display (класична, ESP32) | 135×240, `bodmer/TFT_eSPI` | без SD, без touch, 320KB RAM, 4MB Flash |
+| `esp8266` | NodeMCU ESP8266 + SSD1306 OLED | 128×64, монохром, `Adafruit SSD1306` | без SD/touch, 80KB RAM, 4MB Flash |
 
 Усі environments — `framework = arduino`, `-std=gnu++17`. ESP-IDF v5.5.4 / Arduino Core 3.3.9
 під капотом Arduino-framework для ESP32-S3/ESP32 environments (не "чистий" ESP-IDF).
@@ -89,7 +89,7 @@ BasedOnStyle: Google
 IndentWidth: 2
 AccessModifierOffset: -2
 BreakBeforeBraces: Attach
-ColumnLimit: 100
+ColumnLimit: 120
 ```
 
 Плюс правила іменування (з project instructions, clang-format це не покриває):

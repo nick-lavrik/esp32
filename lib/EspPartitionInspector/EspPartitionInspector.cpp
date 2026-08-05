@@ -317,9 +317,9 @@ void EspPartitionInspector::printAll(Print& out, bool computeSha256) {
   auto partitions = collectAll(computeSha256);
 
 #if defined(ESP8266)
-  out.println("=== ESP8266 Flash Layout (synthetic, no partition table) ===");
+  out.println("===== ESP8266 Flash Layout (synthetic, no partition table, no SHA256) =====");
 #else
-  out.println("=== Flash Partition Table ===");
+  out.println("===== Flash Partition Table =====");
 #endif
   out.printf("%-14s %-7s %-17s %-10s %-10s %-4s %-8s %s\n", "label", "type", "subtype", "offset",
              "size", "encr", "readonly", "state");

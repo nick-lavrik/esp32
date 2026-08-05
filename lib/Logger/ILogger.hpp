@@ -1,12 +1,44 @@
 #pragma once
 #include <cstdarg>
+#include <Print.h>
 
 enum class LogLevel { Error = 0, Warn = 1, Info = 2, Debug = 3, Verbose = 4 };
 
-class ILogger {
+class ILogger : public Print {
 public:
   explicit ILogger(const char* tag) : _tag(tag) {}
   virtual ~ILogger() = default;
+
+  static const size_t BUFFER_SIZE = 128; // Размер буфера в байтах
+  char _buffer[BUFFER_SIZE];
+  size_t _index = 0;
+
+  // Внутренний метод для физической отправки накопленных данных
+  void _sendBuffer() {
+    if (_index > 0) {
+      debug(_buffer); // Отправляем весь буфер за раз
+      _index = 0;     // Сбрасываем указатель
+    }
+  }
+
+  size_t write(uint8_t c) override {
+    // Если встретили перевод строки
+    if (c == '\n') {
+      _buffer[_index++] = (char)0;
+      _sendBuffer();
+      return 1;
+    }
+
+    // ... иначе сохраняем символ в буфер
+    _buffer[_index++] = (char)c;
+
+    // ... если буфер полностью заполнен
+    if (_index >= BUFFER_SIZE) {
+      _sendBuffer();
+    }
+    
+    return 1; // Возвращаем 1 успешный записанный байт
+  }
 
   void error(const char* fmt, ...) const {
     va_list args;
@@ -49,7 +81,8 @@ public:
   void logv(LogLevel level, const char* fmt, va_list args) const { log(level, fmt, args); }
 
 protected:
-  virtual void log(LogLevel level, const char* fmt, va_list args) const = 0;
+  LogLevel _defaultLogLevel = LogLevel::Debug;
 
+  virtual void log(LogLevel level, const char* fmt, va_list args) const = 0;
   const char* _tag;
 };

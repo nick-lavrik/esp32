@@ -65,6 +65,7 @@
 #include <SerialCommander.hpp>
 #include <SystemReset.hpp>
 #include <TaskController.hpp>
+// #include <NetworkManager.hpp>
 
 #include "BackgroundImages.hpp"
 #include "SizeFormatter.hpp"
@@ -73,13 +74,13 @@
 #include "setup.h"
 #include "wifi.h"
 
-#if BOARD_HAS_TOUCH
+#if BOARD_HAS_TOUCHSCREEN
 #include <TouchController.h>
 #endif
 
 const char* EVT_REBOOT = "reboot";
 const char* CFG_SHOW_CLOCK = "clock";
-const char* CFG_BLINK_LED = "blink"; // ESP8266 BLINK_LED_PIN dependency
+const char* CFG_BLINK_LED = "blink";  // ESP8266 BLINK_LED_PIN dependency
 const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 
@@ -158,13 +159,14 @@ MqttClient mqtt(makeMqttConfig());
 
 LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
+// NetworkManager wifiManager;
 
 #if BOARD_HAS_DISPLAY
 Display display;
 TouchScreenConfig displayConfig = makeTouchScreenConfig();
 #endif
 
-#if BOARD_HAS_TOUCH
+#if BOARD_HAS_TOUCHSCREEN
 TouchPointMapper mapper(displayConfig);
 TouchEvents touch(displayConfig);
 TouchController touchController;
@@ -178,11 +180,9 @@ GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
 AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 3);
 #endif
 
-#if BOARD_HAS_TOUCH
+#if BOARD_HAS_TOUCHSCREEN
 void onTouchLog(TouchPoint p) { Logger::debug("Touch: %d, %d", p.x, p.y); }
-void onHoldHandler(TouchPoint p, unsigned long ms) {
-  Logger::debug("Hold at %d,%d for %lu ms", p.x, p.y, ms);
-}
+void onHoldHandler(TouchPoint p, unsigned long ms) { Logger::debug("Hold at %d,%d for %lu ms", p.x, p.y, ms); }
 void onDblClickHandler(TouchPoint p) { Logger::debug("Double click: %d, %d\n", p.x, p.y); }
 
 void onSwipeLeftHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe LEFT"); }
@@ -196,9 +196,7 @@ void onSwipeFromBottomHandler(TouchPoint start, TouchPoint end) {
 void onSwipeFromTopHandler(TouchPoint start, TouchPoint end) {
   Logger::debug("Swipe FROM TOP (напр., шторка сповіщень)");
 }
-void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end) {
-  Logger::debug("Swipe FROM LEFT (напр., назад)");
-}
+void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe FROM LEFT (напр., назад)"); }
 void onSwipeFromRightHandler(TouchPoint start, TouchPoint end) {
   Logger::debug("Swipe FROM RIGHT (напр., бокова панель)");
 }
@@ -236,7 +234,7 @@ void display_flip() {
 }
 
 void setupTouchScreen() {
-#if BOARD_HAS_TOUCH
+#if BOARD_HAS_TOUCHSCREEN
   touch.setTouchPointMapper(&mapper);
   touchController.setup(&touch);
   Logger::debug("TouchScreen setup done");
@@ -302,11 +300,10 @@ void setupMqttClient() {
   mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message");
 
   // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
-  mqtt.addStringListener("mykola-lavryk/devices/+/status",
-                         [](const char* topic, const char* payload) -> bool {
-                           _logger.info("topic:%s payload:%s", topic, payload);
-                           return true;
-                         });
+  mqtt.addStringListener("mykola-lavryk/devices/+/status", [](const char* topic, const char* payload) -> bool {
+    _logger.info("topic:%s payload:%s", topic, payload);
+    return true;
+  });
 
   dispatcher.addListener(EVT_REBOOT, [](IEvent& e) { mqtt.disconnect("reboot"); });
 
@@ -325,12 +322,10 @@ void setupMqttClient() {
   });
 
   static uint32_t i = 0;
-  mqtt.addNumberListener<uint32_t>("mykola-lavrik/int32/#", [](const char* t, uint32_t v) {
-    _logger.info("topic:%s int32:%d", t, v);
-  });
-  scheduler.addCronTask(1 * 60 * 1000UL, []() {
-    mqtt.publishNumber<uint32_t>("mykola-lavrik/int32/" MQTT_CLIENT_ID, (uint32_t)++i);
-  });
+  mqtt.addNumberListener<uint32_t>("mykola-lavrik/int32/#",
+                                   [](const char* t, uint32_t v) { _logger.info("topic:%s int32:%d", t, v); });
+  scheduler.addCronTask(1 * 60 * 1000UL,
+                        []() { mqtt.publishNumber<uint32_t>("mykola-lavrik/int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
 
   _logger.info("%s:%d (%s) ...", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID);
 }
@@ -385,8 +380,7 @@ void dumpSystemInfo() {
 #endif
 
   // --- Flash ---
-  Logger::info("Flash size:  %d bytes (%.2f MB)", ESP.getFlashChipSize(),
-               ESP.getFlashChipSize() / 1024.0 / 1024.0);
+  Logger::info("Flash size:  %d bytes (%.2f MB)", ESP.getFlashChipSize(), ESP.getFlashChipSize() / 1024.0 / 1024.0);
   Logger::info("Flash speed: %d Hz", ESP.getFlashChipSpeed());
 
 // --- Внутрішня RAM (SRAM) ---
@@ -400,8 +394,7 @@ void dumpSystemInfo() {
   // --- PSRAM ---
   Logger::info("PSRAM found: %s", psramFound() ? "YES" : "NO");
   if (psramFound()) {
-    Logger::info("Total PSRAM: %d bytes (%.2f Mb)", ESP.getPsramSize(),
-                 ESP.getPsramSize() / 1024.0 / 1024.0);
+    Logger::info("Total PSRAM: %d bytes (%.2f Mb)", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
     Logger::info("Free PSRAM:  %d bytes (%.2f Mb)", ESP.getFreePsram() / 1024.0 / 1024.0);
   }
 #endif
@@ -548,8 +541,7 @@ void dumpLittleFSInfo() {
   File root = LittleFS.open("/");
   File file = root.openNextFile();
   while (file) {
-    Logger::info("File: %-28s %8d bytes (%s)", file.name(), file.size(),
-                 SizeFormatter::format(file.size()).c_str());
+    Logger::info("File: %-28s %8d bytes (%s)", file.name(), file.size(), SizeFormatter::format(file.size()).c_str());
     file = root.openNextFile();
   }
 #endif
@@ -568,12 +560,14 @@ void dumpLittleFSInfo() {
 
   // --- Скільки місця залишилось ---
   Logger::info("");
-  Logger::info("Used: %d / Total: %d / Free: %d bytes | Free: %.3f%%", usedBytes, totalBytes,
-               totalBytes - usedBytes, freePercent);
+  Logger::info("Used: %d / Total: %d / Free: %d bytes | Free: %.3f%%", usedBytes, totalBytes, totalBytes - usedBytes,
+               freePercent);
   Logger::info("============================================================");
 }
 
 void dumpStatus(const String& section) {
+  static TLogger logger("flash");
+
   if (section.equals("sys")) {
     dumpSystemInfo();
   } else if (section.equals("cfg")) {
@@ -581,12 +575,12 @@ void dumpStatus(const String& section) {
   } else if (section.equals("littlefs")) {
     dumpLittleFSInfo();
   } else if (section.equals("flash")) {
-    EspPartitionInspector::printAll(Serial);
+    EspPartitionInspector::printAll(logger);
   } else if (section.equals("flash+")) {
-    EspPartitionInspector::printAll(Serial, true);
+    EspPartitionInspector::printAll(logger, true);
 #if BOARD_HAS_SD
   } else if (section.equals("sd")) {
-    SDCardInspector::printAll(SD, Serial);
+    SDCardInspector::printAll(SD, logger);
     // SDCardInspector::printAll(SD_MMC, Serial);
   } else if (section.equals("sd+")) {
     dumpSDInfo();
@@ -597,9 +591,8 @@ void dumpStatus(const String& section) {
 }
 
 void setupSerialCommander() {
-  commandHandler.registerCommand(
-      "status", "Показати статус пристрою: status sys|cfg|sd|sd+|flash|flash+|littlefs",
-      [](const String& args) { dumpStatus(args); });
+  commandHandler.registerCommand("status", "Показати статус пристрою: status sys|cfg|sd|sd+|flash|flash+|littlefs",
+                                 [](const String& args) { dumpStatus(args); });
 
   commandHandler.registerCommand("reboot", "Перезавантажити пристрій", [](const String& args) {
     dispatcher.dispatch(EVT_REBOOT);
@@ -613,69 +606,63 @@ void setupSerialCommander() {
 #endif
   });
 
-  commandHandler.registerCommand("scan", "Сканувати wi-fi мережі",
-                                 [](const String& args) { WiFi_scan(); });
+  commandHandler.registerCommand("scan", "Сканувати wi-fi мережі", [](const String& args) { WiFi_scan(); });
 
-  commandHandler.registerCommand("flip", "перевернути екран",
-                                 [](const String& args) { display_flip(); });
+  commandHandler.registerCommand("flip", "перевернути екран", [](const String& args) { display_flip(); });
 
-  commandHandler.registerCommand("led", "Керування світлодіодом: led on|off",
-                                 [](const String& args) {
-                                   if (args.equalsIgnoreCase("on")) {
-                                     Logger::info("LED увімкнено");
-                                   } else if (args.equalsIgnoreCase("off")) {
-                                     Logger::info("LED вимкнено");
-                                   } else {
-                                     Logger::info("Використання: led on|off");
-                                   }
-                                 });
+  commandHandler.registerCommand("led", "Керування світлодіодом: led on|off", [](const String& args) {
+    if (args.equalsIgnoreCase("on")) {
+      Logger::info("LED увімкнено");
+    } else if (args.equalsIgnoreCase("off")) {
+      Logger::info("LED вимкнено");
+    } else {
+      Logger::info("Використання: led on|off");
+    }
+  });
 
-  commandHandler.registerCommand("clock", "Керування годинником: clock on|off",
-                                 [](const String& args) {
-                                   if (args.equalsIgnoreCase("on")) {
-                                     configStorage.setBool(CFG_SHOW_CLOCK, showClock = true);
-                                     Logger::info("clock ON");
-                                   } else if (args.equalsIgnoreCase("off")) {
-                                     configStorage.setBool(CFG_SHOW_CLOCK, showClock = false);
-                                     Logger::info("clock OFF");
-                                   } else {
-                                     Logger::info("Керування годинником: clock on|off");
-                                   }
-                                 });
+  commandHandler.registerCommand("clock", "Керування годинником: clock on|off", [](const String& args) {
+    if (args.equalsIgnoreCase("on")) {
+      configStorage.setBool(CFG_SHOW_CLOCK, showClock = true);
+      Logger::info("clock ON");
+    } else if (args.equalsIgnoreCase("off")) {
+      configStorage.setBool(CFG_SHOW_CLOCK, showClock = false);
+      Logger::info("clock OFF");
+    } else {
+      Logger::info("Керування годинником: clock on|off");
+    }
+  });
 
-  commandHandler.registerCommand(
-      "brightness", "Керування яскравістю: brightness 0-100", [](const String& args) {
-        if (args.length() == 0) {
-          Logger::info("Використання: brightness 0-100|auto");
-        } else if (args.equalsIgnoreCase("auto")) {
+  commandHandler.registerCommand("brightness", "Керування яскравістю: brightness 0-100", [](const String& args) {
+    if (args.length() == 0) {
+      Logger::info("Використання: brightness 0-100|auto");
+    } else if (args.equalsIgnoreCase("auto")) {
 #if LIGHT_SENSOR_PIN > 0
-          display.brightness(lightSensor.value());
+      display.brightness(lightSensor.value());
 #if !defined(BOARD_ESP8266)
-          configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
-          configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+      configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
+      configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
 #else
             isAutoBrightness = true;
 #endif
-          Logger::info(" isAutoBrighness = %s", isAutoBrightness ? "true" : "false");
+      Logger::info(" isAutoBrighness = %s", isAutoBrightness ? "true" : "false");
 #else
             Logger::info(" isAutoBrighness **disabled**");
 #endif
-        } else {
-          display.brightness(args.toInt());
-          configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
-          configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
-          Logger::info("display.brightness(%d)", display.brightness());
-        }
-      });
+    } else {
+      display.brightness(args.toInt());
+      configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+      configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
+      Logger::info("display.brightness(%d)", display.brightness());
+    }
+  });
 
   Logger::info("SerialCommander setup done");
 }
 
 void setupBackgroundImage() {
 #if defined(LITTLEFS_BACKGROUND_IMAGE)
-  spaceImage.loadFromLittleFS(LITTLEFS_BACKGROUND_IMAGE, SPRITE_COLOR_DEPTH > 8
-                                                             ? JpegColorDepth::RGB565
-                                                             : JpegColorDepth::RGB332);
+  spaceImage.loadFromLittleFS(LITTLEFS_BACKGROUND_IMAGE,
+                              SPRITE_COLOR_DEPTH > 8 ? JpegColorDepth::RGB565 : JpegColorDepth::RGB332);
   setBackgroundImage(spaceImage);
 #endif
 }
@@ -694,8 +681,7 @@ void loadConfig() {
 
   Logger::info("\t- %s = %s", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
   Logger::info("\t- %s = %s", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
-  Logger::info("\t- %s = %d", CFG_DISPLAY_BRIGHTNESS,
-               configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
+  Logger::info("\t- %s = %d", CFG_DISPLAY_BRIGHTNESS, configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
   Logger::info("");
 }
 
@@ -723,7 +709,7 @@ void setupLightSensor() {
     display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
   });
 
-#if BOARD_HAS_TOUCH
+#if BOARD_HAS_TOUCHSCREEN
   touchController.events().onHold([](TouchPoint p, unsigned long ms) {
     configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
     configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, lightSensor.value());
@@ -757,6 +743,7 @@ void sendEmail() {
 }
 
 void drawSystemInfo() {
+  char buf[120] = "";
   uint8_t row = 0;
   // img.fillRect(0, 30, 320, 65, BG_COLOR);
 
@@ -765,37 +752,45 @@ void drawSystemInfo() {
   uint32_t uptimeSec = millis() / 1000;
 
   display.setTextSize(1);
+  display.setTextFont(1);
   display.setTextColor(TFT_DARKGREY);
 
+#if defined(ESP32)
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
-  display.printf(F("Uptime: %02d:%02d:%02d"), uptimeSec / 3600, (uptimeSec / 60) % 60,
-                 uptimeSec % 60);
+  display.printf(F("Uptime: %02d:%02d:%02d"), uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
+#endif
 
+#if defined(ESP8266)
+  display.setCursor(0, 0 + row++ * (3 + display.fontHeight()));
+  snprintf(buf, 120, "CPU: %dMHz\nLoop rate: %d/s", cpuFreq, display.loopFrameRate());
+#else
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
-  display.printf(F("CPU: %d MHz   Loop rate: %d/s"), cpuFreq, display.loopFrameRate());
+  snprintf(buf, 120, "CPU: %d MHz   Loop rate: %d/s", cpuFreq, display.loopFrameRate());
+#endif
 
-#if defined(BOARD_ESP8266)
+  display.print(buf);
+
+#if defined(ESP8266)
   // ESP8266 не має ESP.getHeapSize() - показуємо лише вільну пам'ять
-  display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
-  display.printf("Heap free: %d KB", freeHeap / 1024);
+  // display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+  // display.printf("Heap free: %d KB", freeHeap / 1024);
 #else
   uint32_t totalHeap = ESP.getHeapSize();
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
-  display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024,
-                 (freeHeap * 100) / totalHeap);
+  display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, (freeHeap * 100) / totalHeap);
 #endif
 
+#if defined(ESP32)
   char* dumpPingStr = dumpPingStatsStr();
   if (dumpPingStr) {
     display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
     display.print(dumpPingStatsStr());
   }
 
-  char brightnessStr[200];
-  sprintf(brightnessStr, "Brigtness: %d%% %s", display.brightness(),
-          isAutoBrightness ? "(auto)" : "");
+  snprintf(buf, sizeof(buf), "Brigtness: %d%% %s", display.brightness(), isAutoBrightness ? "(auto)" : "");
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
-  display.print(brightnessStr);
+  display.print(buf);
+#endif
 
   // Візуальний бар пам'яті
   // int barX = 10, barY = 56, barW = 300, barH = 10;
@@ -854,26 +849,22 @@ void setupBlinkLED() {
   });
 
   if (!configStorage.getBool(CFG_BLINK_LED, true)) {
-    Logger::info("BlinkLED onPause!!");
     scheduler.pause(blinkLedTaskId);
   }
 
-  commandHandler.registerCommand(
-    "blink", "Керування LED: blink on|off",
-    [blinkLedTaskId](const String& args) {
-      if (args.equalsIgnoreCase("on")) {
-        scheduler.resume(blinkLedTaskId);
-        configStorage.setBool(CFG_BLINK_LED, true);
-        Logger::info("blink ON");
-      } else if (args.equalsIgnoreCase("off")) {
-        scheduler.pause(blinkLedTaskId);
-        configStorage.setBool(CFG_BLINK_LED, false);
-        Logger::info("blink OFF");
-      } else {
-        Logger::info("Керування LED: blink on|off");
-      }
+  commandHandler.registerCommand("blink", "Керування LED: blink on|off", [blinkLedTaskId](const String& args) {
+    if (args.equalsIgnoreCase("on")) {
+      scheduler.resume(blinkLedTaskId);
+      configStorage.setBool(CFG_BLINK_LED, true);
+      Logger::info("blink ON");
+    } else if (args.equalsIgnoreCase("off")) {
+      scheduler.pause(blinkLedTaskId);
+      configStorage.setBool(CFG_BLINK_LED, false);
+      Logger::info("blink OFF");
+    } else {
+      Logger::info("Керування LED: blink on|off");
     }
-  );
+  });
 #endif
 }
 
@@ -901,8 +892,7 @@ void setup() {
   // httpServer.setEventDispatcher(&dispatcher);
   httpServer.begin();
   Logger::info("HttpServer::begin()");
-  Logger::info("LittlFS::exists('/convert.c') = %s",
-               littleFsSource.exists("/convert.c") ? "yes" : "no");
+  Logger::info("LittlFS::exists('/convert.c') = %s", littleFsSource.exists("/convert.c") ? "yes" : "no");
   Logger::info("LittleFS test done.");
 
   display.flush();
@@ -924,7 +914,7 @@ void loop() {
   // sendEmail();
 
   scheduler.loop();
-#if BOARD_HAS_TOUCH
+#if BOARD_HAS_TOUCHSCREEN
   touchController.update();
 #endif
 

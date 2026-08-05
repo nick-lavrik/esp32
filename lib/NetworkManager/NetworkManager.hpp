@@ -15,100 +15,65 @@
 #include "NetworkManagerState.hpp"
 #include "WifiConnection.hpp"
 
-// WiFi connection manager з підтримкою списку з'єднань, пріоритетів,
-// автоперепідключення та AP fallback. Натхнений концепцією nmcli (Ubuntu).
+class ConfigStorage;
+
+// opaque handle для реєстрації/видалення listener'ів
+using NmListenerId = uint16_t;
+static constexpr NmListenerId kInvalidNmListenerId = 0;
+
+// WiFi connection manager з пріоритетним списком мереж і AP-fallback.
 //
-// --- Швидкий старт ---
+// Швидкий старт (ESP32, FreeRTOS task):
+//   ConfigStorage storage;
+//   storage.begin("netmgr");
 //
-//   NetworkManager nm;
+//   NetworkManagerConfig cfg;
+//   cfg.apSsid = "ESP32-Setup";
+//
+//   NetworkManager nm(&storage);
+//   nm.setConfig(cfg);
+//   nm.loadConfig();                     // завантажити збережені з'єднання
 //
 //   WifiConnection home;
-//   home.ssid     = "HomeNet";
+//   home.ssid = "HomeWiFi";
 //   home.password = "secret";
 //   home.priority = 10;
 //   nm.addConnection(home);
 //
-//   WifiConnection office;
-//   office.ssid     = "OfficeNet";
-//   office.password = "work123";
-//   office.priority = 5;
-//   nm.addConnection(office);
+//   nm.addListener(&myListener);
+//   nm.begin();                          // стартує FreeRTOS task
 //
-//   NetworkManagerConfig cfg;
-//   cfg.apSsid    = "ESP32-Fallback";
-//   cfg.apPassword = "12345678";
-//   nm.setConfig(cfg);
+// Після підключення:
+//   Serial.println(nm.localIp().c_str());
 //
-//   nm.begin();   // запускає FreeRTOS-таск (або блокує до connect/AP у BLOCKING_MODE)
-//
-// --- З ConfigStorage ---
-//
-//   ConfigStorage storage;
-//   storage.begin("netmgr");
-//   nm.setStorage(&storage);
-//   nm.loadConfig();       // завантажує конфіг і список з'єднань
-//   nm.begin();
-//
-// --- З listener ---
-//
-//   class MyListener : public INetworkManagerListener {
-//    public:
-//     void onConnected(const WifiConnection& c, const std::string& ip) override {
-//       Serial.printf("Connected: %s  IP: %s\n", c.ssid.c_str(), ip.c_str());
-//     }
-//   };
-//   MyListener listener;
-//   ListenerId id = nm.addListener(&listener);
-//   // nm.removeListener(id);
-
-// Opaque ідентифікатор listener'а (аналогічно ListenerId в EventDispatcher).
-using NmListenerId = uint16_t;
-constexpr NmListenerId kInvalidNmListenerId = 0;
-
-// Опціональна залежність — forward declaration, щоб уникнути
-// обов'язкового включення ConfigStorage.hpp у всіх translation units.
-class ConfigStorage;
+// Ручне управління:
+//   nm.setAutoReconnect(false);          // зупинити автоперепідключення
+//   nm.scan();                           // форсований скан
+//   nm.startAp();                        // форсований AP mode
+//   nm.saveConfig();                     // зберегти поточну конфігурацію
 
 class NetworkManager {
  public:
-  NetworkManager();
+  explicit NetworkManager(ConfigStorage* storage = nullptr);
   ~NetworkManager();
 
-  // Некопійований: ListenerId і FreeRTOS task handle прив'язані до екземпляра.
+  // Некопійований — керує FreeRTOS task і внутрішнім станом
   NetworkManager(const NetworkManager&) = delete;
   NetworkManager& operator=(const NetworkManager&) = delete;
 
   // ---- ініціалізація ----
 
-  // Запускає FSM (FreeRTOS task на ESP32/ESP8266, або входить у blocking loop).
-  // Якщо storage встановлений — конфіг і список з'єднань вже мають бути завантажені
-  // через loadConfig() до виклику begin().
+  // Запускає FSM (FreeRTOS task на ESP32/ESP8266, або blocking на NM_BLOCKING_MODE).
+  // Викликати після setConfig() / loadConfig() / addConnection().
   void begin();
 
-  // Зупиняє FSM, від'єднується від WiFi, зупиняє AP якщо запущений.
+  // Зупиняє task, відключається від WiFi, зупиняє AP.
   void end();
-
-  // ---- ConfigStorage (опціонально) ----
-
-  void setStorage(ConfigStorage* storage);
-
-  // Завантажує NetworkManagerConfig і список WifiConnection з ConfigStorage.
-  // Повертає false якщо storage не встановлений або дані відсутні.
-  bool loadConfig();
-
-  // Зберігає поточний конфіг і список з'єднань у ConfigStorage.
-  // Повертає false якщо storage не встановлений.
-  bool saveConfig();
-
-  // ---- конфігурація ----
-
-  void setConfig(const NetworkManagerConfig& config);
-  const NetworkManagerConfig& config() const;
 
   // ---- з'єднання ----
 
-  // Додає з'єднання до списку. Призначає унікальний connectionId.
-  // Повертає призначений connectionId (або 0 при помилці).
+  // Додає з'єднання до списку. Генерує і повертає connectionId.
+  // Не зберігає автоматично — викличте saveConfig() за потреби.
   uint16_t addConnection(const WifiConnection& conn);
 
   // Видаляє з'єднання за connectionId. Повертає false якщо не знайдено.
@@ -116,9 +81,8 @@ class NetworkManager {
 
   // Повертає вказівник на з'єднання або nullptr якщо не знайдено.
   WifiConnection* getConnection(uint16_t connectionId);
-  const WifiConnection* getConnection(uint16_t connectionId) const;
 
-  // Повний список збережених з'єднань (для ітерації / веб-інтерфейсу).
+  // Повний список збережених з'єднань (тільки читання).
   const std::vector<WifiConnection>& connections() const;
 
   // ---- стан ----
@@ -130,23 +94,33 @@ class NetworkManager {
 
   // ---- управління ----
 
-  // Вмикає/вимикає автоматичне перепідключення та скан у AP_MODE.
-  // false → менеджер залишається у поточному стані до явного виклику.
+  // Вмикає/вимикає автоматичне перепідключення і повторне сканування.
+  // false → менеджер залишається в поточному стані до ручного виклику.
   void setAutoReconnect(bool enabled);
   bool autoReconnect() const;
 
-  // Форсує новий цикл: scan → connect → (AP якщо всі невдалі).
-  // Ігнорує autoReconnect.
+  // Форсований reconnect: перериває поточний стан і починає SCANNING.
   void reconnect();
 
-  // Форсовано запускає AP mode (незалежно від стану підключення).
+  // Форсований перехід в AP_MODE (наприклад, з SerialCommander).
   void startAp();
 
-  // Зупиняє AP mode. Якщо autoReconnect=true — запускає scan.
+  // Зупиняє AP і переходить в SCANNING (якщо autoReconnect=true).
   void stopAp();
 
-  // Форсований WiFi scan (оновлює rssi у відомих з'єднань, викликає onScan* події).
+  // Форсований WiFi-скан без зміни поточного з'єднання.
   void scan();
+
+  // ---- конфігурація ----
+
+  void setConfig(const NetworkManagerConfig& cfg);
+  const NetworkManagerConfig& config() const;
+
+  // Зберігає config + список з'єднань в ConfigStorage ("nm_config", "nm_connections").
+  void saveConfig();
+
+  // Завантажує config + список з'єднань з ConfigStorage.
+  void loadConfig();
 
   // ---- listeners ----
 
@@ -156,36 +130,29 @@ class NetworkManager {
  private:
   // ---- FSM ----
 
-  void _setState(NetworkManagerState newState);
-  void _runFsm();  // один крок FSM — викликається з task або loop()
+  void _setState(NetworkManagerState next);
 
-  // ---- FSM steps ----
+  // Повертає відсортований список enabled-з'єднань для спроби підключення.
+  // Порядок: спочатку найновіший lastConnected, потім за priority DESC.
+  std::vector<WifiConnection*> _sortedCandidates();
 
-  void _doScan();
-  void _doConnect();         // намагається підключитись до наступної мережі зі списку
-  void _doStartAp();
-  void _doReconnect();
-  void _checkConnected();    // перевірка втрати з'єднання у стані CONNECTED
-
-  // ---- helpers ----
-
-  // Будує впорядкований список кандидатів для підключення:
-  //   1. isEnabled=true
-  //   2. якщо scanBeforeConnect — тільки ті що видно (rssi != 0)
-  //   3. сортування: lastConnected DESC (спочатку), потім priority DESC
-  std::vector<WifiConnection*> _buildCandidateList();
-
-  // Спроба підключення до конкретного з'єднання.
-  // Повертає true якщо отримано IP у межах connectTimeoutMs.
-  bool _connectTo(WifiConnection& conn);
-
-  // Оновлює rssi у _connections на основі результатів WiFi.scanNetworks().
+  // Фільтрує _sortedCandidates() залишаючи тільки ті SSID, що видно в ефірі.
+  // Заповнює rssi у відповідних WifiConnection.
   void _applyScanResults();
 
-  // Диспетчер подій до listeners.
+  // Спроба підключення до одного з'єднання. Повертає true при успіху.
+  bool _connectTo(WifiConnection& conn);
+
+  // Конфігурує статичну IP або DHCP перед WiFi.begin().
+  void _applyIpConfig(const WifiConnection& conn);
+
+  // Запускає AP з параметрами з _config.
+  void _startApInternal();
+
+  // Диспетчеризація подій до всіх listeners.
   void _notifyScanStart();
-  void _notifyScanResult();
-  void _notifyScanEnd();
+  void _notifyScanResult(const std::vector<WifiConnection*>& known);
+  void _notifyScanEnd(const std::vector<WifiConnection*>& known);
   void _notifyConnecting(const WifiConnection& conn);
   void _notifyConnected(const WifiConnection& conn, const std::string& ip);
   void _notifyDisconnected(const std::string& ssid);
@@ -193,50 +160,50 @@ class NetworkManager {
   void _notifyApStarted(const std::string& apSsid, const std::string& ip);
   void _notifyApStopped();
 
-  uint16_t _nextConnectionId();
-
   // ---- FreeRTOS task ----
 
-#if !defined(NM_BLOCKING_MODE)
-  static void _taskEntry(void* arg);
-  void* _taskHandle = nullptr;  // TaskHandle_t — void* щоб не тягнути freertos у header
+#if defined(NM_BLOCKING_MODE)
+  // Варіант C: без task, loop() викликається ззовні
+ public:
+  void loop();
+
+ private:
+#else
+  static void _taskEntry(void* param);
+  void _taskLoop();
 #endif
 
-  // ---- стан ----
+  // ---- дані ----
 
-  NetworkManagerState _state = NetworkManagerState::IDLE;
+  ConfigStorage* _storage;
   NetworkManagerConfig _config;
+  NetworkManagerState _state = NetworkManagerState::IDLE;
+
   std::vector<WifiConnection> _connections;
-  uint16_t _nextId = 1;
+  uint16_t _nextConnectionId = 1;
 
-  bool _autoReconnect = true;
-
-  // поточне активне з'єднання (заповнюється після CONNECTED)
   std::string _currentSsid;
   std::string _currentIp;
 
-  // індекс у _buildCandidateList() — яку мережу пробуємо зараз
-  size_t _candidateIndex = 0;
-  uint8_t _retryCount = 0;
+  bool _autoReconnect = true;
 
-  // мітка часу для scanInterval в AP_MODE / RECONNECTING
+  // Індекс поточного кандидата під час CONNECTING (індекс у _sortedCandidates()).
+  // Скидається при кожному новому циклі сканування.
+  size_t _candidateIndex = 0;
+  uint8_t _currentRetries = 0;
+
+  // Момент останнього скану (millis()) — для autoReconnect інтервалу в AP_MODE.
   uint32_t _lastScanMs = 0;
 
-  // форсовані команди з публічного API (встановлюються атомарно)
-  volatile bool _cmdReconnect = false;
-  volatile bool _cmdStartAp = false;
-  volatile bool _cmdStopAp = false;
-  volatile bool _cmdScan = false;
-
-  // ---- storage ----
-  ConfigStorage* _storage = nullptr;
-
-  // ---- listeners ----
-
+  // Listeners
   struct ListenerEntry {
     NmListenerId id;
     INetworkManagerListener* listener;
   };
   std::vector<ListenerEntry> _listeners;
   NmListenerId _nextListenerId = 1;
+
+#if !defined(NM_BLOCKING_MODE)
+  TaskHandle_t _taskHandle = nullptr;
+#endif
 };
