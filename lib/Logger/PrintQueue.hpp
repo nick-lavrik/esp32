@@ -11,6 +11,12 @@
 // чергою і зберігають порядок повідомлень між тегами. Не створювати
 // напряму - тільки через PrintQueueRegistry.
 //
+// Існує повноцінно лише на ESP32 (є FreeRTOS-мьютекс і сам ring buffer).
+// На ESP8266 rwlock::write() - завжди-успішний no-op (немає RTOS, немає
+// конкурентного доступу в кооперативному loop() - див. RwLock.cpp), тому
+// пряме write ніколи "не вдається" і буферизувати нічого: PrintQueue там
+// звужується до тонкої обгортки без стану (див. PrintQueue.cpp).
+//
 // Використання (напряму зазвичай не потрібно - див. SerialLogger::log()):
 //   PrintQueue& q = PrintQueueRegistry::instance().forOutput(Serial);
 //   q.tryWrite(line, /*timeoutMs=*/10);
@@ -18,54 +24,58 @@
 //   // в loop() кожної плати - дренажить усі зареєстровані черги:
 //   PrintQueue::flush();
 //
-// Розмір черги (кількість рядків) - через build_flags, напр.:
+// Розмір черги на ESP32 (кількість рядків) - через build_flags, напр.:
 //   build_flags = -D DEFAULT_PRINT_QUEUE_SIZE=10
-// esp8266 (мало RAM) лишає дефолт (5) або зменшує, плати з PSRAM
-// можуть збільшити.
 
 #include <Print.h>
 #include <cstddef>
 #include <cstdint>
+
+#if defined(ESP32)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#endif
 
 #ifndef DEFAULT_PRINT_QUEUE_SIZE
 #define DEFAULT_PRINT_QUEUE_SIZE 5
 #endif
 
-
 class PrintQueue {
 public:
-    static constexpr size_t kCapacity = DEFAULT_PRINT_QUEUE_SIZE;
+    // kLineSize використовує SerialLogger для розміру свого стекового
+    // буфера незалежно від платформи - лишається спільним.
     static constexpr size_t kLineSize = 160;
 
     explicit PrintQueue(Print& output);
 
-    // Спершу неблокуюче дренажить те, що вже в черзі (зберігає порядок),
-    // потім пробує записати line напряму з таймаутом timeoutMs. Якщо
-    // пряме write не вдалось (output зайнятий) - кладе line у чергу
-    // (drop-oldest при переповненні). Повертає true, якщо line пішов
-    // напряму в output без буферизації.
+    // Спершу неблокуюче дренажить те, що вже в черзі (зберігає порядок,
+    // ESP32-only), потім пробує записати line напряму з таймаутом
+    // timeoutMs. Якщо пряме write не вдалось - кладе line у чергу
+    // (drop-oldest при переповненні, ESP32-only). Повертає true, якщо
+    // line пішов напряму в output без буферизації. На ESP8266 - завжди
+    // напряму, завжди true (див. коментар вище).
     bool tryWrite(const char* line, uint32_t timeoutMs);
 
-    // Неблокуюча спроба виштовхати накопичене. Викликати періодично,
-    // якщо після невдалого tryWrite() довго не буде нових log()-викликів
-    // (інакше чергу продренажить лише наступний tryWrite()).
+    // Неблокуюча спроба виштовхати накопичене (ESP32). На ESP8266 - no-op.
     void drain();
 
-    // Дренажить усі зареєстровані черги (усі Print-виходи). Викликати
-    // з loop() кожної плати.
+    // Дренажить усі зареєстровані черги. Викликати з loop() кожної плати.
     static void flush();
 
 private:
+    Print& _output;
+
+#if defined(ESP32)
+    static constexpr size_t kCapacity = DEFAULT_PRINT_QUEUE_SIZE;
+
     void pushLocked(const char* line);
     void drainLocked();
 
-    Print& _output;
     SemaphoreHandle_t _mutex;
     StaticSemaphore_t _mutexBuffer;
 
     char _lines[kCapacity][kLineSize] = {};
     size_t _head = 0;   // індекс найстарішого елемента
     size_t _count = 0;  // скільки елементів фактично в черзі
+#endif
 };

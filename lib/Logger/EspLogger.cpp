@@ -1,3 +1,7 @@
+#if defined(ESP8266)
+#endif
+
+#if defined(ESP32)
 #include "EspLogger.hpp"
 #include "LogLevelManager.hpp"
 #include <esp_log.h>
@@ -21,3 +25,4 @@ void EspLogger::log(LogLevel level, const char* fmt, va_list args) const {
 
     esp_log_writev(espLevel, _tag, fmt, args);
 }
+#endif
