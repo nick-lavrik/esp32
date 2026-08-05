@@ -779,16 +779,16 @@ void drawSystemInfo() {
 
 void setupFlipButton() {
 
-    #if defined(BOOT_BUTTON_PIN)
+    #if defined(FLIP_BUTTON_PIN)
     // GPIO - INPUT, OUTPUT, INPUT_PULLUP, or INPUT_PULLDOWN
     // - INPUT: Sets the pin as a regular digital read.
     // - OUTPUT: Sets the pin to send out a 3.3V high or 0V low signal.
     // - INPUT_PULLUP: Turns on a built-in resistor holding the pin HIGH until pulled to ground.
     // - INPUT_PULLDOWN: Turns on a built-in resistor holding the pin LOW until supplied with 3.3V.
-    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP); // GPIO0 - Enable pull-up resistor
+    pinMode(FLIP_BUTTON_PIN, INPUT_PULLUP); // GPIO0 - Enable pull-up resistor
     scheduler.addCronTask(0, []() -> void {
         static bool bootButtonPressed = false;
-        int buttonState = digitalRead(BOOT_BUTTON_PIN);
+        int buttonState = digitalRead(FLIP_BUTTON_PIN);
         if ((buttonState == LOW) && !bootButtonPressed) {
             bootButtonPressed = true;
             display_flip();
@@ -803,7 +803,7 @@ void setupFlipButton() {
             // loop (released) ...
         }
     });
-    Logger::info("FlipButton GPIO PIN=%d", BOOT_BUTTON_PIN);
+    Logger::info("FlipButton GPIO PIN=%d", FLIP_BUTTON_PIN);
     #endif
 }
 
