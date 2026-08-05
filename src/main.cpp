@@ -79,6 +79,7 @@
 
 const char* EVT_REBOOT = "reboot";
 const char* CFG_SHOW_CLOCK = "clock";
+const char* CFG_BLINK_LED = "blink"; // ESP8266 BLINK_LED_PIN dependency
 const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 
@@ -840,7 +841,7 @@ void setupFlipButton() {
 void setupBlinkLED() {
 #if BLINK_LED_PIN
   pinMode(BLINK_LED_PIN, OUTPUT);
-  scheduler.addCronTask(10, []() {
+  TaskId blinkLedTaskId = scheduler.addCronTask(10, []() {
     static char lastMs[9] = "00:00:00";
     char now[9];
     ntp.ftime("%H:%M:%S", now, 9);
@@ -851,17 +852,39 @@ void setupBlinkLED() {
       digitalWrite(BLINK_LED_PIN, HIGH);  // вимкнути
     }
   });
+
+  if (!configStorage.getBool(CFG_BLINK_LED, true)) {
+    Logger::info("BlinkLED onPause!!");
+    scheduler.pause(blinkLedTaskId);
+  }
+
+  commandHandler.registerCommand(
+    "blink", "Керування LED: blink on|off",
+    [blinkLedTaskId](const String& args) {
+      if (args.equalsIgnoreCase("on")) {
+        scheduler.resume(blinkLedTaskId);
+        configStorage.setBool(CFG_BLINK_LED, true);
+        Logger::info("blink ON");
+      } else if (args.equalsIgnoreCase("off")) {
+        scheduler.pause(blinkLedTaskId);
+        configStorage.setBool(CFG_BLINK_LED, false);
+        Logger::info("blink OFF");
+      } else {
+        Logger::info("Керування LED: blink on|off");
+      }
+    }
+  );
 #endif
 }
 
 void setup() {
   setupSerial();
-  setupBlinkLED();
   setupSD();
+  setupLittleFS();
   setupEventDispatcher();
   setupConfigStorage();
   setupSerialCommander();
-  setupLittleFS();
+  setupBlinkLED();
   setupDisplay();
   setupTouchScreen();
 

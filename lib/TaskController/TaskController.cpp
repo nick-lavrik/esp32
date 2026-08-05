@@ -48,6 +48,16 @@ bool TaskController::pause(TaskId id) {
   return false;
 }
 
+bool TaskController::isPaused(TaskId id) {
+  for (auto& task : _tasks) {
+    if (task->id() == id) {
+      return task->isPaused();
+    }
+  }
+  assert("unknown TaskId"); // todo: throw exception
+  return false;
+}
+
 bool TaskController::resume(TaskId id) {
   for (auto& task : _tasks) {
     if (task->id() == id) {
@@ -55,6 +65,16 @@ bool TaskController::resume(TaskId id) {
       return true;
     }
   }
+  return false;
+}
+
+bool TaskController::isCancelled(TaskId id) {
+  for (auto& task : _tasks) {
+    if (task->id() == id) {
+      return task->isCancelled();
+    }
+  }
+  assert("unknown TaskId"); // todo: throw exception
   return false;
 }
 

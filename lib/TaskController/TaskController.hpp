@@ -50,6 +50,9 @@ public:
   // Повертає true, якщо завдання знайдено.
   bool resume(TaskId id);
 
+  bool isPaused(TaskId id);
+  bool isCancelled(TaskId id);
+  
   // Викликати регулярно з loop() скетчу: виконує та прибирає
   // завершені/видалені завдання з черги.
   void loop();

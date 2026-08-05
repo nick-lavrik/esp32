@@ -45,7 +45,7 @@ void setupWiFi() {
     // display.setCursor(10, 10 + 3 + display.fontHeight());
     display.println("\nWiFi connected!");
     display.flush();
-    Logger::info("WiFi connected, IP: %s", WiFi.localIP().toString());
+    Logger::info("WiFi connected, IP: %s", WiFi.localIP().toString().c_str());
     // setLed(false, true, false);
   } else {
     display.setTextColor(TFT_RED);
