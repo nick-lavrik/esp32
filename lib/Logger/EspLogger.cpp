@@ -1,4 +1,5 @@
 #if defined(ESP8266)
+#error "please check USE_ESP_LOGGER setup on ESP8266 platform"
 #endif
 
 #if defined(ESP32)
