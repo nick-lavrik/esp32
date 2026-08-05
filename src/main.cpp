@@ -685,7 +685,6 @@ void setupLightSensor() {
                 display.brightness(lightSensor.value());
                 Logger::info("display.brightness(%d) *auto*", lightSensor.value());
             }
-            Logger::info("");
         });
 
         scheduler.addCronTask(0, []() {

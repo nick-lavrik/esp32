@@ -299,7 +299,7 @@ std::vector<EspPartitionInfo> EspPartitionInspector::collectAll(bool computeSha2
 }
 
 void EspPartitionInspector::printOne(const EspPartitionInfo &info, Print& out) {
-    out.printf("%-14s %-6s %-17s 0x%08X 0x%08X %-4s %-8s %s\n",
+    out.printf("%-14s %-7s %-17s 0x%08X 0x%08X %-4s %-8s %s\n",
                info.label.c_str(),
                info.typeName.c_str(),
                info.subtypeName.c_str(),
@@ -323,16 +323,16 @@ void EspPartitionInspector::printAll(Print &out, bool computeSha256) {
 #else
     out.println("=== Flash Partition Table ===");
 #endif
-    out.printf("%-14s %-6s %-17s %-10s %-10s %-4s %-8s %s\n",
+    out.printf("%-14s %-7s %-17s %-10s %-10s %-4s %-8s %s\n",
                "label", "type", "subtype", "offset", "size", "encr", "readonly", "state");
-    out.printf("%.14s %.6s %.17s %.10s %.10s %.4s %.8s %s\n",
+    out.printf("%.14s %.7s %.17s %.10s %.10s %.4s %.8s %s\n",
                line, line, line, line, line, line, line, line);
 
     for (const auto &info : partitions) {
         printOne(info, out);
     }
 
-    out.printf("%.14s-%.6s-%.17s-%.10s-%.10s-%.4s-%.8s-%s\n",
+    out.printf("%.14s-%.7s-%.17s-%.10s-%.10s-%.4s-%.8s-%s\n",
                line, line, line, line, line, line, line, line);
 
     out.printf("Total: %u entries\n", static_cast<unsigned int>(partitions.size()));
