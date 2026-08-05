@@ -1,0 +1,7 @@
+{
+  "name": "NetworkManager",
+  "version": "0.1.0",
+  "description": "WiFi connection manager with priority list, AP fallback and event listeners",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32", "espressif8266"]
+}
