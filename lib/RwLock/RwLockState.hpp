@@ -1,6 +1,14 @@
 // Внутрішній стан одного зареєстрованого через rwlock об'єкта.
 // Не використовувати напряму — тільки через RwLock.hpp / namespace rwlock.
+//
+// Існує лише на ESP32: тут є FreeRTOS з preemptive-задачами, які реально
+// можуть конкурувати за доступ до obj (наприклад кілька тасків пишуть у
+// Serial). На ESP8266 немає RTOS (кооперативний однопотоковий loop()) —
+// конкурентного доступу фізично нема, тому там rwlock — no-op без стану
+// (див. RwLock.cpp), і цей файл на ESP8266 компілюється в пусте місце.
 #pragma once
+
+#if defined(ESP32)
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -23,3 +31,5 @@ struct RwLockState {
   bool activeWriter = false;
   int waitingWriters = 0;
 };
+
+#endif  // defined(ESP32)

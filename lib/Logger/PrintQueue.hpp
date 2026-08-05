@@ -33,6 +33,7 @@
 #define DEFAULT_PRINT_QUEUE_SIZE 5
 #endif
 
+
 class PrintQueue {
 public:
     static constexpr size_t kCapacity = DEFAULT_PRINT_QUEUE_SIZE;

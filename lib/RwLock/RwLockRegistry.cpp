@@ -1,5 +1,8 @@
 #include "RwLockRegistry.hpp"
 
+// Тіло файлу існує лише на ESP32 — див. коментар у RwLockRegistry.hpp.
+#if defined(ESP32)
+
 RwLockRegistry::RwLockRegistry() {
   _mapMutex = xSemaphoreCreateMutexStatic(&_mapMutexBuffer);
 }
@@ -26,3 +29,5 @@ RwLockState* RwLockRegistry::find(void* obj) {
   xSemaphoreGive(_mapMutex);
   return result;
 }
+
+#endif  // defined(ESP32)
