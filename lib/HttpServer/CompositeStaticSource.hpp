@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+
 #include "IStaticSource.hpp"
 
 // Пріоритетний ланцюжок джерел статики. Перше джерело в списку, для якого
@@ -12,24 +13,23 @@
 //
 // Не володіє джерелами (не видаляє їх у деструкторі) — власник (main.cpp
 // конкретної плати) відповідає за час життя переданих IStaticSource*.
-class CompositeStaticSource : public IStaticSource
-{
+class CompositeStaticSource : public IStaticSource {
 public:
-    // priority: більше число - вищий пріоритет (перевіряється раніше).
-    // При однаковому priority - порядок додавання (addSource раніше = раніше перевіряється).
-    void addSource(IStaticSource* source, int priority = 0);
+  // priority: більше число - вищий пріоритет (перевіряється раніше).
+  // При однаковому priority - порядок додавання (addSource раніше = раніше перевіряється).
+  void addSource(IStaticSource* source, int priority = 0);
 
-    bool exists(const String& path) const override;
-    void handleRequest(AsyncWebServerRequest* request, const String& path) override;
+  bool exists(const String& path) const override;
+  void handleRequest(AsyncWebServerRequest* request, const String& path) override;
 
 private:
-    struct Entry {
-        IStaticSource* source;
-        int priority;
-    };
+  struct Entry {
+    IStaticSource* source;
+    int priority;
+  };
 
-    std::vector<Entry> _sources;
+  std::vector<Entry> _sources;
 
-    // Повертає перше джерело (за пріоритетом), яке має path, або nullptr.
-    IStaticSource* _findSource(const String& path) const;
+  // Повертає перше джерело (за пріоритетом), яке має path, або nullptr.
+  IStaticSource* _findSource(const String& path) const;
 };

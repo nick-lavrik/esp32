@@ -7,11 +7,11 @@
 // реалізують IEvent напряму.
 class IEvent {
 public:
-    virtual ~IEvent() = default;
+  virtual ~IEvent() = default;
 
-    // Зупиняє подальшу передачу події наступним слухачам.
-    virtual void stopPropagation() = 0;
+  // Зупиняє подальшу передачу події наступним слухачам.
+  virtual void stopPropagation() = 0;
 
-    // Повертає true, якщо передачу події вже зупинено.
-    virtual bool isPropagationStopped() const = 0;
+  // Повертає true, якщо передачу події вже зупинено.
+  virtual bool isPropagationStopped() const = 0;
 };

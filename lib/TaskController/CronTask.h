@@ -8,15 +8,15 @@
 // не видалить його явно.
 class CronTask : public ITask {
 public:
-    CronTask(uint32_t intervalMs, TaskCallback callback);
+  CronTask(uint32_t intervalMs, TaskCallback callback);
 
-    bool update(uint32_t now) override;
+  bool update(uint32_t now) override;
 
 protected:
-    void onResume(uint32_t pausedForMs) override;
+  void onResume(uint32_t pausedForMs) override;
 
 private:
-    uint32_t _intervalMs;
-    uint32_t _lastRun;
-    TaskCallback _callback;
+  uint32_t _intervalMs;
+  uint32_t _lastRun;
+  TaskCallback _callback;
 };

@@ -1,51 +1,52 @@
 #pragma once
 
 #include <Arduino.h>
+
+#include <TLogger.hpp>
 #include <functional>
 #include <vector>
-#include <TLogger.hpp>
 
 // Неблокуючий обробник команд, що надходять через Serial.
 // Викликайте update() у loop() на кожній ітерації — метод НЕ блокує
 // виконання, навіть якщо у порту ще немає жодного байта.
 class SerialCommander {
 public:
-    using CommandCallback = std::function<void(const String& args)>;
+  using CommandCallback = std::function<void(const String& args)>;
 
-    SerialCommander(Stream& serial = Serial, char terminator = '\n');
+  SerialCommander(Stream& serial = Serial, char terminator = '\n');
 
-    // Реєстрація нової команди.
-    // name        — назва команди, порівнюється без урахування регістру
-    // description — опис для команди "list"
-    // callback    — функція, що отримає рядок аргументів після назви команди
-    void registerCommand(const String& name, const String& description, CommandCallback callback);
+  // Реєстрація нової команди.
+  // name        — назва команди, порівнюється без урахування регістру
+  // description — опис для команди "list"
+  // callback    — функція, що отримає рядок аргументів після назви команди
+  void registerCommand(const String& name, const String& description, CommandCallback callback);
 
-    // Викликати щоразу в loop(). Неблокуючий.
-    void update();
+  // Викликати щоразу в loop(). Неблокуючий.
+  void update();
 
-    // Максимальна довжина буфера рядка
-    // (захист від переповнення, якщо хтось шле дані без термінатора).
-    void setMaxLineLength(size_t maxLen) { maxLineLength_ = maxLen; }
+  // Максимальна довжина буфера рядка
+  // (захист від переповнення, якщо хтось шле дані без термінатора).
+  void setMaxLineLength(size_t maxLen) { maxLineLength_ = maxLen; }
 
 private:
-    struct Command {
-        String name;
-        String description;
-        CommandCallback callback;
-    };
+  struct Command {
+    String name;
+    String description;
+    CommandCallback callback;
+  };
 
-    Stream& serial_;
-    char terminator_;
-    String buffer_;
-    size_t maxLineLength_ = 128;
-    std::vector<Command> commands_;
+  Stream& serial_;
+  char terminator_;
+  String buffer_;
+  size_t maxLineLength_ = 128;
+  std::vector<Command> commands_;
 
-    void processLine(const String& line);
-    void printUnknown(const String& name);
-    void printList();
+  void processLine(const String& line);
+  void printUnknown(const String& name);
+  void printList();
 
-    static String trim(const String& s);
-    static void splitFirstToken(const String& line, String& outName, String& outArgs);
+  static String trim(const String& s);
+  static void splitFirstToken(const String& line, String& outName, String& outArgs);
 
-    const TLogger _logger{"cmd"};
+  const TLogger _logger{"cmd"};
 };

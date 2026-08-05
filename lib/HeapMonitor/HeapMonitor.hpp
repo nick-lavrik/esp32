@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Arduino.h>
+
 #include <TLogger.hpp>
+
 #include "esp_heap_caps.h"
 
 /**
@@ -36,31 +38,31 @@
  */
 class HeapMonitor {
 public:
-    // intervalMs - як часто друкувати статистику (мілісекунди)
-    explicit HeapMonitor(uint32_t intervalMs = 10000);
+  // intervalMs - як часто друкувати статистику (мілісекунди)
+  explicit HeapMonitor(uint32_t intervalMs = 10000);
 
-    // Викликати один раз у setup(). Друкує стан пам'яті одразу.
-    void begin();
+  // Викликати один раз у setup(). Друкує стан пам'яті одразу.
+  void begin();
 
-    // Викликати в loop(). Неблокуюче - друкує лише коли настав інтервал.
-    void update();
+  // Викликати в loop(). Неблокуюче - друкує лише коли настав інтервал.
+  void update();
 
-    // Примусово надрукувати статистику зараз (ігноруючи інтервал)
-    void printNow();
+  // Примусово надрукувати статистику зараз (ігноруючи інтервал)
+  void printNow();
 
-    // Змінити інтервал логування "на льоту"
-    void setInterval(uint32_t intervalMs);
+  // Змінити інтервал логування "на льоту"
+  void setInterval(uint32_t intervalMs);
 
-    // Отримати останнє відоме значення вільної пам'яті (default caps), без друку
-    size_t getFreeHeap() const;
+  // Отримати останнє відоме значення вільної пам'яті (default caps), без друку
+  size_t getFreeHeap() const;
 
-    // Отримати найбільший вільний неперервний блок (default caps)
-    size_t getLargestFreeBlock() const;
+  // Отримати найбільший вільний неперервний блок (default caps)
+  size_t getLargestFreeBlock() const;
 
 private:
-    uint32_t _intervalMs;
-    uint32_t _lastPrintMs;
+  uint32_t _intervalMs;
+  uint32_t _lastPrintMs;
 
-    bool _psramAvailable() const;
-    const TLogger _logger{"heapmonitor"};
+  bool _psramAvailable() const;
+  const TLogger _logger{"heapmonitor"};
 };

@@ -22,20 +22,20 @@
 
 class PrintQueueRegistry {
 public:
-    static PrintQueueRegistry& instance();
+  static PrintQueueRegistry& instance();
 
-    // Повертає чергу для output, створюючи її при першому зверненні.
-    PrintQueue& forOutput(Print& output);
+  // Повертає чергу для output, створюючи її при першому зверненні.
+  PrintQueue& forOutput(Print& output);
 
-    // Дренажить усі зареєстровані черги.
-    void flushAll();
+  // Дренажить усі зареєстровані черги.
+  void flushAll();
 
 private:
-    PrintQueueRegistry();
+  PrintQueueRegistry();
 
 #if defined(ESP32)
-    SemaphoreHandle_t _mapMutex;
-    StaticSemaphore_t _mapMutexBuffer;
-    std::unordered_map<void*, std::unique_ptr<PrintQueue>> _queues;
+  SemaphoreHandle_t _mapMutex;
+  StaticSemaphore_t _mapMutexBuffer;
+  std::unordered_map<void*, std::unique_ptr<PrintQueue>> _queues;
 #endif
 };

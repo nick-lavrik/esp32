@@ -13,20 +13,20 @@
 // однаково, не знаючи, яка апаратна бібліотека стоїть під капотом.
 class TouchController {
 public:
-    // Ініціалізація апаратного тачскріна + TouchPointMapper.
-    // Викликати один раз з setup().
-    static void setup(TouchEvents* touch);
+  // Ініціалізація апаратного тачскріна + TouchPointMapper.
+  // Викликати один раз з setup().
+  static void setup(TouchEvents* touch);
 
-    // Опитування апаратного тачскріна і прокидання події в TouchEvents.
-    // Викликати щоцикл з loop().
-    static void update();
+  // Опитування апаратного тачскріна і прокидання події в TouchEvents.
+  // Викликати щоцикл з loop().
+  static void update();
 
-    static void setInstance(TouchEvents* instance);
-    // Доступ до TouchEvents для підписки на онTouch/onSwipe/onHold і т.д.
-    // Підписку можна робити в спільному main.cpp - вона однакова для обох плат.
-    static TouchEvents &events();
+  static void setInstance(TouchEvents* instance);
+  // Доступ до TouchEvents для підписки на онTouch/onSwipe/onHold і т.д.
+  // Підписку можна робити в спільному main.cpp - вона однакова для обох плат.
+  static TouchEvents& events();
 
 private:
-    // Статична змінна-вказівник для збереження екземпляру
-    static TouchEvents* _events; 
+  // Статична змінна-вказівник для збереження екземпляру
+  static TouchEvents* _events;
 };

@@ -13,14 +13,14 @@
  */
 class AnalogSensorEvent : public Event {
 public:
-    AnalogSensorEvent(const AnalogSensor& sensor, const uint16_t percent, const uint16_t rawValue, const unsigned long timestampMs)
-        : Event(), sensor(sensor), percent(percent), rawValue(rawValue), timestampMs(timestampMs) {
-    }
+  AnalogSensorEvent(const AnalogSensor& sensor, const uint16_t percent, const uint16_t rawValue,
+                    const unsigned long timestampMs)
+      : Event(), sensor(sensor), percent(percent), rawValue(rawValue), timestampMs(timestampMs) {}
 
-    const AnalogSensor& sensor;
-    const uint8_t percent;
-    const uint16_t rawValue;
-    const unsigned long timestampMs;
+  const AnalogSensor& sensor;
+  const uint8_t percent;
+  const uint16_t rawValue;
+  const unsigned long timestampMs;
 
-    const uint16_t value() { return rawValue; };
+  const uint16_t value() { return rawValue; };
 };

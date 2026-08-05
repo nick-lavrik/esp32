@@ -18,13 +18,13 @@
 #include "RwLockState.hpp"
 
 class RwLockRegistry {
- public:
+public:
   static RwLockRegistry& instance();
 
   void registerObject(void* obj);
   RwLockState* find(void* obj);  // nullptr, якщо obj не зареєстровано
 
- private:
+private:
   RwLockRegistry();
 
   SemaphoreHandle_t _mapMutex;

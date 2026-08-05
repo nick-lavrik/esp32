@@ -9,8 +9,8 @@ class IEventDispatcher;
 // Носить довідковий характер (для логів/діагностики) - фактичну
 // прив'язку робить сам метод subscribe().
 struct SubscribedEvent {
-    std::string eventName;
-    int priority = 0;
+  std::string eventName;
+  int priority = 0;
 };
 
 // Аналог Symfony\Component\EventDispatcher\EventSubscriberInterface: клас,
@@ -26,7 +26,8 @@ struct SubscribedEvent {
 //       }
 //       void subscribe(IEventDispatcher& d) override {
 //           _connectedId = d.addListener("wifi.connected", [this](IEvent& e){ onConnected(e); });
-//           _disconnectedId = d.addListener("wifi.disconnected", [this](IEvent& e){ onDisconnected(e); });
+//           _disconnectedId = d.addListener("wifi.disconnected", [this](IEvent& e){
+//           onDisconnected(e); });
 //       }
 //       void unsubscribe(IEventDispatcher& d) override {
 //           d.removeListener(_connectedId);
@@ -40,14 +41,14 @@ struct SubscribedEvent {
 //   };
 class IEventSubscriber {
 public:
-    virtual ~IEventSubscriber() = default;
+  virtual ~IEventSubscriber() = default;
 
-    // Перелік подій, які цей підписник слухає (для інтроспекції).
-    virtual std::vector<SubscribedEvent> getSubscribedEvents() const = 0;
+  // Перелік подій, які цей підписник слухає (для інтроспекції).
+  virtual std::vector<SubscribedEvent> getSubscribedEvents() const = 0;
 
-    // Реєструє слухачі цього підписника на переданому диспетчері.
-    virtual void subscribe(IEventDispatcher& dispatcher) = 0;
+  // Реєструє слухачі цього підписника на переданому диспетчері.
+  virtual void subscribe(IEventDispatcher& dispatcher) = 0;
 
-    // Знімає слухачі цього підписника з переданого диспетчера.
-    virtual void unsubscribe(IEventDispatcher& dispatcher) = 0;
+  // Знімає слухачі цього підписника з переданого диспетчера.
+  virtual void unsubscribe(IEventDispatcher& dispatcher) = 0;
 };

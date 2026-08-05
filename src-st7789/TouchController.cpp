@@ -1,11 +1,12 @@
 #if __has_include(<XPT2046_Touchscreen.h>)
-#include <XPT2046_Touchscreen.h>
 #include <TouchController.h>
+#include <XPT2046_Touchscreen.h>
+
 #include <Logger.hpp>
 
 // --- Тач ---
-#define TOUCH_CS   33
-#define TOUCH_IRQ  36
+#define TOUCH_CS 33
+#define TOUCH_IRQ 36
 
 // == I2C (SDA и SCL)
 // SDA (Serial Data Line): линия, по которой передаются сами данные (и туда, и обратно).
@@ -27,18 +28,14 @@ void TouchController::setup(TouchEvents* events) {
   // bool begin(int8_t sck = -1, int8_t miso = -1, int8_t mosi = -1, int8_t ss = -1);
   touchSPI.begin(25, 39, 32, TOUCH_CS);
   ts.begin(touchSPI);
-  ts.setRotation(TFT_ROTATION); // 3
+  ts.setRotation(TFT_ROTATION);  // 3
 
   Logger::info("TouchController::XPT2046 setup done");
 
   _events = events;
 }
 
-void TouchController::update() {
-    events().update(ts);
-}
+void TouchController::update() { events().update(ts); }
 
-TouchEvents& TouchController::events() {
-    return *_events;
-}
+TouchEvents& TouchController::events() { return *_events; }
 #endif

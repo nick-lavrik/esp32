@@ -28,53 +28,51 @@ extern "C" {
  */
 template <typename T>
 class ProcessResultQueue {
-    static_assert(std::is_trivially_copyable<T>::value,
-                  "ProcessResultQueue<T>: T має бути trivially copyable "
-                  "(для важких типів використовуйте T = вказівник, див. коментар у файлі)");
+  static_assert(std::is_trivially_copyable<T>::value,
+                "ProcessResultQueue<T>: T має бути trivially copyable "
+                "(для важких типів використовуйте T = вказівник, див. коментар у файлі)");
 
 public:
-    explicit ProcessResultQueue(UBaseType_t capacity = 8)
-        : _handle(xQueueCreate(capacity, sizeof(T))) {}
+  explicit ProcessResultQueue(UBaseType_t capacity = 8)
+      : _handle(xQueueCreate(capacity, sizeof(T))) {}
 
-    ~ProcessResultQueue() {
-        if (_handle != nullptr) {
-            vQueueDelete(_handle);
-        }
+  ~ProcessResultQueue() {
+    if (_handle != nullptr) {
+      vQueueDelete(_handle);
     }
+  }
 
-    ProcessResultQueue(const ProcessResultQueue&)            = delete;
-    ProcessResultQueue& operator=(const ProcessResultQueue&) = delete;
-    ProcessResultQueue(ProcessResultQueue&&)                 = delete;
-    ProcessResultQueue& operator=(ProcessResultQueue&&)      = delete;
+  ProcessResultQueue(const ProcessResultQueue&) = delete;
+  ProcessResultQueue& operator=(const ProcessResultQueue&) = delete;
+  ProcessResultQueue(ProcessResultQueue&&) = delete;
+  ProcessResultQueue& operator=(ProcessResultQueue&&) = delete;
 
-    bool isValid() const { return _handle != nullptr; }
+  bool isValid() const { return _handle != nullptr; }
 
-    /// Неблокуючий запис. false, якщо черга повна або невалідна.
-    bool tryPush(const T& value) {
-        if (_handle == nullptr) return false;
-        return xQueueSend(_handle, &value, 0) == pdTRUE;
-    }
+  /// Неблокуючий запис. false, якщо черга повна або невалідна.
+  bool tryPush(const T& value) {
+    if (_handle == nullptr) return false;
+    return xQueueSend(_handle, &value, 0) == pdTRUE;
+  }
 
-    /// Запис із витісненням найстарішого елемента, якщо черга повна.
-    /// Зручно для "прогресу", де важливе лише останнє значення.
-    bool pushOverwriteIfFull(const T& value) {
-        if (_handle == nullptr) return false;
-        if (xQueueSend(_handle, &value, 0) == pdTRUE) return true;
-        T discarded{};
-        xQueueReceive(_handle, &discarded, 0);
-        return xQueueSend(_handle, &value, 0) == pdTRUE;
-    }
+  /// Запис із витісненням найстарішого елемента, якщо черга повна.
+  /// Зручно для "прогресу", де важливе лише останнє значення.
+  bool pushOverwriteIfFull(const T& value) {
+    if (_handle == nullptr) return false;
+    if (xQueueSend(_handle, &value, 0) == pdTRUE) return true;
+    T discarded{};
+    xQueueReceive(_handle, &discarded, 0);
+    return xQueueSend(_handle, &value, 0) == pdTRUE;
+  }
 
-    /// Неблокуюче читання. false, якщо черга порожня.
-    bool tryPop(T& out) {
-        if (_handle == nullptr) return false;
-        return xQueueReceive(_handle, &out, 0) == pdTRUE;
-    }
+  /// Неблокуюче читання. false, якщо черга порожня.
+  bool tryPop(T& out) {
+    if (_handle == nullptr) return false;
+    return xQueueReceive(_handle, &out, 0) == pdTRUE;
+  }
 
-    UBaseType_t available() const {
-        return _handle ? uxQueueMessagesWaiting(_handle) : 0;
-    }
+  UBaseType_t available() const { return _handle ? uxQueueMessagesWaiting(_handle) : 0; }
 
 private:
-    QueueHandle_t _handle;
+  QueueHandle_t _handle;
 };

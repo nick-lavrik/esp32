@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+
 #include "AnalogSensor.hpp"
 #include "MqttClient.hpp"
 
@@ -29,30 +30,29 @@
  */
 class AnalogSensorMqttReporter {
 public:
-    AnalogSensorMqttReporter(AnalogSensor& sensor,
-                          MqttClient& mqttClient,
-                          const char* topic,
-                          uint32_t intervalMs = 5000,
-                          uint8_t deltaThresholdPercent = 5);
+  AnalogSensorMqttReporter(AnalogSensor& sensor, MqttClient& mqttClient, const char* topic,
+                           uint32_t intervalMs = 5000, uint8_t deltaThresholdPercent = 5);
 
-    // Reads the sensor and publishes if due. Safe to call often.
-    void update();
+  // Reads the sensor and publishes if due. Safe to call often.
+  void update();
 
-    void setIntervalMs(uint32_t intervalMs) { _intervalMs = intervalMs; }
-    void setDeltaThresholdPercent(uint8_t deltaThresholdPercent) { _deltaThresholdPercent = deltaThresholdPercent; }
+  void setIntervalMs(uint32_t intervalMs) { _intervalMs = intervalMs; }
+  void setDeltaThresholdPercent(uint8_t deltaThresholdPercent) {
+    _deltaThresholdPercent = deltaThresholdPercent;
+  }
 
 private:
-    bool _shouldPublish(uint8_t currentPercent, unsigned long now) const;
-    void _publish(uint8_t percent);
+  bool _shouldPublish(uint8_t currentPercent, unsigned long now) const;
+  void _publish(uint8_t percent);
 
-    AnalogSensor& _sensor;
-    MqttClient& _mqttClient;
-    String _topic;
+  AnalogSensor& _sensor;
+  MqttClient& _mqttClient;
+  String _topic;
 
-    uint32_t _intervalMs;
-    uint8_t _deltaThresholdPercent;
+  uint32_t _intervalMs;
+  uint8_t _deltaThresholdPercent;
 
-    unsigned long _lastPublishMs = 0;
-    uint8_t _lastPublishedPercent = 0;
-    bool _hasPublished = false;
+  unsigned long _lastPublishMs = 0;
+  uint8_t _lastPublishedPercent = 0;
+  bool _hasPublished = false;
 };

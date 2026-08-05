@@ -8,177 +8,178 @@
 #else
 // ESP8266 core не має esp_heap_caps.h (це ESP-IDF API) і не має PSRAM -
 // підміняємо тими самими іменами, що зводяться до звичайних malloc/free.
-static inline void* heap_caps_malloc(size_t size, uint32_t) { return malloc(size); }
-static inline void heap_caps_free(void* ptr) { free(ptr); }
+static inline void *heap_caps_malloc(size_t size, uint32_t) { return malloc(size); }
+static inline void heap_caps_free(void *ptr) { free(ptr); }
 static inline size_t heap_caps_get_free_size(uint32_t) { return ESP.getFreeHeap(); }
 static inline size_t heap_caps_get_largest_free_block(uint32_t) { return ESP.getFreeHeap(); }
 #define MALLOC_CAP_SPIRAM 0
-#define MALLOC_CAP_8BIT   0
+#define MALLOC_CAP_8BIT 0
 #endif
 
 JpegImage *JpegImage::_activeInstance = nullptr;
 
 JpegImage::JpegImage()
-    : _buffer(nullptr), _width(0), _height(0),
-      _depth(JpegColorDepth::RGB565), _loaded(false), _usedPsram(false)
-{
-}
+    : _buffer(nullptr),
+      _width(0),
+      _height(0),
+      _depth(JpegColorDepth::RGB565),
+      _loaded(false),
+      _usedPsram(false) {}
 
-JpegImage::~JpegImage() {
-    freeBuffer();
-}
+JpegImage::~JpegImage() { freeBuffer(); }
 
 void JpegImage::freeBuffer() {
-    if (_buffer != nullptr) {
-        heap_caps_free(_buffer);
-        _buffer = nullptr;
-    }
-    _loaded = false;
-    _width = 0;
-    _height = 0;
+  if (_buffer != nullptr) {
+    heap_caps_free(_buffer);
+    _buffer = nullptr;
+  }
+  _loaded = false;
+  _width = 0;
+  _height = 0;
 }
 
 // Спочатку намагаємось у PSRAM (якщо є), інакше - у звичайну RAM
 static void *allocPreferPsram(size_t bytes, bool *usedPsram) {
-    void *ptr = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (ptr != nullptr) {
-        *usedPsram = true;
-        return ptr;
-    }
-    *usedPsram = false;
-    return heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
+  void *ptr = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (ptr != nullptr) {
+    *usedPsram = true;
+    return ptr;
+  }
+  *usedPsram = false;
+  return heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
 }
 
 bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
-    freeBuffer();
-    _depth = depth;
+  freeBuffer();
+  _depth = depth;
 
-    if (!LittleFS.exists(path)) {
-        _logger.error("Файл не знайдено: %s", path);
-        return false;
-    }
+  if (!LittleFS.exists(path)) {
+    _logger.error("Файл не знайдено: %s", path);
+    return false;
+  }
 
-    File file = LittleFS.open(path, "r");
-    if (!file) {
-        _logger.error("Не вдалось відкрити файл: %s", path);
-        return false;
-    }
+  File file = LittleFS.open(path, "r");
+  if (!file) {
+    _logger.error("Не вдалось відкрити файл: %s", path);
+    return false;
+  }
 
-    size_t fileSize = file.size();
-    bool jpegBufPsram = false;
-    uint8_t *jpegData = (uint8_t *)allocPreferPsram(fileSize, &jpegBufPsram);
-    if (jpegData == nullptr) {
-        _logger.error("Недостатньо пам'яті для читання jpg-файлу");
-        file.close();
-        return false;
-    }
-
-    size_t bytesRead = file.read(jpegData, fileSize);
+  size_t fileSize = file.size();
+  bool jpegBufPsram = false;
+  uint8_t *jpegData = (uint8_t *)allocPreferPsram(fileSize, &jpegBufPsram);
+  if (jpegData == nullptr) {
+    _logger.error("Недостатньо пам'яті для читання jpg-файлу");
     file.close();
+    return false;
+  }
 
-    if (bytesRead != fileSize) {
-        _logger.error("Розмір прочитаних даних не збігається з розміром файлу");
-        heap_caps_free(jpegData);
-        return false;
-    }
+  size_t bytesRead = file.read(jpegData, fileSize);
+  file.close();
 
-    uint16_t jpegWidth = 0;
-    uint16_t jpegHeight = 0;
-    if (TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, fileSize) != JDR_OK) {
-        _logger.error("Не вдалось розпарсити заголовок jpg");
-        heap_caps_free(jpegData);
-        return false;
-    }
-
-    size_t bufferBytes;
-    if (depth == JpegColorDepth::MONO1) {
-        bufferBytes = (size_t)((jpegWidth + 7) / 8) * jpegHeight;
-    } else {
-        size_t bytesPerPixel = (depth == JpegColorDepth::RGB565) ? 2 : 1;
-        bufferBytes = (size_t)jpegWidth * jpegHeight * bytesPerPixel;
-    }
-
-    _logger.info("\"%s\" %dx%d (%d bytes) - free (%d)", path, jpegWidth, jpegHeight, bufferBytes, heap_caps_get_free_size(MALLOC_CAP_8BIT));
-
-    _buffer = allocPreferPsram(bufferBytes, &_usedPsram);
-    if (_buffer == nullptr) {
-        _logger.error("Недостатньо пам'яті для декодованого зображення (%d / %d)", bufferBytes, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) );
-        heap_caps_free(jpegData);
-        return false;
-    }
-
-    _width = jpegWidth;
-    _height = jpegHeight;
-
-    TJpgDec.setJpgScale(1);
-    // RGB565 -> потрібен swap байтів для коректного порядку на ST7789
-    // RGB332 -> конвертуємо самі з "чистого" RGB565, swap не потрібен
-    // TJpgDec.setSwapBytes(depth == JpegColorDepth::RGB565); // ми вже робимо swap в Display.cpp
-    TJpgDec.setCallback(JpegImage::jpegOutputCallback);
-
-    _activeInstance = this;
-    JRESULT decodeResult = TJpgDec.drawJpg(0, 0, jpegData, fileSize);
-    _activeInstance = nullptr;
-
+  if (bytesRead != fileSize) {
+    _logger.error("Розмір прочитаних даних не збігається з розміром файлу");
     heap_caps_free(jpegData);
+    return false;
+  }
 
-    if (decodeResult != JDR_OK) {
-        _logger.error("Помилка декодування jpg \"%s\"", path);
-        freeBuffer();
-        return false;
-    }
+  uint16_t jpegWidth = 0;
+  uint16_t jpegHeight = 0;
+  if (TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, fileSize) != JDR_OK) {
+    _logger.error("Не вдалось розпарсити заголовок jpg");
+    heap_caps_free(jpegData);
+    return false;
+  }
 
-    _loaded = true;
-    _logger.info("Завантажено %dx%d, глибина: %d біт, розмір буфера: %u байт, пам'ять: %s\n",
-                  _width, _height, (int)depth, (unsigned)bufferBytes,
-                  _usedPsram ? "PSRAM" : "внутрішня RAM");
-    return true;
+  size_t bufferBytes;
+  if (depth == JpegColorDepth::MONO1) {
+    bufferBytes = (size_t)((jpegWidth + 7) / 8) * jpegHeight;
+  } else {
+    size_t bytesPerPixel = (depth == JpegColorDepth::RGB565) ? 2 : 1;
+    bufferBytes = (size_t)jpegWidth * jpegHeight * bytesPerPixel;
+  }
+
+  _logger.info("\"%s\" %dx%d (%d bytes) - free (%d)", path, jpegWidth, jpegHeight, bufferBytes,
+               heap_caps_get_free_size(MALLOC_CAP_8BIT));
+
+  _buffer = allocPreferPsram(bufferBytes, &_usedPsram);
+  if (_buffer == nullptr) {
+    _logger.error("Недостатньо пам'яті для декодованого зображення (%d / %d)", bufferBytes,
+                  heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    heap_caps_free(jpegData);
+    return false;
+  }
+
+  _width = jpegWidth;
+  _height = jpegHeight;
+
+  TJpgDec.setJpgScale(1);
+  // RGB565 -> потрібен swap байтів для коректного порядку на ST7789
+  // RGB332 -> конвертуємо самі з "чистого" RGB565, swap не потрібен
+  // TJpgDec.setSwapBytes(depth == JpegColorDepth::RGB565); // ми вже робимо swap в Display.cpp
+  TJpgDec.setCallback(JpegImage::jpegOutputCallback);
+
+  _activeInstance = this;
+  JRESULT decodeResult = TJpgDec.drawJpg(0, 0, jpegData, fileSize);
+  _activeInstance = nullptr;
+
+  heap_caps_free(jpegData);
+
+  if (decodeResult != JDR_OK) {
+    _logger.error("Помилка декодування jpg \"%s\"", path);
+    freeBuffer();
+    return false;
+  }
+
+  _loaded = true;
+  _logger.info("Завантажено %dx%d, глибина: %d біт, розмір буфера: %u байт, пам'ять: %s\n", _width,
+               _height, (int)depth, (unsigned)bufferBytes, _usedPsram ? "PSRAM" : "внутрішня RAM");
+  return true;
 }
 
 bool JpegImage::jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
-    JpegImage *self = _activeInstance;
-    if (self == nullptr || self->_buffer == nullptr) {
-        return false;
-    }
+  JpegImage *self = _activeInstance;
+  if (self == nullptr || self->_buffer == nullptr) {
+    return false;
+  }
 
-    if (y >= self->_height) {
-        return true;
-    }
-
-    for (uint16_t row = 0; row < h; row++) {
-        uint16_t destY = y + row;
-        if (destY >= self->_height) {
-            break;
-        }
-
-        uint16_t copyWidth = w;
-        if (x + copyWidth > self->_width) {
-            copyWidth = self->_width - x;
-        }
-
-        uint16_t *srcRow = bitmap + (row * w);
-
-        if (self->_depth == JpegColorDepth::RGB565) {
-            uint16_t *destRow = (uint16_t *)self->_buffer + (destY * self->_width) + x;
-            memcpy(destRow, srcRow, copyWidth * sizeof(uint16_t));
-        } else if (self->_depth == JpegColorDepth::RGB332) {
-            // RGB332 - конвертуємо піксель за пікселем
-            uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->_width) + x;
-            for (uint16_t col = 0; col < copyWidth; col++) {
-                destRow[col] = rgb565to332(srcRow[col]);
-            }
-        } else {
-            // MONO1 - поріг яскравості, пакування в біти (формат Adafruit_GFX::drawBitmap)
-            uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->rowStrideBytes());
-            for (uint16_t col = 0; col < copyWidth; col++) {
-                uint16_t destX = x + col;
-                bool white = rgb565toGray(srcRow[col]) >= self->_monoThreshold;
-                setMonoBit(destRow, destX, white);
-            }
-        }
-    }
-
+  if (y >= self->_height) {
     return true;
+  }
+
+  for (uint16_t row = 0; row < h; row++) {
+    uint16_t destY = y + row;
+    if (destY >= self->_height) {
+      break;
+    }
+
+    uint16_t copyWidth = w;
+    if (x + copyWidth > self->_width) {
+      copyWidth = self->_width - x;
+    }
+
+    uint16_t *srcRow = bitmap + (row * w);
+
+    if (self->_depth == JpegColorDepth::RGB565) {
+      uint16_t *destRow = (uint16_t *)self->_buffer + (destY * self->_width) + x;
+      memcpy(destRow, srcRow, copyWidth * sizeof(uint16_t));
+    } else if (self->_depth == JpegColorDepth::RGB332) {
+      // RGB332 - конвертуємо піксель за пікселем
+      uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->_width) + x;
+      for (uint16_t col = 0; col < copyWidth; col++) {
+        destRow[col] = rgb565to332(srcRow[col]);
+      }
+    } else {
+      // MONO1 - поріг яскравості, пакування в біти (формат Adafruit_GFX::drawBitmap)
+      uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->rowStrideBytes());
+      for (uint16_t col = 0; col < copyWidth; col++) {
+        uint16_t destX = x + col;
+        bool white = rgb565toGray(srcRow[col]) >= self->_monoThreshold;
+        setMonoBit(destRow, destX, white);
+      }
+    }
+  }
+
+  return true;
 }
 
 bool JpegImage::isLoaded() const { return _loaded; }
@@ -187,18 +188,18 @@ uint16_t JpegImage::height() const { return _height; }
 JpegColorDepth JpegImage::colorDepth() const { return _depth; }
 
 size_t JpegImage::bufferSizeBytes() const {
-    if (_depth == JpegColorDepth::MONO1) {
-        return rowStrideBytes() * _height;
-    }
-    size_t bpp = (_depth == JpegColorDepth::RGB565) ? 2 : 1;
-    return (size_t)_width * _height * bpp;
+  if (_depth == JpegColorDepth::MONO1) {
+    return rowStrideBytes() * _height;
+  }
+  size_t bpp = (_depth == JpegColorDepth::RGB565) ? 2 : 1;
+  return (size_t)_width * _height * bpp;
 }
 
 size_t JpegImage::rowStrideBytes() const {
-    if (_depth != JpegColorDepth::MONO1) {
-        return 0;
-    }
-    return (size_t)(_width + 7) / 8;
+  if (_depth != JpegColorDepth::MONO1) {
+    return 0;
+  }
+  return (size_t)(_width + 7) / 8;
 }
 
 void JpegImage::setMonoThreshold(uint8_t threshold) { _monoThreshold = threshold; }
@@ -206,25 +207,25 @@ void JpegImage::setMonoThreshold(uint8_t threshold) { _monoThreshold = threshold
 void *JpegImage::buffer() const { return _buffer; }
 
 const uint16_t *JpegImage::bufferRGB565() const {
-    if (_depth != JpegColorDepth::RGB565) {
-        return nullptr;
-    }
+  if (_depth != JpegColorDepth::RGB565) {
+    return nullptr;
+  }
 
-    return static_cast<const uint16_t *>(_buffer);
+  return static_cast<const uint16_t *>(_buffer);
 }
 
 const uint8_t *JpegImage::bufferRGB332() const {
-    if (_depth != JpegColorDepth::RGB332) {
-        return nullptr;
-    }
+  if (_depth != JpegColorDepth::RGB332) {
+    return nullptr;
+  }
 
-    return static_cast<const uint8_t *>(_buffer);
+  return static_cast<const uint8_t *>(_buffer);
 }
 
 const uint8_t *JpegImage::bufferMono1() const {
-    if (_depth != JpegColorDepth::MONO1) {
-        return nullptr;
-    }
+  if (_depth != JpegColorDepth::MONO1) {
+    return nullptr;
+  }
 
-    return static_cast<const uint8_t *>(_buffer);
+  return static_cast<const uint8_t *>(_buffer);
 }

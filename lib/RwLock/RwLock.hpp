@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <functional>
+
 #include "RwLockHandle.hpp"
 
 namespace rwlock {

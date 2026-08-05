@@ -6,8 +6,8 @@
 // а не через esp_log_level_set/get напряму.
 class EspLogger : public ILogger {
 public:
-    explicit EspLogger(const char* tag);
+  explicit EspLogger(const char* tag);
 
 protected:
-    void log(LogLevel level, const char* fmt, va_list args) const override;
+  void log(LogLevel level, const char* fmt, va_list args) const override;
 };

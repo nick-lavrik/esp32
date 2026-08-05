@@ -28,6 +28,7 @@
 //   build_flags = -D DEFAULT_PRINT_QUEUE_SIZE=10
 
 #include <Print.h>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -42,40 +43,40 @@
 
 class PrintQueue {
 public:
-    // kLineSize використовує SerialLogger для розміру свого стекового
-    // буфера незалежно від платформи - лишається спільним.
-    static constexpr size_t kLineSize = 160;
+  // kLineSize використовує SerialLogger для розміру свого стекового
+  // буфера незалежно від платформи - лишається спільним.
+  static constexpr size_t kLineSize = 160;
 
-    explicit PrintQueue(Print& output);
+  explicit PrintQueue(Print& output);
 
-    // Спершу неблокуюче дренажить те, що вже в черзі (зберігає порядок,
-    // ESP32-only), потім пробує записати line напряму з таймаутом
-    // timeoutMs. Якщо пряме write не вдалось - кладе line у чергу
-    // (drop-oldest при переповненні, ESP32-only). Повертає true, якщо
-    // line пішов напряму в output без буферизації. На ESP8266 - завжди
-    // напряму, завжди true (див. коментар вище).
-    bool tryWrite(const char* line, uint32_t timeoutMs);
+  // Спершу неблокуюче дренажить те, що вже в черзі (зберігає порядок,
+  // ESP32-only), потім пробує записати line напряму з таймаутом
+  // timeoutMs. Якщо пряме write не вдалось - кладе line у чергу
+  // (drop-oldest при переповненні, ESP32-only). Повертає true, якщо
+  // line пішов напряму в output без буферизації. На ESP8266 - завжди
+  // напряму, завжди true (див. коментар вище).
+  bool tryWrite(const char* line, uint32_t timeoutMs);
 
-    // Неблокуюча спроба виштовхати накопичене (ESP32). На ESP8266 - no-op.
-    void drain();
+  // Неблокуюча спроба виштовхати накопичене (ESP32). На ESP8266 - no-op.
+  void drain();
 
-    // Дренажить усі зареєстровані черги. Викликати з loop() кожної плати.
-    static void flush();
+  // Дренажить усі зареєстровані черги. Викликати з loop() кожної плати.
+  static void flush();
 
 private:
-    Print& _output;
+  Print& _output;
 
 #if defined(ESP32)
-    static constexpr size_t kCapacity = DEFAULT_PRINT_QUEUE_SIZE;
+  static constexpr size_t kCapacity = DEFAULT_PRINT_QUEUE_SIZE;
 
-    void pushLocked(const char* line);
-    void drainLocked();
+  void pushLocked(const char* line);
+  void drainLocked();
 
-    SemaphoreHandle_t _mutex;
-    StaticSemaphore_t _mutexBuffer;
+  SemaphoreHandle_t _mutex;
+  StaticSemaphore_t _mutexBuffer;
 
-    char _lines[kCapacity][kLineSize] = {};
-    size_t _head = 0;   // індекс найстарішого елемента
-    size_t _count = 0;  // скільки елементів фактично в черзі
+  char _lines[kCapacity][kLineSize] = {};
+  size_t _head = 0;   // індекс найстарішого елемента
+  size_t _count = 0;  // скільки елементів фактично в черзі
 #endif
 };

@@ -1,7 +1,8 @@
 #pragma once
 
-#include "IStaticSource.hpp"
 #include <FS.h>
+
+#include "IStaticSource.hpp"
 
 // Віддає файли з LittleFS. contentType визначається автоматично
 // всередині ESPAsyncWebServer за розширенням шляху (AsyncFileResponse
@@ -10,14 +11,13 @@
 // Приклад:
 //   LittleFsStaticSource source(LittleFS);
 //   compositeSource.addSource(&source);
-class LittleFsStaticSource : public IStaticSource
-{
+class LittleFsStaticSource : public IStaticSource {
 public:
-    explicit LittleFsStaticSource(fs::FS& fs) : _fs(fs) {}
+  explicit LittleFsStaticSource(fs::FS& fs) : _fs(fs) {}
 
-    bool exists(const String& path) const override;
-    void handleRequest(AsyncWebServerRequest* request, const String& path) override;
+  bool exists(const String& path) const override;
+  void handleRequest(AsyncWebServerRequest* request, const String& path) override;
 
 private:
-    fs::FS& _fs;
+  fs::FS& _fs;
 };

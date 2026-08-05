@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+
 #include "TouchPoint.h"
 
 // Тип колбека для свайпів (onSwipeLeft/Right/Up/Down, onSwipeFromXxx).

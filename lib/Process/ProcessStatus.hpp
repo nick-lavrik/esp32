@@ -9,9 +9,9 @@
  * та Process::doAsyncApp() (кооперативна модель через Process::update()).
  */
 enum class ProcessStatus : uint8_t {
-    Pending,    ///< Створено, ще не розпочало виконання
-    Running,    ///< Виконується
-    Completed,  ///< Завершено успішно (ctx.finish() викликано)
-    Cancelled,  ///< Скасовано (ProcessHandle::cancel() + ctx.acknowledgeCancel() / автоматично)
-    Failed      ///< Завершено з помилкою (ctx.fail() викликано)
+  Pending,    ///< Створено, ще не розпочало виконання
+  Running,    ///< Виконується
+  Completed,  ///< Завершено успішно (ctx.finish() викликано)
+  Cancelled,  ///< Скасовано (ProcessHandle::cancel() + ctx.acknowledgeCancel() / автоматично)
+  Failed  ///< Завершено з помилкою (ctx.fail() викликано)
 };

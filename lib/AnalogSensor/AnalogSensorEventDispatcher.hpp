@@ -1,9 +1,10 @@
 #pragma once
 
 #include <Arduino.h>
+
 #include "AnalogSensor.hpp"
-#include "EventDispatcher.hpp"
 #include "AnalogSensorEvent.hpp"
+#include "EventDispatcher.hpp"
 
 /**
  * AnalogSensorEventDispatcher
@@ -18,25 +19,26 @@
  */
 class AnalogSensorEventDispatcher {
 public:
-    static constexpr const char* EVT_ANALOG_SENSOR_VALUE = "AnalogSensor.value";
-    static constexpr const char* kEventName = "AnalogSensorValue";
+  static constexpr const char* EVT_ANALOG_SENSOR_VALUE = "AnalogSensor.value";
+  static constexpr const char* kEventName = "AnalogSensorValue";
 
-    AnalogSensorEventDispatcher(AnalogSensor& sensor,
-                                 EventDispatcher& eventDispatcher,
-                                 uint8_t deltaThresholdPercent = 5);
+  AnalogSensorEventDispatcher(AnalogSensor& sensor, EventDispatcher& eventDispatcher,
+                              uint8_t deltaThresholdPercent = 5);
 
-    // Reads the sensor and dispatches AnalogSensorValue if it changed enough.
-    void update();
+  // Reads the sensor and dispatches AnalogSensorValue if it changed enough.
+  void update();
 
-    void setDeltaThresholdPercent(uint8_t deltaThresholdPercent) { _deltaThresholdPercent = deltaThresholdPercent; }
+  void setDeltaThresholdPercent(uint8_t deltaThresholdPercent) {
+    _deltaThresholdPercent = deltaThresholdPercent;
+  }
 
 private:
-    bool _hasChangedEnough(uint8_t currentPercent) const;
+  bool _hasChangedEnough(uint8_t currentPercent) const;
 
-    AnalogSensor& _sensor;
-    EventDispatcher& _eventDispatcher;
-    uint8_t _deltaThresholdPercent;
+  AnalogSensor& _sensor;
+  EventDispatcher& _eventDispatcher;
+  uint8_t _deltaThresholdPercent;
 
-    uint8_t _lastDispatchedPercent = 0;
-    bool _hasDispatched = false;
+  uint8_t _lastDispatchedPercent = 0;
+  bool _hasDispatched = false;
 };

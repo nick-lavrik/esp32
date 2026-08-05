@@ -79,9 +79,7 @@ TickType_t remainingTicks(TickType_t deadline) {
 
 }  // namespace
 
-void rwlock::registerObject(void* obj) {
-  RwLockRegistry::instance().registerObject(obj);
-}
+void rwlock::registerObject(void* obj) { RwLockRegistry::instance().registerObject(obj); }
 
 RwLockHandle rwlock::rlock(void* obj, uint32_t timeoutMs) {
   RwLockHandle handle;

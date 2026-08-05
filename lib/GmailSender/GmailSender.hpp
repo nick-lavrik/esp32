@@ -4,6 +4,7 @@
 #define HAS_GMAIL_SENDER 1
 #include <Arduino.h>
 #include <ESP_Mail_Client.h>
+
 #include <TLogger.hpp>
 
 // Клас-обгортка над ESP-Mail-Client для відправки email через Gmail SMTP.
@@ -17,23 +18,23 @@
 
 class GmailSender {
 public:
-    GmailSender(const char* senderEmail, const char* appPassword, const char* senderName = "ESP32");
+  GmailSender(const char* senderEmail, const char* appPassword, const char* senderName = "ESP32");
 
-    // Повертає true при успішній відправці, false - при помилці (деталі в Serial)
-    bool sendEmail(const char* recipientEmail, const char* subject, const char* message);
+  // Повертає true при успішній відправці, false - при помилці (деталі в Serial)
+  bool sendEmail(const char* recipientEmail, const char* subject, const char* message);
 
-    // Викликається один раз, наприклад, у setup(), щоб підписатись на статус-колбек
-    void begin();
+  // Викликається один раз, наприклад, у setup(), щоб підписатись на статус-колбек
+  void begin();
 
 private:
-    String _senderEmail;
-    String _appPassword;
-    String _senderName;
-    SMTPSession _smtp;
+  String _senderEmail;
+  String _appPassword;
+  String _senderName;
+  SMTPSession _smtp;
 
-    static void smtpCallback(SMTP_Status status);
+  static void smtpCallback(SMTP_Status status);
 
-    const TLogger _logger{"gmail"};
+  const TLogger _logger{"gmail"};
 };
 #else
 #define HAS_GMAIL_SENDER 0

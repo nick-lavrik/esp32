@@ -56,67 +56,66 @@
 #include <cstdint>
 
 #if defined(ESP32)
-    #include <ESPAsyncWebServer.h>
+#include <ESPAsyncWebServer.h>
 #elif defined(ESP8266)
-    #include <ESPAsyncWebServer.h>
+#include <ESPAsyncWebServer.h>
 #else
-    #error "HttpServer library supports ESP32 and ESP8266 only"
+#error "HttpServer library supports ESP32 and ESP8266 only"
 #endif
 
 class IStaticSource;
 class ITemplateResolver;
-class IEventDispatcher; // lib/EventDispatcher/IEventDispatcher.hpp
+class IEventDispatcher;  // lib/EventDispatcher/IEventDispatcher.hpp
 
 // Конфігурація ліміту з'єднань/буферів — значення за замовчуванням
 // відрізняються по платформі через різницю у вільному heap.
-struct HttpServerConfig
-{
-    uint16_t port = 80;
+struct HttpServerConfig {
+  uint16_t port = 80;
 
 #if defined(ESP32)
-    uint8_t maxClients = 4;      // ESP32 classic / S3 — обмежуємо явно, не покладаємось на дефолт бібліотеки
-    size_t  chunkSize   = 1024;  // розмір чанку при читанні файлів з SD/LittleFS
+  uint8_t maxClients =
+      4;  // ESP32 classic / S3 — обмежуємо явно, не покладаємось на дефолт бібліотеки
+  size_t chunkSize = 1024;  // розмір чанку при читанні файлів з SD/LittleFS
 #elif defined(ESP8266)
-    uint8_t maxClients = 2;      // менше RAM — менше одночасних з'єднань
-    size_t  chunkSize   = 512;
+  uint8_t maxClients = 2;  // менше RAM — менше одночасних з'єднань
+  size_t chunkSize = 512;
 #endif
 };
 
-class HttpServer
-{
+class HttpServer {
 public:
-    explicit HttpServer(const HttpServerConfig& config = HttpServerConfig());
-    ~HttpServer();
+  explicit HttpServer(const HttpServerConfig& config = HttpServerConfig());
+  ~HttpServer();
 
-    // Заборона копіювання — власник ресурсу AsyncWebServer.
-    HttpServer(const HttpServer&) = delete;
-    HttpServer& operator=(const HttpServer&) = delete;
+  // Заборона копіювання — власник ресурсу AsyncWebServer.
+  HttpServer(const HttpServer&) = delete;
+  HttpServer& operator=(const HttpServer&) = delete;
 
-    // Джерело статики. nullptr дозволено (сервер підніметься без статичних роутів,
-    // корисно якщо потрібні лише API/JSON-ендпоінти).
-    void setStaticSource(IStaticSource* staticSource);
+  // Джерело статики. nullptr дозволено (сервер підніметься без статичних роутів,
+  // корисно якщо потрібні лише API/JSON-ендпоінти).
+  void setStaticSource(IStaticSource* staticSource);
 
-    // Резолвер для %KEY% підстановок у текстових файлах (html/css/js).
-    // Якщо не заданий — template processor не підключається, файли віддаються as-is.
-    void setTemplateResolver(ITemplateResolver* templateResolver);
+  // Резолвер для %KEY% підстановок у текстових файлах (html/css/js).
+  // Якщо не заданий — template processor не підключається, файли віддаються as-is.
+  void setTemplateResolver(ITemplateResolver* templateResolver);
 
-    // Опціональна публікація подій сервера в спільну шину проєкту.
-    // Pointer injection за прийнятим у проєкті паттерном (nullptr за замовчуванням + setter).
-    void setEventDispatcher(IEventDispatcher* eventDispatcher);
+  // Опціональна публікація подій сервера в спільну шину проєкту.
+  // Pointer injection за прийнятим у проєкті паттерном (nullptr за замовчуванням + setter).
+  void setEventDispatcher(IEventDispatcher* eventDispatcher);
 
-    // Піднімає сервер (реєструє роути, викликає AsyncWebServer::begin()).
-    bool begin();
+  // Піднімає сервер (реєструє роути, викликає AsyncWebServer::begin()).
+  bool begin();
 
-    // Зупиняє сервер, звільняє AsyncWebServer.
-    void end();
+  // Зупиняє сервер, звільняє AsyncWebServer.
+  void end();
 
-    bool isRunning() const { return _isRunning; }
+  bool isRunning() const { return _isRunning; }
 
 private:
-    HttpServerConfig    _config;
-    AsyncWebServer      _server;
-    IStaticSource*      _staticSource     = nullptr;
-    ITemplateResolver*  _templateResolver = nullptr;
-    IEventDispatcher*   _eventDispatcher  = nullptr;
-    bool                _isRunning        = false;
+  HttpServerConfig _config;
+  AsyncWebServer _server;
+  IStaticSource* _staticSource = nullptr;
+  ITemplateResolver* _templateResolver = nullptr;
+  IEventDispatcher* _eventDispatcher = nullptr;
+  bool _isRunning = false;
 };

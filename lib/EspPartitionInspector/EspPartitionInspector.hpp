@@ -1,9 +1,10 @@
 #pragma once
 
-#include <vector>
-#include <string>
-#include <cstdint>
 #include <Print.h>
+
+#include <cstdint>
+#include <string>
+#include <vector>
 
 #if !defined(ESP8266)
 // esp_partition_t в ESP-IDF оголошений як `typedef struct { ... } esp_partition_t;`
@@ -29,24 +30,24 @@
 // ESP8266 не рахується (computeSha256 ігнорується).
 class EspPartitionInspector {
 public:
-    static std::vector<EspPartitionInfo> collectAll(bool computeSha256 = false);
+  static std::vector<EspPartitionInfo> collectAll(bool computeSha256 = false);
 
-    // Друкує таблицю розділів (або, на ESP8266, синтетичний список регіонів)
-    // у вигляді, зручному для serial-виводу.
-    static void printAll(Print &out, bool computeSha256 = false);
+  // Друкує таблицю розділів (або, на ESP8266, синтетичний список регіонів)
+  // у вигляді, зручному для serial-виводу.
+  static void printAll(Print &out, bool computeSha256 = false);
 
-    // Друкує один вже зібраний EspPartitionInfo (для кастомного форматування).
-    static void printOne(const EspPartitionInfo &info, Print &out);
+  // Друкує один вже зібраний EspPartitionInfo (для кастомного форматування).
+  static void printOne(const EspPartitionInfo &info, Print &out);
 
 private:
 #if defined(ESP8266)
-    static std::vector<EspPartitionInfo> collectAllEsp8266();
+  static std::vector<EspPartitionInfo> collectAllEsp8266();
 #else
-    static std::vector<EspPartitionInfo> collectAllEsp32(bool computeSha256);
-    static std::string partitionTypeToString(uint8_t type);
-    static std::string partitionSubtypeToString(uint8_t type, uint8_t subtype);
-    static std::string detectState(const esp_partition_t *partition);
-    static bool readSha256(const esp_partition_t *partition, uint8_t *out32);
+  static std::vector<EspPartitionInfo> collectAllEsp32(bool computeSha256);
+  static std::string partitionTypeToString(uint8_t type);
+  static std::string partitionSubtypeToString(uint8_t type, uint8_t subtype);
+  static std::string detectState(const esp_partition_t *partition);
+  static bool readSha256(const esp_partition_t *partition, uint8_t *out32);
 #endif
-    static std::string sha256ToHex(const uint8_t *sha256);
+  static std::string sha256ToHex(const uint8_t *sha256);
 };

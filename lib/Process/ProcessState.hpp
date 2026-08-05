@@ -22,33 +22,32 @@ extern "C" {
 template <typename TProgress>
 class ProcessState {
 public:
-    explicit ProcessState(UBaseType_t queueCapacity = 8)
-        : progressQueue(queueCapacity) {}
+  explicit ProcessState(UBaseType_t queueCapacity = 8) : progressQueue(queueCapacity) {}
 
-    std::atomic<ProcessStatus> status{ProcessStatus::Pending};
-    std::atomic<bool>          cancelRequested{false};
+  std::atomic<ProcessStatus> status{ProcessStatus::Pending};
+  std::atomic<bool> cancelRequested{false};
 
-    ProcessResultQueue<TProgress> progressQueue;
+  ProcessResultQueue<TProgress> progressQueue;
 
-    /// Записати фінальний результат потокобезпечно (spinlock, безпечно між ядрами).
-    void setFinalResult(const TProgress& value) {
-        portENTER_CRITICAL(&_finalResultLock);
-        _finalResult = value;
-        portEXIT_CRITICAL(&_finalResultLock);
-        _hasFinalResult.store(true, std::memory_order_release);
-    }
+  /// Записати фінальний результат потокобезпечно (spinlock, безпечно між ядрами).
+  void setFinalResult(const TProgress& value) {
+    portENTER_CRITICAL(&_finalResultLock);
+    _finalResult = value;
+    portEXIT_CRITICAL(&_finalResultLock);
+    _hasFinalResult.store(true, std::memory_order_release);
+  }
 
-    /// Прочитати фінальний результат. false, якщо ще не встановлено.
-    bool getFinalResult(TProgress& out) const {
-        if (!_hasFinalResult.load(std::memory_order_acquire)) return false;
-        portENTER_CRITICAL(&_finalResultLock);
-        out = _finalResult;
-        portEXIT_CRITICAL(&_finalResultLock);
-        return true;
-    }
+  /// Прочитати фінальний результат. false, якщо ще не встановлено.
+  bool getFinalResult(TProgress& out) const {
+    if (!_hasFinalResult.load(std::memory_order_acquire)) return false;
+    portENTER_CRITICAL(&_finalResultLock);
+    out = _finalResult;
+    portEXIT_CRITICAL(&_finalResultLock);
+    return true;
+  }
 
 private:
-    mutable portMUX_TYPE _finalResultLock = portMUX_INITIALIZER_UNLOCKED;
-    std::atomic<bool>    _hasFinalResult{false};
-    TProgress            _finalResult{};
+  mutable portMUX_TYPE _finalResultLock = portMUX_INITIALIZER_UNLOCKED;
+  std::atomic<bool> _hasFinalResult{false};
+  TProgress _finalResult{};
 };

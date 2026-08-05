@@ -9,15 +9,15 @@
 // або
 //   build_flags = -D USE_ESP_LOGGER
 #if defined(USE_SERIAL_LOGGER)
-    #include "SerialLogger.hpp"
-    using TLogger = SerialLogger;
+#include "SerialLogger.hpp"
+using TLogger = SerialLogger;
 #elif defined(USE_ESP_LOGGER)
-    #include "EspLogger.hpp"
-    using TLogger = EspLogger;
+#include "EspLogger.hpp"
+using TLogger = EspLogger;
 #elif defined(ESP8266)
-    #include "SerialLogger.hpp"
-    using TLogger = SerialLogger;
+#include "SerialLogger.hpp"
+using TLogger = SerialLogger;
 #else
-    #include "EspLogger.hpp"
-    using TLogger = EspLogger;
+#include "EspLogger.hpp"
+using TLogger = EspLogger;
 #endif

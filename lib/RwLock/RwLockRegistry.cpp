@@ -3,9 +3,7 @@
 // Тіло файлу існує лише на ESP32 — див. коментар у RwLockRegistry.hpp.
 #if defined(ESP32)
 
-RwLockRegistry::RwLockRegistry() {
-  _mapMutex = xSemaphoreCreateMutexStatic(&_mapMutexBuffer);
-}
+RwLockRegistry::RwLockRegistry() { _mapMutex = xSemaphoreCreateMutexStatic(&_mapMutexBuffer); }
 
 RwLockRegistry& RwLockRegistry::instance() {
   static RwLockRegistry registry;  // magic static — thread-safe одноразова ініціалізація

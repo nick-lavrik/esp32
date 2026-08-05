@@ -9,11 +9,11 @@
 //   env:esp8266           -> build_flags: -DBOARD_ESP8266
 
 #if defined(BOARD_4848S040)
-  #include "Setup_ST7701_4848S040.h" // визначає клас LGFX + alias TFT_eSPI
+#include "Setup_ST7701_4848S040.h"  // визначає клас LGFX + alias TFT_eSPI
 #elif defined(BOARD_ESP8266)
-  #include "Setup_SSD1306_NodeMCU.h" // TFT_eSPI/TFT_eSprite-сумісна обгортка над Adafruit_SSD1306
+#include "Setup_SSD1306_NodeMCU.h"  // TFT_eSPI/TFT_eSprite-сумісна обгортка над Adafruit_SSD1306
 #else
-  #include <TFT_eSPI.h>              // справжній bodmer/TFT_eSPI (ST7789, SPI)
+#include <TFT_eSPI.h>  // справжній bodmer/TFT_eSPI (ST7789, SPI)
 #endif
 
 /**
@@ -22,4 +22,4 @@
  * @see file://./../src-st7789/TftInstance.cpp
  * @see file://./../src-esp8266/TftInstance.cpp
  */
-extern TFT_eSPI tft; 
+extern TFT_eSPI tft;

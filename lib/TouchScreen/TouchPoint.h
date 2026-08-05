@@ -5,6 +5,6 @@
 // залежить від контексту виклику (наприклад, TouchPoint до і після
 // CoordinateMapper::map()).
 struct TouchPoint {
-    int x = 0;
-    int y = 0;
+  int x = 0;
+  int y = 0;
 };

@@ -15,12 +15,12 @@
 //   };
 class Event : public IEvent {
 public:
-    Event() = default;
-    ~Event() override = default;
+  Event() = default;
+  ~Event() override = default;
 
-    void stopPropagation() override;
-    bool isPropagationStopped() const override;
+  void stopPropagation() override;
+  bool isPropagationStopped() const override;
 
 private:
-    bool _propagationStopped = false;
+  bool _propagationStopped = false;
 };
