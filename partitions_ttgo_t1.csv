@@ -1,6 +1,10 @@
 # Кастомна partition-таблиця для ttgo-t1 (без OTA)
 #
-# Flash: 4 MB (0x400000)
+# Flash: реальний розмір чіпа на цій платі — 16 MB (0x1000000), не 4MB
+# (заводський дефолт "ttgo-t1" в PlatformIO board definition вказує 4MB,
+# але SDK/esptool читає з flash ID реальні 16MB — board_upload.flash_size
+# в platformio.ini вже виставлено 16MB, ця таблиця приведена у відповідність).
+#
 # OTA не використовується — один app-розділ замість двох (ota_0/ota_1).
 #
 # ВАЖЛИВО: app-розділ навмисно розташований на стандартній адресі 0x10000,
@@ -14,15 +18,14 @@
 # дамп пам'яті після краху для подальшого аналізу через espcoredump.py.
 # Без нього застосунок працює нормально, лише пише попередження при бут.
 #
-# Ідентична розбивка до partitions_st7789.csv (той самий чіп/flash).
-#
-# app      - 0x1E3000 - 1.9Mb
-# nvs      - 0x07D000 - 500Kb
-# littlefs - 0x180000 - 1.5Mb
+# app      - 0x300000 - 3Mb    (з запасом; поточний firmware суттєво менший)
+# nvs      - 0x0F0000 - 960Kb  (з запасом під ConfigStorage)
+# coredump - 0x010000 - 64Kb
+# littlefs - 0xBF0000 - ~11.9Mb (решта flash — під BackgroundImages/JPEG)
 #
 # Name,      Type,  SubType,   Offset,    Size,      Flags
 phy_init,    data,  phy,       0x009000,  0x001000,
-app,         app,   factory,   0x010000,  0x1E3000,
-coredump,    data,  coredump,  0x1F3000,  0x010000,
-nvs,         data,  nvs,       0x203000,  0x07D000,
-spiffs,      data,  spiffs,    0x280000,  0x180000,
+app,         app,   factory,   0x010000,  0x300000,
+coredump,    data,  coredump,  0x310000,  0x010000,
+nvs,         data,  nvs,       0x320000,  0x0F0000,
+spiffs,      data,  spiffs,    0x410000,  0xBF0000,
