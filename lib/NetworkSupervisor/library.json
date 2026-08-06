@@ -1,5 +1,5 @@
 {
-  "name": "NetworkManager",
+  "name": "NetworkSupervisor",
   "version": "0.1.0",
   "description": "WiFi connection manager with priority list, AP fallback and event listeners",
   "frameworks": ["arduino"],

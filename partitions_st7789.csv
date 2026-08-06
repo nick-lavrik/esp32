@@ -14,6 +14,10 @@
 # дамп пам'яті після краху для подальшого аналізу через espcoredump.py.
 # Без нього застосунок працює нормально, лише пише попередження при бут.
 #
+# app      - 0x1E3000 - 1.9Mb
+# nvs      - 0x07D000 - 500Kb
+# littlefs - 0x180000 - 1.5Mb
+#
 # Name,      Type,  SubType,   Offset,    Size,      Flags
 phy_init,    data,  phy,       0x009000,  0x001000,
 app,         app,   factory,   0x010000,  0x1E3000,
