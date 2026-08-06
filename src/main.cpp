@@ -41,8 +41,18 @@
 
 #include "Display.h"
 #if BOARD_HAS_SD
+#if defined(BOARD_ESP32_S3_LCD147)
+// Ця плата підключає TF-карту через SD_MMC (4-bit: D0/D1/D2/D3/CLK/CMD),
+// а не через SPI (CS/MOSI/MISO/SCK), як інші плати проєкту. SD_MMC.h надає
+// клас fs::SDMMCFS з тим самим публічним API, що й fs::SDFS (SD.h):
+// cardType()/cardSize()/usedBytes()/open()/... — тому решта коду (SD.*
+// виклики в dumpSDInfo(), SDCardInspector::printAll(SD, ...)) працює без
+// змін, якщо просто підмінити ім'я SD на SD_MMC для цієї плати.
+#include <SD_MMC.h>
+#define SD SD_MMC
+#else
 #include <SD.h>
-
+#endif
 #include <SDCardInspector.hpp>
 #endif
 #include <LittleFS.h>
@@ -349,6 +359,24 @@ void setupMqttClient() {
 
 void setupSD() {
 #if BOARD_HAS_SD
+#if defined(BOARD_ESP32_S3_LCD147)
+  // SD_MMC (4-bit): піни задаються з build_flags (SD_D0/D1/D2/D3/CLK/CMD).
+  if (!SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0, SD_D1, SD_D2, SD_D3)) {
+    Logger::error("SD_MMC.setPins() fail.");
+    return;
+  }
+ 
+  const int maxAttempts = 3;
+  for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+    if (SD_MMC.begin("/sdcard", /*mode1bit=*/false)) {
+      Logger::info("SD_MMC init done (%d/%d)", attempt, maxAttempts);
+      return;
+    }
+    delay(100);
+  }
+ 
+  Logger::error("SD_MMC init fail.");
+#else
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   const int maxAttempts = 3;
 
@@ -361,6 +389,7 @@ void setupSD() {
   }
 
   Logger::error("SD init fail.");
+#endif
 #else
   Logger::warn("SD disabled.");
 #endif
