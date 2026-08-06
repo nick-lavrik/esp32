@@ -65,7 +65,7 @@
 #include <SerialCommander.hpp>
 #include <SystemReset.hpp>
 #include <TaskController.hpp>
-// #include <NetworkManager.hpp>
+#include <NetworkSupervisor.hpp>
 
 #include "BackgroundImages.hpp"
 #include "SizeFormatter.hpp"
@@ -159,7 +159,7 @@ MqttClient mqtt(makeMqttConfig());
 
 LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
-// NetworkManager wifiManager;
+NetworkSupervisor wifi;
 
 #if BOARD_HAS_DISPLAY
 Display display;

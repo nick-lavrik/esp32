@@ -4,6 +4,13 @@
 
 #include "ConfigStorage.hpp"
 
+// Портабельна затримка: delay() на ESP8266/blocking, vTaskDelay() на ESP32
+#if defined(NM_BLOCKING_MODE) || defined(ESP8266)
+#define NM_DELAY(ms) delay(ms)
+#else
+#define NM_DELAY(ms) vTaskDelay(pdMS_TO_TICKS(ms))
+#endif
+
 static constexpr char kConfigKey[] = "nm_config";
 static constexpr char kConnectionsKey[] = "nm_conn";
 static constexpr char kIdCounterKey[] = "nm_id_ctr";
@@ -25,14 +32,14 @@ void NetworkSupervisor::begin() {
   _autoReconnect = _config.autoReconnect;
   _registerWifiEvents();
   _setState(NetworkSupervisorState::SCANNING);
-#if !defined(NM_BLOCKING_MODE)
+#if !defined(NM_BLOCKING_MODE) && !defined(ESP8266)
   xTaskCreate(_taskEntry, "NetworkSupervisor", 4096, this, 1, &_taskHandle);
 #endif
 }
 
 void NetworkSupervisor::end() {
   _unregisterWifiEvents();
-#if !defined(NM_BLOCKING_MODE)
+#if !defined(NM_BLOCKING_MODE) && !defined(ESP8266)
   if (_taskHandle) {
     vTaskDelete(_taskHandle);
     _taskHandle = nullptr;
@@ -346,11 +353,7 @@ bool NetworkSupervisor::_connectTo(WifiConnection& conn) {
 
   uint32_t deadline = millis() + _config.connectTimeoutMs;
   while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
-#if defined(NM_BLOCKING_MODE)
-    delay(100);
-#else
-    vTaskDelay(pdMS_TO_TICKS(100));
-#endif
+NM_DELAY(100);
   }
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -486,11 +489,7 @@ void NetworkSupervisor::_taskLoop() {
             _candidateIndex++;
             _currentRetries = 0;
           }
-#if defined(NM_BLOCKING_MODE)
-          delay(_config.retryDelayMs);
-#else
-          vTaskDelay(pdMS_TO_TICKS(_config.retryDelayMs));
-#endif
+NM_DELAY(_config.retryDelayMs);
         }
         break;
       }
@@ -509,11 +508,7 @@ void NetworkSupervisor::_taskLoop() {
             _setState(NetworkSupervisorState::RECONNECTING);
           }
         }
-#if defined(NM_BLOCKING_MODE)
-        delay(500);
-#else
-        vTaskDelay(pdMS_TO_TICKS(500));
-#endif
+NM_DELAY(500);
         break;
       }
 
@@ -534,11 +529,7 @@ void NetworkSupervisor::_taskLoop() {
             _startApInternal();
           }
         } else {
-#if defined(NM_BLOCKING_MODE)
-          delay(200);
-#else
-          vTaskDelay(pdMS_TO_TICKS(200));
-#endif
+NM_DELAY(200);
         }
         break;
       }
@@ -546,11 +537,7 @@ void NetworkSupervisor::_taskLoop() {
       // ----------------------------------------------------------
       case NetworkSupervisorState::AP_MODE: {
         if (!_autoReconnect) {
-#if defined(NM_BLOCKING_MODE)
-          delay(1000);
-#else
-          vTaskDelay(pdMS_TO_TICKS(1000));
-#endif
+NM_DELAY(1000);
           break;
         }
         // перевіряємо інтервал сканування
@@ -561,22 +548,14 @@ void NetworkSupervisor::_taskLoop() {
           _currentRetries = 0;
           _setState(NetworkSupervisorState::SCANNING);
         } else {
-#if defined(NM_BLOCKING_MODE)
-          delay(1000);
-#else
-          vTaskDelay(pdMS_TO_TICKS(1000));
-#endif
+NM_DELAY(1000);
         }
         break;
       }
 
       // ----------------------------------------------------------
       default:
-#if defined(NM_BLOCKING_MODE)
-        delay(100);
-#else
-        vTaskDelay(pdMS_TO_TICKS(100));
-#endif
+NM_DELAY(100);
         break;
     }
   }
@@ -588,7 +567,7 @@ void NetworkSupervisor::_taskLoop() {
 
 #if defined(NM_BLOCKING_MODE)
 void NetworkSupervisor::loop() { _taskLoop(); }
-#else
+#elif !defined(ESP8266)
 void NetworkSupervisor::_taskEntry(void* param) {
   static_cast<NetworkSupervisor*>(param)->_taskLoop();
   vTaskDelete(nullptr);
@@ -734,11 +713,7 @@ void NetworkSupervisor::_onWpsSuccess(const std::string& ssid, const std::string
   WiFi.begin(ssid.c_str(), password.c_str());
   uint32_t deadline = millis() + _config.connectTimeoutMs;
   while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
-#if defined(NM_BLOCKING_MODE)
-    delay(100);
-#else
-    vTaskDelay(pdMS_TO_TICKS(100));
-#endif
+NM_DELAY(100);
   }
 
   if (WiFi.status() == WL_CONNECTED) {

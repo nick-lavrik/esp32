@@ -8,6 +8,8 @@
 #include <ESP8266WiFi.h>
 #else
 #include <WiFi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #endif
 
 #include "INetworkSupervisorListener.hpp"
@@ -234,10 +236,12 @@ class NetworkSupervisor {
   void loop();
 
  private:
-#else
+#elif !defined(ESP8266)
+  // Варіант A: ESP32 FreeRTOS task
   static void _taskEntry(void* param);
-  void _taskLoop();
 #endif
+  // _taskLoop() — спільний для всіх варіантів (ESP32 task / ESP8266 loop / blocking)
+  void _taskLoop();
 
   // ---- дані ----
 
@@ -276,7 +280,7 @@ class NetworkSupervisor {
   std::vector<ListenerEntry> _listeners;
   NsListenerId _nextListenerId = 1;
 
-#if !defined(NM_BLOCKING_MODE)
+#if !defined(NM_BLOCKING_MODE) && !defined(ESP8266)
   TaskHandle_t _taskHandle = nullptr;
 #endif
 };
