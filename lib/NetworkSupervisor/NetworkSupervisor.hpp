@@ -8,6 +8,7 @@
 #include <ESP8266WiFi.h>
 #else
 #include <WiFi.h>
+#include <esp_wps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #endif

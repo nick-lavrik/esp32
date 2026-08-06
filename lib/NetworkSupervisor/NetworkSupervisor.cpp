@@ -642,26 +642,37 @@ void NetworkSupervisor::_startWpsInternal() {
 #else
   // ESP32: асинхронний через WiFi.onEvent() — результат прийде в event handler.
   // PIN mode: якщо wpsPin порожній — esp генерує PIN і стріляє ARDUINO_EVENT_WPS_ER_PIN.
-  if (_config.wpsMethod == WpsMethod::PIN && !_config.wpsPin.empty()) {
-    esp_wps_config_t wpsConfig = {};
-    wpsConfig.wps_type = WPS_TYPE_PIN;
-    strncpy(wpsConfig.factory_info.device_name, "ESP32", sizeof(wpsConfig.factory_info.device_name));
-    esp_wifi_wps_enable(&wpsConfig);
+  {
+    esp_wps_config_t wpsConfig;
+    memset(&wpsConfig, 0, sizeof(esp_wps_config_t));
+
+    if (_config.wpsMethod == WpsMethod::PIN) {
+      wpsConfig.wps_type = WPS_TYPE_PIN;
+      // якщо wpsPin заданий — копіюємо в config.pin (8 символів)
+      if (!_config.wpsPin.empty()) {
+        snprintf(wpsConfig.pin, sizeof(wpsConfig.pin), "%s", _config.wpsPin.c_str());
+      } else {
+        snprintf(wpsConfig.pin, sizeof(wpsConfig.pin), "00000000");
+      }
+    } else {
+      wpsConfig.wps_type = WPS_TYPE_PBC;
+    }
+
+    snprintf(wpsConfig.factory_info.manufacturer, sizeof(wpsConfig.factory_info.manufacturer),
+             "ESPRESSIF");
+    snprintf(wpsConfig.factory_info.model_name, sizeof(wpsConfig.factory_info.model_name),
+             "ESPRESSIF IOT");
+    snprintf(wpsConfig.factory_info.device_name, sizeof(wpsConfig.factory_info.device_name),
+             "ESP32");
+
+    esp_err_t err = esp_wifi_wps_enable(&wpsConfig);
+    if (err != ESP_OK) return;
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    esp_wifi_wps_start();
+#else
     esp_wifi_wps_start(0);
-  } else if (_config.wpsMethod == WpsMethod::PIN) {
-    // генерація PIN пристроєм — ARDUINO_EVENT_WPS_ER_PIN прийде в onEvent
-    esp_wps_config_t wpsConfig = {};
-    wpsConfig.wps_type = WPS_TYPE_PIN;
-    strncpy(wpsConfig.factory_info.device_name, "ESP32", sizeof(wpsConfig.factory_info.device_name));
-    esp_wifi_wps_enable(&wpsConfig);
-    esp_wifi_wps_start(0);
-  } else {
-    // PBC
-    esp_wps_config_t wpsConfig = {};
-    wpsConfig.wps_type = WPS_TYPE_PBC;
-    strncpy(wpsConfig.factory_info.device_name, "ESP32", sizeof(wpsConfig.factory_info.device_name));
-    esp_wifi_wps_enable(&wpsConfig);
-    esp_wifi_wps_start(0);
+#endif
   }
 #endif
 }
