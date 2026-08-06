@@ -14,6 +14,18 @@ const char* password = WIFI_PASSWORD;
 
 extern Display display;
 
+namespace {
+  void wifi_wait() {
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+      display.print(".");
+      display.flush();
+      delay(500);
+      attempts++;
+    }
+  }
+}
+
 void setupWiFi() {
   display.clear();
   display.setTextColor(TFT_WHITE);
@@ -24,24 +36,18 @@ void setupWiFi() {
   display.setTextSize(2);
   display.setCursor(10, 10);
 #endif
-  display.print("Connecting WiFi..");
-  display.flush();
+  // display.print("Connecting WiFi..");
+  // display.flush();
 
 #if defined(BOARD_ESP8266)
   WiFi.mode(WIFI_STA);
 #endif
   WiFi.begin(ssid, password);
   // WiFi.setSleep(false); // вирішуємо проблему сміття в моніторі (ttgo-t1)
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    display.print(".");
-    display.flush();
-    delay(500);
-    attempts++;
-  }
+  // wifi_wait();
 
   // tft.fillScreen(BG_COLOR);
-  if (WiFi.status() == WL_CONNECTED) {
+  /* if (WiFi.status() == WL_CONNECTED) {
     // display.setCursor(10, 10 + 3 + display.fontHeight());
     display.println("\nWiFi connected!");
     display.flush();
@@ -54,7 +60,7 @@ void setupWiFi() {
     display.flush();
     // setLed(true, false, false);
     delay(5000);
-  }
+  } */
 }
 
 #if defined(BOARD_ESP8266)

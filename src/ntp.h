@@ -56,12 +56,13 @@ void drawTime() {
     display.setCursor(max(0, display.width() - 10 - display.textWidth("Time sync failed!")), 8);
     display.print("Time sync failed");
     display.setTextSize(1);
-    Logger::warn("Time sync failed!");
+    // Logger::warn("Time sync failed!");
     return;
   }
 
-  char timeStr[12];
+  char timeStr[16];
   ntp.ftime("%H:%M:%S", timeStr, sizeof(timeStr));
+  // ntp.ftime("%H:%M:%S.%Q", timeStr, sizeof(timeStr));
 
 #if BOARD_TTGO_T1
   // time
@@ -90,7 +91,7 @@ void drawTime() {
 
   textW = display.textWidth(dateStr);
   x = (display.width() - textW) / 2;
-  y = 95;
+  y = 93;
 
   // tft.fillRect(0, y, tft.width(), tft.fontHeight(), TFT_BLACK);
 
@@ -123,10 +124,29 @@ void drawTime() {
   // x = (TFT_WIDTH - textW) / 2;
   display.setCursor(TFT_WIDTH - textW, 0);
   display.print(timeStr);
+/* #elif BOARD_4848S040
+  int x = 1; int y = 1; int f = 0;
+  display.setTextColor(TFT_WHITE);
+  display.setTextSize(1);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 1
+  display.setTextColor(TFT_GREENYELLOW);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 2
+  ++f; // display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 3
+  display.setTextColor(TFT_ORANGE);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 4
+  display.setTextColor(TFT_DARKGREY);
+  ++f; // display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 5
+  display.setTextColor(TFT_DARKGREEN);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d -. %s", f, timeStr); y += 3 + display.fontHeight(); // 6
+  display.setTextColor(TFT_CYAN);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d +, %s", f, timeStr); y += 3 + display.fontHeight(); // 7
+  display.setTextColor(TFT_MAGENTA);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 8
+  display.setTextFont(1); */
 #else
   display.setTextSize(2);
   display.setTextColor(TFT_LIGHTGREY);
-  display.setCursor(max(0, display.width() - 10 - display.textWidth(timeStr)), 8);
+  display.setCursor(max(0, display.width() - display.textWidth(timeStr) - 15), 8);
   display.print(timeStr);
 #endif
 }

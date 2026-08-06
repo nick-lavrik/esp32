@@ -159,7 +159,7 @@ MqttClient mqtt(makeMqttConfig());
 
 LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
-NetworkSupervisor wifi;
+//NetworkSupervisor wifi;
 
 #if BOARD_HAS_DISPLAY
 Display display;
@@ -227,10 +227,22 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
 }
 #endif
 
+void display_brightness(uint8_t percent, bool _auto) {
+  display.brightness(percent);
+  configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
+  configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = _auto);
+  Logger::info("display.brightness(%d)%s", display.brightness(), isAutoBrightness ? " (auto)" : "");
+}
+
 void display_flip() {
   displayConfig.invertY = !displayConfig.invertY;
   displayConfig.invertX = !displayConfig.invertX;
   display.flip();
+}
+
+void show_clock(bool show) {
+  configStorage.setBool(CFG_SHOW_CLOCK, showClock = show);
+  Logger::debug("showClock = %s", showClock ? "YES" : "NO");
 }
 
 void setupTouchScreen() {
@@ -243,20 +255,20 @@ void setupTouchScreen() {
 
   touchController.events().onSwipeUp([](TouchPoint s, TouchPoint e) {
     if (display.brightness() == 0) {
-      display.brightness(1);
+      display_brightness(1, false);
     } else if (display.brightness() == 1) {
-      display.brightness(10);
+      display_brightness(10, false);
     } else {
-      display.brightness(min(100, display.brightness() + 10));
+      display_brightness(min(100, display.brightness() + 10), false);
     }
     Logger::debug("Brightness: %d%% (increase)", display.brightness());
   });
 
   touchController.events().onSwipeDown([](TouchPoint s, TouchPoint e) {
     if (display.brightness() == 1) {
-      display.brightness(0);
+      display_brightness(0, false);
     } else {
-      display.brightness(max(1, display.brightness() - 10));
+      display_brightness(max(1, display.brightness() - 10), false);
     }
     Logger::debug("Brightness: %d%% (decrease)", display.brightness());
   });
@@ -295,21 +307,21 @@ void setupLittleFS() {
 
 void setupMqttClient() {
   static TLogger _logger{"mqtt"};
-  mqtt.begin();
 
+  mqtt.begin();
   mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message");
 
   // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
-  mqtt.addStringListener("mykola-lavryk/devices/+/status", [](const char* topic, const char* payload) -> bool {
-    _logger.info("topic:%s payload:%s", topic, payload);
-    return true;
+  mqtt.addStringListener("mykola-lavryk/devices/+/status", [](const char* topic, const char* payload) {
+    char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
+    _logger.info("%s %-45.45s LWT:%s", t, topic, payload);
   });
 
   dispatcher.addListener(EVT_REBOOT, [](IEvent& e) { mqtt.disconnect("reboot"); });
 
 #if LIGHT_SENSOR_PIN > 0
 /* lightSensor.addListener([]() {
-    // mqtt.publishStruct("mykola-lavryk:sensors/ldr", )
+    // mqtt.publishStruct("mykola-lavryk/sensors/ldr", )
     // isAutoBrightness, lightSensor.read(), lightSensor.value())
 }); */
 #else
@@ -322,12 +334,17 @@ void setupMqttClient() {
   });
 
   static uint32_t i = 0;
-  mqtt.addNumberListener<uint32_t>("mykola-lavrik/int32/#",
-                                   [](const char* t, uint32_t v) { _logger.info("topic:%s int32:%d", t, v); });
+  mqtt.addNumberListener<uint32_t>(
+    "mykola-lavrik/int32/#",
+    [](const char* t, uint32_t v) {
+      char w[9] = ""; ntp.ftime("%H:%M:%S", w, sizeof(w)); 
+      _logger.info("%s %-45.45s int:%d", w, t, v); 
+    });
+
   scheduler.addCronTask(1 * 60 * 1000UL,
                         []() { mqtt.publishNumber<uint32_t>("mykola-lavrik/int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
 
-  _logger.info("%s:%d (%s) ...", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID);
+  _logger.info("%s:%d (%s) lwt:%s", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID, MQTT_LWT_TOPIC);
 }
 
 void setupSD() {
@@ -622,11 +639,9 @@ void setupSerialCommander() {
 
   commandHandler.registerCommand("clock", "Керування годинником: clock on|off", [](const String& args) {
     if (args.equalsIgnoreCase("on")) {
-      configStorage.setBool(CFG_SHOW_CLOCK, showClock = true);
-      Logger::info("clock ON");
+      show_clock(true);
     } else if (args.equalsIgnoreCase("off")) {
-      configStorage.setBool(CFG_SHOW_CLOCK, showClock = false);
-      Logger::info("clock OFF");
+      show_clock(false);
     } else {
       Logger::info("Керування годинником: clock on|off");
     }
@@ -637,22 +652,13 @@ void setupSerialCommander() {
       Logger::info("Використання: brightness 0-100|auto");
     } else if (args.equalsIgnoreCase("auto")) {
 #if LIGHT_SENSOR_PIN > 0
-      display.brightness(lightSensor.value());
-#if !defined(BOARD_ESP8266)
-      configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
-      configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
-#else
-            isAutoBrightness = true;
-#endif
+      display_brightness(lightSensor.value(), true);
       Logger::info(" isAutoBrighness = %s", isAutoBrightness ? "true" : "false");
 #else
-            Logger::info(" isAutoBrighness **disabled**");
+      Logger::info(" isAutoBrighness **disabled**");
 #endif
     } else {
-      display.brightness(args.toInt());
-      configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
-      configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
-      Logger::info("display.brightness(%d)", display.brightness());
+      display_brightness(args.toInt(), false);
     }
   });
 
@@ -676,7 +682,7 @@ void setupConfigStorage() {
 void loadConfig() {
   showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
   isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
-  display.brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
+  display_brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50), isAutoBrightness);
   Logger::info("ConfigStorage load done");
 
   Logger::info("\t- %s = %s", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
@@ -697,7 +703,7 @@ void setupLightSensor() {
   lightSensor.addListener([]() {
     Logger::info("lightSensor.value() = %4d (%3d%%)", lightSensor.read(), lightSensor.value());
     if (isAutoBrightness) {
-      display.brightness(lightSensor.value());
+      display_brightness(lightSensor.value(), isAutoBrightness);
       Logger::info("display.brightness(%d) *auto*", lightSensor.value());
     }
   });
@@ -712,8 +718,7 @@ void setupLightSensor() {
 #if BOARD_HAS_TOUCHSCREEN
   touchController.events().onHold([](TouchPoint p, unsigned long ms) {
     configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
-    configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, lightSensor.value());
-    display.brightness(lightSensor.value());
+    display_brightness(lightSensor.value(), isAutoBrightness);
   });
 
   SwipeCallback onSwipe = [](TouchPoint s, TouchPoint e) {
@@ -762,25 +767,27 @@ void drawSystemInfo() {
 
 #if defined(ESP8266)
   display.setCursor(0, 1 + row++ * (2 + display.fontHeight()));
-  snprintf(buf, 120, "CPU: %dMHz\nLoop rate: %d/s", cpuFreq, display.loopFrameRate());
+  snprintf(buf, sizeof(buf), "CPU: %dMHz\nLoop rate: %d/s", cpuFreq, display.loopFrameRate());
   display.print(buf);
 
-  enum ScreenMode { HEAP, NETWORK, UPTIME };
-  static ScreenMode currentScreen = HEAP;
+  enum ScreenMode { DISPLAY_INFO, NETWORK, UPTIME };
+  static ScreenMode currentScreen = NETWORK;
   static uint32_t currentScreenTs = millis();
-  const uint32_t screenDelayMs = 5 * 1000UL;
+  const uint32_t screenDelayMs = 3 * 1000UL;
   uint32_t hfree; uint32_t hmax; uint8_t hfrag;
   
   switch (currentScreen) {
-    case HEAP:
-      ESP.getHeapStats(&hfree, &hmax, &hfrag);
-      snprintf(buf, sizeof(buf), "\nHeap: %d KB / %d KB", hfree / 1024, freeHeap / 1024 /*hmax / 1024*/);
+    case DISPLAY_INFO:
+      snprintf(buf, sizeof(buf), "Display: %dx%d\nBrightness: %d\n", TFT_WIDTH, TFT_HEIGHT, display.brightness());
       break;
     case NETWORK:
       snprintf(buf, sizeof(buf), "WiFi: %s\nIP:   %s", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
       break;
     case UPTIME:
-      snprintf(buf, sizeof(buf), "\nUptime: %02d:%02d:%02d", uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
+      ESP.getHeapStats(&hfree, &hmax, &hfrag);
+      snprintf(buf, sizeof(buf), "Heap: %d / %d KB\nUptime: %02d:%02d:%02d", 
+          hmax / 1024, hfree / 1024,
+          uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
       break;
   }
 
@@ -816,7 +823,7 @@ void drawSystemInfo() {
     display.print(dumpPingStatsStr());
   }
 
-  snprintf(buf, sizeof(buf), "Brigtness: %d%% %s", display.brightness(), isAutoBrightness ? "(auto)" : "");
+  snprintf(buf, sizeof(buf), "Brightness: %d%% %s", display.brightness(), isAutoBrightness ? "(auto)" : "");
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
   display.print(buf);
 #endif
@@ -842,17 +849,40 @@ void setupFlipButton() {
   // - INPUT_PULLDOWN: Turns on a built-in resistor holding the pin LOW until supplied with 3.3V.
   pinMode(FLIP_BUTTON_PIN, INPUT_PULLUP);  // GPIO0 - Enable pull-up resistor
   scheduler.addCronTask(0, []() -> void {
-    static bool bootButtonPressed = false;
+    static bool flipButtonPressed = false;
+    static uint32_t flippButtonPressedTs = 0;
+    static uint8_t _brightness = 0;
+    static bool _autoBrightness = false;
+    static bool _pause = false;
+    uint32_t now = millis();
+
     int buttonState = digitalRead(FLIP_BUTTON_PIN);
-    if ((buttonState == LOW) && !bootButtonPressed) {
-      bootButtonPressed = true;
-      display_flip();
+    if ((buttonState == LOW) && !flipButtonPressed) {
+      _pause = false;
+      flipButtonPressed = true;
+      flippButtonPressedTs = millis();
       Logger::info("Button pressed!");
     } else if (buttonState == LOW) {
       // loop (pressed) ....
-    } else if (bootButtonPressed) {
-      // button release
-      bootButtonPressed = false;
+      if (_pause) {
+        // "hide/show" action done!
+      } else if (now - flippButtonPressedTs > 3000UL) {
+        // "hide/show" action done!
+        _pause = true;
+        if (display.brightness() == 0) {
+          display_brightness(max(_brightness, (uint8_t)1), _autoBrightness);
+        } else {
+          _brightness = display.brightness();
+          _autoBrightness = isAutoBrightness;
+          display_brightness(0, false);
+        }
+      }
+    } else if (flipButtonPressed) {
+      if (now - flippButtonPressedTs < 1000UL) {
+        show_clock(!showClock);
+      }
+      flipButtonPressed = false;
+      flippButtonPressedTs = 0;
       Logger::info("Button released!");
     } else {
       // loop (released) ...
@@ -897,6 +927,46 @@ void setupBlinkLED() {
 #endif
 }
 
+#if defined(ESP8266)
+#define TFT_WHITE WHITE
+#define TFT_GREEN WHITE
+#define TFT_DARKGREY WHITE
+#define TFT_DARKGREEN WHITE
+#endif
+#include <MonoIcon16x16.hpp>
+MonoIcon16x16 icon;
+void setupWiFiIcon() {
+
+  #if defined(BOARD_ESP826)
+    const int p[2] = {display.width() - 16, display.height() - 16};
+  #else
+    const int p[2] = {display.width() - 16, 0};
+  #endif
+
+  Logger::info("================ Display %dx%d", display.width(), display.height());
+
+  scheduler.addCronTask(0, [p]() {
+    /* display.drawRect(0, 0, 2, 2, TFT_GREEN);
+    display.drawRect(10, 10, 2, 2, TFT_GREEN);
+    display.drawRect(20, 20, 2, 2, TFT_GREEN);
+    display.drawRect(display.width()-2, 0, 2, 2, TFT_GREEN);
+
+    display.drawRect(TFT_WIDTH - 16, TFT_HEIGHT - 16, 2, 2, TFT_WHITE);
+    display.drawRect(TFT_WIDTH - 20, TFT_HEIGHT - 20, 12, 12, TFT_GREEN); */
+
+
+    if (WiFi.isConnected()) {
+      display.drawBitmap(p[0], p[1],
+        (const uint8_t*) icon.wifi().data(),
+        16, 16, TFT_DARKGREEN);
+    } else {
+      display.drawBitmap(p[0], p[1], 
+        (const uint8_t*) ((uint)(millis() % 1000) >= 450 ? icon.wifi().data() : icon.empty().data()),
+        16, 16, TFT_DARKGREY);
+    }
+  });
+}
+
 void setup() {
   setupSerial();
   setupSD();
@@ -915,6 +985,7 @@ void setup() {
   setupLightSensor();
   setupMqttClient();
   setupFlipButton();
+  setupWiFiIcon();
   loadConfig();
 
   httpServer.setStaticSource(&littleFsSource);
@@ -930,19 +1001,19 @@ void setup() {
 
 void loop() {
   PrintQueue::flush();
-  commandHandler.update();
-  mqtt.loop();
-
-  // display.startWrite();
   doPing();
-  display.clear();
   drawBackgroundImage();
   drawSystemInfo();
+
+  mqtt.loop();
+  commandHandler.update();
+
   if (showClock) drawTime();
 
   // sendEmail();
 
   scheduler.loop();
+
 #if BOARD_HAS_TOUCHSCREEN
   touchController.update();
 #endif
