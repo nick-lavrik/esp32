@@ -5,6 +5,29 @@
 #include "LogLevelManager.hpp"
 #include "PrintQueueRegistry.hpp"
 
+#if SCREEN_LOG_TAIL_LINES > 0
+#include "PrintFanout.hpp"
+#include "ScreenLogTail.hpp"
+
+namespace {
+// Meyer's singleton: static локальна змінна гарантовано ініціалізується
+// при першому виклику (уникає static initialization order fiasco між
+// цим TU і ScreenLogTail.cpp/іншими глобальними об'єктами). Один спільний
+// fanout (Serial + tail) для всіх SerialLogger-інстансів без явного output.
+PrintFanout<2>& serialLoggerFanout() {
+  static PrintFanout<2> fanout{Serial, screenLogTail()};
+  return fanout;
+}
+}  // namespace
+
+Print& serialLoggerOutput = serialLoggerFanout();
+
+#else
+
+Print& serialLoggerOutput = Serial;
+
+#endif
+
 SerialLogger::SerialLogger(const char* tag, Print& output) : ILogger(tag), _output(output) {}
 
 const char* SerialLogger::levelName(LogLevel level) {

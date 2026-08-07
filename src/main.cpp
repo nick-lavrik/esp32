@@ -334,17 +334,19 @@ void setupMqttClient() {
 #if LIGHT_SENSOR_PIN > 0
   // publish mqtt
   lightSensor.addListener([]() {
-      mqtt.publishNumber<int8_t>("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor", lightSensor.value());
+      _logger.debug("light_sensor(%d) => %d%%", lightSensor.read(), lightSensor.value());
+      mqtt.publishNumber<int>("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor", lightSensor.value());
   });
   _logger.info("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor MQTT done.");
 #else
   // subscribe on mqtt
-  mqtt.addNumberListener<int8_t>(
+  mqtt.addNumberListener<int>(
     "mykola-lavrik/devices/+/light_sensor",
-    [](const char* topic, int32_t value) {
+    [](const char* topic, int value) {
       char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t)); 
-      _logger.info("%s %-45.45s int:%d", t, topic, value); 
+      _logger.info("%s %-45.45s val:%d%%", t, topic, value); 
     });
+  _logger.info("mykola-lavryk/devices/+/light_sensor listen");
 #endif
 
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
