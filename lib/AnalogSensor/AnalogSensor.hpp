@@ -63,8 +63,10 @@ public:
 
     // raw analag sensor value
     uint16_t raw = analogRead(_adcPin);
+
     // raw "percentage" (normalised) sensor value
     long value = map(raw, _adcMinValue, _adcMaxValue, _mapMin, _mapMax);
+
     // safe "percentage" (normilised) sensor value
     uint16_t actual = static_cast<uint16_t>(
         constrain(value, std::min(_mapMin, _mapMax), std::max(_mapMin, _mapMax)));
@@ -112,6 +114,7 @@ private:
 
   const uint16_t _mapMin;
   const uint16_t _mapMax;
+
   uint16_t _mapThreshold;
 
   struct Entry {

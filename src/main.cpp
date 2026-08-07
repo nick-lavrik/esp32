@@ -43,17 +43,19 @@
 #if BOARD_HAS_SD
 #if defined(BOARD_ESP32_S3_LCD147)
 // Ця плата підключає TF-карту через SD_MMC (4-bit: D0/D1/D2/D3/CLK/CMD),
-// а не через SPI (CS/MOSI/MISO/SCK), як інші плати проєкту. SD_MMC.h надає
-// клас fs::SDMMCFS з тим самим публічним API, що й fs::SDFS (SD.h):
-// cardType()/cardSize()/usedBytes()/open()/... — тому решта коду (SD.*
-// виклики в dumpSDInfo(), SDCardInspector::printAll(SD, ...)) працює без
-// змін, якщо просто підмінити ім'я SD на SD_MMC для цієї плати.
+// а не через SPI (CS/MOSI/MISO/SCK), як інші плати проєкту.
+//
+// УВАГА: підміна через "#define SD SD_MMC" тут навмисно НЕ використовується —
+// вона ламає компіляцію, бо <SD.h> транзитивно підключають і інші бібліотеки
+// (напр. ESP Mail Client -> MB_FS.h), де глобальна текстова підміна імені SD
+// конфліктує з їхніми власними деклараціями/викликами SD.*. Замість цього
+// нижче явно використовується SD_MMC (SDCardInspector::printAll(SD_MMC, ...),
+// SD_MMC.cardType()/cardSize()/... — той самий публічний API, що й fs::SDFS).
 #include <SD_MMC.h>
-#define SD SD_MMC
 #else
 #include <SD.h>
-#endif
 #include <SDCardInspector.hpp>
+#endif
 #endif
 #include <LittleFS.h>
 #include <PubSubClient.h>
@@ -187,7 +189,7 @@ GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
 #endif
 
 #if LIGHT_SENSOR_PIN > 0
-AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 3);
+AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 #endif
 
 #if BOARD_HAS_TOUCHSCREEN
@@ -330,12 +332,19 @@ void setupMqttClient() {
   dispatcher.addListener(EVT_REBOOT, [](IEvent& e) { mqtt.disconnect("reboot"); });
 
 #if LIGHT_SENSOR_PIN > 0
-/* lightSensor.addListener([]() {
-    // mqtt.publishStruct("mykola-lavryk/sensors/ldr", )
-    // isAutoBrightness, lightSensor.read(), lightSensor.value())
-}); */
+  // publish mqtt
+  lightSensor.addListener([]() {
+      mqtt.publishNumber<int8_t>("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor", lightSensor.value());
+  });
+  _logger.info("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor MQTT done.");
 #else
-// subscribe on mqtt
+  // subscribe on mqtt
+  mqtt.addNumberListener<int8_t>(
+    "mykola-lavrik/devices/+/light_sensor",
+    [](const char* topic, int32_t value) {
+      char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t)); 
+      _logger.info("%s %-45.45s int:%d", t, topic, value); 
+    });
 #endif
 
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
@@ -501,15 +510,28 @@ void dumpConfigStorage() {
 }
 
 #if BOARD_HAS_SD
+// ACTIVE_SD — локальний (не глобальний!) макрос-псевдонім лише для двох
+// функцій нижче: dumpSDlistDir()/dumpSDInfo(). Визначається безпосередньо
+// перед використанням і одразу #undef-иться, щоб не впливати на інший код
+// файлу чи транзитивні включення <SD.h> в сторонніх бібліотеках (напр.
+// ESP Mail Client -> MB_FS.h), де глобальний "#define SD SD_MMC" ламає
+// компіляцію (конфлікт з їхніми власними SD.*-викликами).
+#if defined(BOARD_ESP32_S3_LCD147)
+#define ACTIVE_SD SD_MMC
+#include <SDCardInspector.hpp>
+#else
+#define ACTIVE_SD SD
+#endif
+ 
 void dumpSDlistDir(const char* dirname, uint8_t levels) {
   Logger::info("Вміст директорії: %s", dirname);
-
-  File root = SD.open(dirname);
+ 
+  File root = ACTIVE_SD.open(dirname);
   if (!root || !root.isDirectory()) {
     Logger::info("  (не вдалось відкрити директорію)");
     return;
   }
-
+ 
   File file = root.openNextFile();
   int maxFiles = 50;
   while (file && --maxFiles) {
@@ -527,25 +549,25 @@ void dumpSDlistDir(const char* dirname, uint8_t levels) {
     Logger::info("  ...");
   }
 }
-
+ 
 void dumpSDInfo() {
   // 1. Деактивируем выбор других устройств на шине
   // digitalWrite(15, HIGH); // Отключаем TFT_CS
   // digitalWrite(33, HIGH); // Отключаем TOUCH_CS
   // digitalWrite(5, HIGH);  // SD_CS = HIGH (пока отключен)
-
+ 
   Logger::info("========= SD Card Info =====================================");
-
-  uint8_t cardType = SD.cardType();
-
+ 
+  uint8_t cardType = ACTIVE_SD.cardType();
+ 
   if (cardType == CARD_NONE) {
     Logger::info("❌ Картку не вставлено (або тип не визначено).");
     Logger::info("============================================================");
     return;
   }
-
+ 
   Logger::info("✅ Картку успішно знайдено!");
-
+ 
   // Виводимо тип для деталізації
   if (cardType == CARD_MMC)
     Logger::info("Тип картки: %s", "MMC");
@@ -555,24 +577,26 @@ void dumpSDInfo() {
     Logger::info("Тип картки: %s", "SDHC");
   else
     Logger::info("Тип картки: %s", "Невідомий тип");
-
+ 
   Logger::info("------------------------------------------------------------");
   dumpSDlistDir("/", 2);
   Logger::info("------------------------------------------------------------");
-
+ 
   // Виводимо розмір картки
-  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+  uint64_t cardSize = ACTIVE_SD.cardSize() / (1024 * 1024);
   // Serial.printf(F("Розмір картки: %llu MB\n"), cardSize);
-  Logger::info("Розмір картки: %s", SizeFormatter::format(SD.cardSize()));
-  Logger::info("Зайнято місця: %s (%.2f%%)", SizeFormatter::format(SD.usedBytes()),
-               SD.usedBytes() * 100.0 / SD.cardSize());
-  Logger::info("Вільно місця:  %s (%.2f%%)", SizeFormatter::format(SD.cardSize() - SD.usedBytes()),
-               (SD.cardSize() - SD.usedBytes()) * 100.0 / SD.cardSize());
-
+  Logger::info("Розмір картки: %s", SizeFormatter::format(ACTIVE_SD.cardSize()));
+  Logger::info("Зайнято місця: %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.usedBytes()),
+               ACTIVE_SD.usedBytes() * 100.0 / ACTIVE_SD.cardSize());
+  Logger::info("Вільно місця:  %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.cardSize() - ACTIVE_SD.usedBytes()),
+               (ACTIVE_SD.cardSize() - ACTIVE_SD.usedBytes()) * 100.0 / ACTIVE_SD.cardSize());
+ 
   Logger::info("============================================================");
 }
+ 
+#undef ACTIVE_SD
 #endif  // BOARD_HAS_SD
-
+ 
 void dumpLittleFSInfo() {
   Logger::info("========= LittleFS INFO ====================================");
 
@@ -626,8 +650,13 @@ void dumpStatus(const String& section) {
     EspPartitionInspector::printAll(logger, true);
 #if BOARD_HAS_SD
   } else if (section.equals("sd")) {
-    SDCardInspector::printAll(SD, logger);
+    // SDCardInspector::printAll(SD, logger);
     // SDCardInspector::printAll(SD_MMC, Serial);
+    #if defined(BOARD_ESP32_S3_LCD147)
+      SDCardInspector::printAll(SD_MMC, logger);
+    #else
+      SDCardInspector::printAll(SD, logger);
+    #endif
   } else if (section.equals("sd+")) {
     dumpSDInfo();
 #endif
@@ -737,12 +766,12 @@ void setupLightSensor() {
     }
   });
 
-  scheduler.addCronTask(0, []() {
+  /* scheduler.addCronTask(0, []() {
     display.setTextSize(1);
     display.setTextColor(TFT_DARKGREY);
     display.setCursor(10, display.height() - 1 * (5 + display.fontHeight()));
     display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
-  });
+  }); */
 
 #if BOARD_HAS_TOUCHSCREEN
   touchController.events().onHold([](TouchPoint p, unsigned long ms) {
@@ -855,6 +884,14 @@ void drawSystemInfo() {
   snprintf(buf, sizeof(buf), "Brightness: %d%% %s", display.brightness(), isAutoBrightness ? "(auto)" : "");
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
   display.print(buf);
+
+  #if LIGHT_SENSOR_PIN > 0
+    // display.setTextSize(1);
+    // display.setTextColor(TFT_DARKGREY);
+    // display.setCursor(10, display.height() - 1 * (5 + display.fontHeight()));
+    display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+    display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
+  #endif
 #endif
 
   // Візуальний бар пам'яті
@@ -867,6 +904,109 @@ void drawSystemInfo() {
   // int lightPercent = readLightPercent();
   // img.setCursor(180, 70);
   // img.printf("Light: %d%%", lightPercent);
+}
+
+void drawTime() {
+  struct tm timeinfo;
+  if (!ntp.isSynced()) {
+    display.setTextSize(2);
+    display.setTextColor(TFT_RED);
+    display.setCursor(max(0, display.width() - 10 - display.textWidth("Time sync failed!")), 8);
+    display.print("Time sync failed");
+    display.setTextSize(1);
+    // Logger::warn("Time sync failed!");
+    return;
+  }
+
+  char timeStr[16];
+  ntp.ftime("%H:%M:%S", timeStr, sizeof(timeStr));
+  // ntp.ftime("%H:%M:%S.%Q", timeStr, sizeof(timeStr));
+
+#if BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147
+  // time
+  display.setTextFont(7);  // великий "цифровий" шрифт (тільки цифри та ":")
+  // display.setTextSize(1);
+
+  int textW = display.textWidth(timeStr);
+  int textH = display.fontHeight();
+  int x = (tft.width() - textW) / 2;
+  int y = 30;
+
+  // Затираємо попередній текст перед виводом нового
+  // tft.fillRect(0, y, tft.width(), textH, TFT_BLACK);
+
+  // display.setTextColor(TFT_DARKGREY);
+  display.setTextColor(TFT_CYAN);
+  display.setCursor(x, y);
+  display.print(timeStr);
+
+  // date
+  char dateStr[16];
+  ntp.ftime("%d.%m.%Y", dateStr, sizeof(dateStr));
+
+  display.setTextFont(4);
+  display.setTextSize(1);
+
+  textW = display.textWidth(dateStr);
+  x = (display.width() - textW) / 2;
+  y = 93;
+
+  // tft.fillRect(0, y, tft.width(), tft.fontHeight(), TFT_BLACK);
+
+  // display.setTextColor(TFT_DARKGREEN);
+  display.setTextColor(TFT_ORANGE);
+  display.setCursor(x, y);
+  display.print(dateStr);
+
+  display.setTextSize(1);
+  display.setTextFont(1);
+#elif BOARD_ESP8266
+  // display.flip();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  int16_t x1, y1;
+  uint16_t textW, textH;
+
+  // display.getTextBounds(timeStr, 0, 0, &x1, &y1, &textW, &textH);
+  textW = display.textWidth(timeStr);
+  int x = (TFT_WIDTH - textW) / 2;
+  display.setCursor(x, 25);
+  display.print(timeStr);
+
+  // Менша дата під часом
+  ntp.ftime("%d.%m.%Y", timeStr, sizeof(timeStr));
+
+  display.setTextSize(1);
+  // display.getTextBounds(dateStr, 0, 0, &x1, &y1, &textW, &textH);
+  textW = display.textWidth(timeStr);
+  // x = (TFT_WIDTH - textW) / 2;
+  display.setCursor(TFT_WIDTH - textW, 0);
+  display.print(timeStr);
+/* #elif BOARD_4848S040
+  int x = 1; int y = 1; int f = 0;
+  display.setTextColor(TFT_WHITE);
+  display.setTextSize(1);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 1
+  display.setTextColor(TFT_GREENYELLOW);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 2
+  ++f; // display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 3
+  display.setTextColor(TFT_ORANGE);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 4
+  display.setTextColor(TFT_DARKGREY);
+  ++f; // display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 5
+  display.setTextColor(TFT_DARKGREEN);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d -. %s", f, timeStr); y += 3 + display.fontHeight(); // 6
+  display.setTextColor(TFT_CYAN);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d +, %s", f, timeStr); y += 3 + display.fontHeight(); // 7
+  display.setTextColor(TFT_MAGENTA);
+  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 8
+  display.setTextFont(1); */
+#else
+  display.setTextSize(2);
+  display.setTextColor(TFT_LIGHTGREY);
+  display.setCursor(max(0, display.width() - display.textWidth(timeStr) - 15), 8);
+  display.print(timeStr);
+#endif
 }
 
 void setupFlipButton() {
