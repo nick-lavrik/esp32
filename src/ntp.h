@@ -31,7 +31,7 @@ void setupNtpService() {
     // Serial.printf("[NTP2] Синхронізовано: %s\n", buf); buf[0] = 0;
     // Serial.printf("[NTP] Синхронізовано: %s\n", ntp.ftime("%Y-%m-%d %H:%M:%S.%q", buf,
     // sizeof(buf)));  // millis() - ще не оновлено в перший раз (!)
-    Logger::info("NTP Синхронізовано: %s", ntp.ftime("%Y-%m-%d %H:%M:%S.%q", buf, sizeof(buf), tv));
+    Logger::info("NTP sync: %s", ntp.ftime("%Y-%m-%d %H:%M:%S.%q", buf, sizeof(buf), tv));
   });
 
   // --- Варіант 1: POSIX TZ-рядок (рекомендовано, DST рахується автоматично) ---

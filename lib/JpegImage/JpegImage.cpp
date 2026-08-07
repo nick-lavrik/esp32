@@ -54,13 +54,13 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   _depth = depth;
 
   if (!LittleFS.exists(path)) {
-    _logger.error("Файл не знайдено: %s", path);
+    _logger.error("File not found: %s", path);
     return false;
   }
 
   File file = LittleFS.open(path, "r");
   if (!file) {
-    _logger.error("Не вдалось відкрити файл: %s", path);
+    _logger.error("Can't open file: %s", path);
     return false;
   }
 
@@ -68,7 +68,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   bool jpegBufPsram = false;
   uint8_t *jpegData = (uint8_t *)allocPreferPsram(fileSize, &jpegBufPsram);
   if (jpegData == nullptr) {
-    _logger.error("Недостатньо пам'яті для читання jpg-файлу");
+    _logger.error("Not enough memory to read jpg file");
     file.close();
     return false;
   }
@@ -77,7 +77,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   file.close();
 
   if (bytesRead != fileSize) {
-    _logger.error("Розмір прочитаних даних не збігається з розміром файлу");
+    _logger.error("The size of the read data does not match the file size");
     heap_caps_free(jpegData);
     return false;
   }
@@ -85,7 +85,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   uint16_t jpegWidth = 0;
   uint16_t jpegHeight = 0;
   if (TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, fileSize) != JDR_OK) {
-    _logger.error("Не вдалось розпарсити заголовок jpg");
+    _logger.error("Can't perse jpeg header");
     heap_caps_free(jpegData);
     return false;
   }
@@ -125,13 +125,13 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   heap_caps_free(jpegData);
 
   if (decodeResult != JDR_OK) {
-    _logger.error("Помилка декодування jpg \"%s\"", path);
+    _logger.error("Jpeg decode error \"%s\"", path);
     freeBuffer();
     return false;
   }
 
   _loaded = true;
-  _logger.info("Завантажено %dx%d, глибина: %d біт, розмір буфера: %u байт, пам'ять: %s\n", _width,
+  _logger.info("Loaded %dx%d, depth: %d біт, buffer: %u B, memory: %s", _width,
                _height, (int)depth, (unsigned)bufferBytes, _usedPsram ? "PSRAM" : "внутрішня RAM");
   return true;
 }

@@ -78,6 +78,7 @@
 #include <SystemReset.hpp>
 #include <TaskController.hpp>
 #include <NetworkSupervisor.hpp>
+#include <RouterApiClient.hpp>
 
 #include "ScreenLogTail.hpp"
 
@@ -174,6 +175,8 @@ MqttClient mqtt(makeMqttConfig());
 LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
 //NetworkSupervisor wifi;
+
+RouterApiClient routerApi("192.168.28.1", "QWRtaW46cGFzcw==");
 
 #if BOARD_HAS_DISPLAY
 Display display;
@@ -327,6 +330,11 @@ void setupMqttClient() {
   mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message");
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
 
+  mqtt.addStringListener("mykola-lavryk/#", [](const char* topic, const char* payload) {
+    // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
+    _logger.info(">>> %s::%s", topic, payload);
+  });
+
   // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
   mqtt.addStringListener("mykola-lavryk/devices/+/status", [](const char* topic, const char* payload) {
     char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
@@ -338,20 +346,20 @@ void setupMqttClient() {
 #if LIGHT_SENSOR_PIN > 0
   // publish mqtt
   lightSensor.addListener([]() {
-      _logger.debug("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor => %d", lightSensor.value());
-      mqtt.publishNumber<int>("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor", (int)lightSensor.value());
+      _logger.debug("mykola-lavryk/devices/" PIO_PIOENV "/light-sensor => %d", lightSensor.value());
+      mqtt.publishNumber<int>("mykola-lavryk/devices/" PIO_PIOENV "/light-sensor", (int)lightSensor.value());
   });
-  _logger.info("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor MQTT done.");
-#endif
+  _logger.info("mykola-lavryk/devices/" PIO_PIOENV "/light-sensor MQTT done.");
+#else
   // subscribe on mqtt
   mqtt.addNumberListener<int>(
-    "mykola-lavrik/devices/+/light_sensor",
+    "mykola-lavryk/devices/+/light-sensor",
     [](const char* topic, int value) {
       char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t)); 
-      _logger.info("%s %-45.45s val:%d%%", t, topic, value); 
+      _logger.info("%s %-45s val:%d%%", t, topic, value); 
     });
-  _logger.info("mykola-lavryk/devices/+/light_sensor listen");
-// #endif
+  _logger.info("mykola-lavryk/devices/+/light-sensor listen");
+#endif
 
   commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
     _logger.info("isConnected = %s", mqtt.isConnected() ? "yes" : "no");
@@ -359,14 +367,14 @@ void setupMqttClient() {
 
   static uint32_t i = 0;
   mqtt.addNumberListener<uint32_t>(
-    "mykola-lavrik/int32/#",
+    "mykola-lavryk/int32/#",
     [](const char* t, uint32_t v) {
       char w[9] = ""; ntp.ftime("%H:%M:%S", w, sizeof(w)); 
       _logger.info("%s %-45.45s int:%d", w, t, v); 
     });
 
   scheduler.addCronTask(1 * 60 * 1000UL,
-                        []() { mqtt.publishNumber<uint32_t>("mykola-lavrik/int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
+                        []() { mqtt.publishNumber<uint32_t>("mykola-lavryk/int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
 
   _logger.info("%s:%d (%s) lwt:%s", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID, MQTT_LWT_TOPIC);
 }
@@ -899,11 +907,18 @@ void drawSystemInfo() {
   #endif
 
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
-  display.println("----------------------------------------------");
+  display.println("------------------------------------");
+  #if BOARD_TTGO_T1 || BOARD_ST7789
+  int skip = 11; // hide logvele and tag
+  #elif BOARD_ESP32_S3_LCD147
+  int skip = 11; // hideloglevel only!
+  #else
+  int skip = 0;
+  #endif
 
   ScreenLogTail& tail = screenLogTail();
-  for (size_t i = tail.count(); i ; --i) {
-    display.println(tail.line(i));  // від найстарішого (0) до найновішого
+  for (size_t i = tail.count(); i ;--i) {
+    display.println(tail.line(i-1) + skip);  // від найстарішого (0) до найновішого
   }
 
 #endif
@@ -1120,7 +1135,7 @@ void setupBlinkLED() {
 MonoIcon16x16 icon;
 void setupWiFiIcon() {
 
-  #if defined(BOARD_ESP826)
+  #if defined(BOARD_ESP8266)
     const int p[2] = {display.width() - 16, display.height() - 16};
   #else
     const int p[2] = {display.width() - 16, 0};

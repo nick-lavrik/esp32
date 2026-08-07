@@ -58,12 +58,12 @@ void SerialCommander::processLine(const String& line) {
 }
 
 void SerialCommander::printUnknown(const String& name) {
-  _logger.warn("Невідома команда: %s", name);
-  _logger.info("Введіть 'list' для перегляду доступних команд");
+  _logger.warn("Unknown command: %s", name);
+  _logger.info("Enter 'list' to see available commands");
 }
 
 void SerialCommander::printList() {
-  _logger.info("Доступні команди:");
+  _logger.info("Commands:");
   for (const auto& cmd : commands_) {
     _logger.info("  %-12s - %s", cmd.name.c_str(), cmd.description.c_str());
   }

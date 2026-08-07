@@ -1,0 +1,26 @@
+{
+  "name": "AsusWRT",
+  "version": "0.1.0",
+  "description": "ASUS/Merlin router client list fetcher (login.cgi + appGet.cgi), JSON parse + table format",
+  "keywords": ["esp32", "esp8266", "httpclient", "asus", "merlin", "router"],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32", "espressif8266"],
+  "dependencies": [
+    {
+      "name": "ArduinoJson",
+      "version": "^7"
+    }
+  ],
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  },
+  "export": {
+    "include": [
+      "*.hpp",
+      "*.cpp",
+      "library.json"
+    ]
+  }
+}
