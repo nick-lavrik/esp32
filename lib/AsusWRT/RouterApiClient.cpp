@@ -1,6 +1,11 @@
 #include "RouterApiClient.hpp"
 
+#if ESP8266
+#include <ESP8266HTTPClient.h>
+#else // if ESP32
 #include <HTTPClient.h>
+#endif
+
 #include <WiFiClient.h>
 
 RouterApiClient::RouterApiClient(const String& host, const String& loginAuthorization)

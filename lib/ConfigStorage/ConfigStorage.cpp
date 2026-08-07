@@ -223,13 +223,13 @@ bool ConfigStorage::writeFile(const String& path, const void* data, size_t len) 
 
 size_t ConfigStorage::readFile(const String& path, void* outData, size_t maxLen) {
   if (!LittleFS.exists(path)) {
-    Logger::info("[ConfigStorage] INFO: файл \"%s\" відсутній, повертаю значення за замовчуванням",
+    Logger::info("[ConfigStorage] INFO: \"%s\" missing",
                  path.c_str());
     return 0;
   }
   File f = LittleFS.open(path, "r");
   if (!f) {
-    Logger::info("[ConfigStorage] INFO: не вдалось відкрити \"%s\" на читання", path.c_str());
+    Logger::info("[ConfigStorage] INFO: can't read \"%s\"", path.c_str());
     return 0;
   }
   size_t available = f.size();
@@ -249,9 +249,9 @@ bool ConfigStorage::begin(const char* namespaceName, const char* partitionLabel)
       partitionLabel;  // на ESP8266 не використовується, зберігаємо для сумісності API
 
   if (!LittleFS.begin()) {
-    Logger::warn("[ConfigStorage] INFO: LittleFS.begin() не вдався, форматую...");
+    Logger::warn("[ConfigStorage] INFO: LittleFS.begin() fail, start auto-format...");
     if (!LittleFS.format() || !LittleFS.begin()) {
-      Logger::error("[ConfigStorage] Помилка: LittleFS недоступна");
+      Logger::error("[ConfigStorage] LittleFS halt!");
       return false;
     }
   }
@@ -313,8 +313,8 @@ String ConfigStorage::getString(const char* key, const String& defaultValue) {
   }
   String path = pathFor(key, "str");
   if (!LittleFS.exists(path)) {
-    Logger::warn("[ConfigStorage] INFO: файл \"%s\" відсутній, повертаю значення за замовчуванням",
-                 path.c_str());
+    Logger::warn("[ConfigStorage] INFO: \"%s\" missing, default(%s)",
+                 path.c_str(), defaultValue.c_str());
     return defaultValue;
   }
   File f = LittleFS.open(path, "r");

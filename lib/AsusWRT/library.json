@@ -9,6 +9,19 @@
     {
       "name": "ArduinoJson",
       "version": "^7"
+    },
+    {
+      "name": "ESP8266HTTPClient",
+      "version": "^1.2",
+      "platforms": "espressif8266"
+    },
+    {
+      "name": "HTTPClient",
+      "platforms": "espressif32"
+    },
+    {
+      "name": "Hash",
+      "platforms": "espressif8266"
     }
   ],
   "build": {

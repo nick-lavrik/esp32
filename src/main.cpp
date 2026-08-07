@@ -79,6 +79,8 @@
 #include <TaskController.hpp>
 #include <NetworkSupervisor.hpp>
 #include <RouterApiClient.hpp>
+#include <RouterClientListParser.hpp>
+#include <RouterClientListIterator.hpp>
 
 #include "ScreenLogTail.hpp"
 
@@ -470,7 +472,7 @@ void dumpSystemInfo() {
   Logger::info("");
   Logger::info("WiFi SSID:%s", WiFi.SSID().c_str());
   if (WiFi.status() == WL_CONNECTED) {
-    Logger::info("WiFi   IP: %s", WiFi.localIP().toString());
+    Logger::info("WiFi   IP: %s", WiFi.localIP().toString().c_str());
   } else {
     Logger::info("WiFi disconnected....");
   }
@@ -906,6 +908,7 @@ void drawSystemInfo() {
     display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
   #endif
 
+  #if SCREEN_LOG_TAIL_LINES > 0
   display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
   display.println("------------------------------------");
   #if BOARD_TTGO_T1 || BOARD_ST7789
@@ -920,7 +923,7 @@ void drawSystemInfo() {
   for (size_t i = tail.count(); i ;--i) {
     display.println(tail.line(i-1) + skip);  // від найстарішого (0) до найновішого
   }
-
+  #endif
 #endif
 
   // Візуальний бар пам'яті
@@ -936,14 +939,29 @@ void drawSystemInfo() {
 }
 
 void drawTime() {
+  static uint32_t lastErrorMs = 0;
   struct tm timeinfo;
   if (!ntp.isSynced()) {
+    const char* msg = "sync fail";
+    int x, y;
     display.setTextSize(2);
     display.setTextColor(TFT_RED);
-    display.setCursor(max(0, display.width() - 10 - display.textWidth("Time sync failed!")), 8);
-    display.print("Time sync failed");
+    display.setCursor(
+      x = max(0, (int) (display.width() - display.textWidth(msg)) / 2),
+      y = max(0, (int) (display.height() - display.fontHeight()) / 2)
+    );
+    // 128x64.108
+    // (128-108)/2 = 10
+    // Logger::warn("Time sync failed!, pos(%d, %d, %dx%d.%d)", x, y, display.width(), display.height(), display.textWidth(msg));
+    if (lastErrorMs == 0) {
+      lastErrorMs = millis() - 2000; // first message in 3 sec, all other after 5 second
+    }
+    if (millis() - lastErrorMs > 5000) {
+      Logger::warn("Time sync failed!");
+      lastErrorMs = millis();
+    }
+    display.print(msg);
     display.setTextSize(1);
-    // Logger::warn("Time sync failed!");
     return;
   }
 
@@ -1194,6 +1212,29 @@ void setup() {
   Logger::info("LittleFS test done.");
 
   display.flush();
+
+  Logger::info("====== AsusWRT test script =======");
+
+  const char* path = "/asus-get_clientlist.json";
+  File file = LittleFS.open(path, "r");
+  if (!file || file.isDirectory()) {
+    Logger::error("Can't open file (%s)", path);
+    return;
+  }
+
+  String json = file.readString();
+  file.close();
+  std::vector<RouterClientInfo> clients;
+  if (!RouterClientListParser::parse(json, clients)) {
+    Logger::error("can't parse client list json. [%d]", clients.capacity());
+  }
+
+  RouterClientListIterator it(std::move(clients));
+  while (it.hasNext()) {
+    const RouterClientInfo& c = it.next();
+    Serial.println(c.name);
+  }
+
   Logger::info("> Ready. Введіть 'list' для перегляду команд.");
 }
 
