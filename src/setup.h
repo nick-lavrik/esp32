@@ -9,8 +9,14 @@
 
 extern Display display;
 
+#include <ScreenLogTail.hpp>
+
 void setupSerial() {
+  // #if !defined(SCREEN_LOG_TAIL_LINES) || !SCREEN_LOG_TAIL_LINES
   rwlock::registerObject(Serial);
+  rwlock::registerObject(screenLogTail());
+  // #endif
+
   Serial.begin(115200);
   delay(200);
   Logger::info("");

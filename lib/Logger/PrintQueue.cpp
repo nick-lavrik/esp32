@@ -37,6 +37,7 @@ void PrintQueue::flush() {
 
 PrintQueue::PrintQueue(Print& output) : _output(output) {
   _mutex = xSemaphoreCreateMutexStatic(&_mutexBuffer);
+  rwlock::registerObject(_output);
 }
 
 bool PrintQueue::tryWrite(const char* line, uint32_t timeoutMs) {

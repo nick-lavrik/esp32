@@ -79,6 +79,8 @@
 #include <TaskController.hpp>
 #include <NetworkSupervisor.hpp>
 
+#include "ScreenLogTail.hpp"
+
 #include "BackgroundImages.hpp"
 #include "SizeFormatter.hpp"
 #include "ntp.h"
@@ -321,7 +323,9 @@ void setupMqttClient() {
   static TLogger _logger{"mqtt"};
 
   mqtt.begin();
+
   mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message");
+  scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
 
   // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
   mqtt.addStringListener("mykola-lavryk/devices/+/status", [](const char* topic, const char* payload) {
@@ -334,11 +338,11 @@ void setupMqttClient() {
 #if LIGHT_SENSOR_PIN > 0
   // publish mqtt
   lightSensor.addListener([]() {
-      _logger.debug("light_sensor(%d) => %d%%", lightSensor.read(), lightSensor.value());
-      mqtt.publishNumber<int>("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor", lightSensor.value());
+      _logger.debug("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor => %d", lightSensor.value());
+      mqtt.publishNumber<int>("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor", (int)lightSensor.value());
   });
   _logger.info("mykola-lavryk/devices/" PIO_PIOENV "/light_sensor MQTT done.");
-#else
+#endif
   // subscribe on mqtt
   mqtt.addNumberListener<int>(
     "mykola-lavrik/devices/+/light_sensor",
@@ -347,9 +351,8 @@ void setupMqttClient() {
       _logger.info("%s %-45.45s val:%d%%", t, topic, value); 
     });
   _logger.info("mykola-lavryk/devices/+/light_sensor listen");
-#endif
+// #endif
 
-  scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
   commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
     _logger.info("isConnected = %s", mqtt.isConnected() ? "yes" : "no");
   });
@@ -764,7 +767,7 @@ void setupLightSensor() {
     Logger::info("lightSensor.value() = %4d (%3d%%)", lightSensor.read(), lightSensor.value());
     if (isAutoBrightness) {
       display_brightness(lightSensor.value(), isAutoBrightness);
-      Logger::info("display.brightness(%d) *auto*", lightSensor.value());
+      // Logger::info("display.brightness(%d) *auto*", lightSensor.value());
     }
   });
 
@@ -894,6 +897,15 @@ void drawSystemInfo() {
     display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
     display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
   #endif
+
+  display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+  display.println("----------------------------------------------");
+
+  ScreenLogTail& tail = screenLogTail();
+  for (size_t i = tail.count(); i ; --i) {
+    display.println(tail.line(i));  // від найстарішого (0) до найновішого
+  }
+
 #endif
 
   // Візуальний бар пам'яті

@@ -21,6 +21,7 @@ PrintFanout<2>& serialLoggerFanout() {
 }  // namespace
 
 Print& serialLoggerOutput = serialLoggerFanout();
+// const Print& serialLoggerOutput = PrintFanout<2>{Serial, screenLogTail()}; //  serialLoggerFanout();
 
 #else
 
