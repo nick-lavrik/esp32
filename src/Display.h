@@ -49,21 +49,21 @@ public:
   int height() const;
 
   const uint32_t loopFrameRate();
-  size_t fontHeight() { return sprite_.fontHeight(); }
+  size_t fontHeight() { return sprite().fontHeight(); }
 
-  void setTextFont(uint8_t f) { sprite_.setTextFont(f); }
-  void setTextColor(uint16_t color) { sprite_.setTextColor(color); }
-  void setTextColor(uint16_t color, uint16_t bg) { sprite_.setTextColor(color, bg); }
-  void setTextSize(uint8_t size) { sprite_.setTextSize(size); }
+  void setTextFont(uint8_t f) { sprite().setTextFont(f); }
+  void setTextColor(uint16_t color) { sprite().setTextColor(color); }
+  void setTextColor(uint16_t color, uint16_t bg) { sprite().setTextColor(color, bg); }
+  void setTextSize(uint8_t size) { sprite().setTextSize(size); }
 
   void drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) {
-    sprite_.drawRect(x, y, w, h, color);
+    sprite().drawRect(x, y, w, h, color);
   }
   void drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color) {
-    sprite_.drawCircle(x, y, r, color);
+    sprite().drawCircle(x, y, r, color);
   }
   uint16_t drawString(const char *text, int32_t x, int32_t y) {
-    return sprite_.drawString(text, x, y);
+    return sprite().drawString(text, x, y);
   }
 
   int16_t textWidth(const char *string) { return sprite_.textWidth(string); }
@@ -77,25 +77,28 @@ public:
   } */
 
   void drawBitmap( int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor) {
-    sprite_.drawBitmap(x, y, bitmap, w, h, fgcolor);
+    sprite().drawBitmap(x, y, bitmap, w, h, fgcolor);
   };
-  /*drawBitmap( int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor, uint16_t bgcolor),
-  drawXBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor),
-  drawXBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor, uint16_t bgcolor),*/
+    /*drawBitmap( int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor, uint16_t bgcolor),
+    drawXBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor),
+    drawXBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor, uint16_t bgcolor),*/
 
 
   template <typename... Args>
   size_t printf(const __FlashStringHelper *ifsh, const Args &...args) {
     // return sprite_.printf(reinterpret_cast<const char*>(ifsh), args...);
-    return sprite_.printf((PGM_P)ifsh, args...);
+    return sprite().printf((PGM_P)ifsh, args...);
   }
 
   template <typename... Args>
   size_t printf(const char *format, const Args &...args) {
-    return sprite_.printf(format, args...);
+    return sprite().printf(format, args...);
   }
 
 protected:
+  void initSprite();
+  TFT_eSPI& sprite() { return sprite_; }
+
 private:
   TFT_eSPI &tft_;
   TFT_eSprite sprite_;  // вся робота з екраном (drawText/clear/...) йде через спрайт,

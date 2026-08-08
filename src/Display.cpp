@@ -17,8 +17,14 @@ void Display::init() {
   width_ = tft_.width();
   height_ = tft_.height();
 
+  initSprite();
+  flush();  // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
+}
+
+void Display::initSprite() {
   // Спрайт на весь розмір екрана — вся подальша робота йде через нього.
   sprite_.setColorDepth(SPRITE_COLOR_DEPTH);  // 16
+  // sprite_.setColorDepth(5);  // 16
   sprite_.setSwapBytes(true);
   void* buf = sprite_.createSprite(width_, height_);
   if (buf == nullptr) {
@@ -28,8 +34,6 @@ void Display::init() {
   }
 
   sprite_.fillSprite(TFT_BLACK);
-
-  flush();  // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
 }
 
 void Display::flip() {
@@ -37,28 +41,32 @@ void Display::flip() {
   tft_.setRotation((tft_.getRotation() + 2) % 4);
 }
 
-void Display::clear(uint16_t color) { sprite_.fillSprite(color); }
+void Display::clear(uint16_t color) { 
+  sprite_.fillSprite(color);
+}
 
 void Display::drawText(int x, int y, const char* text, uint16_t color) {
-  sprite_.setTextColor(color);
-  sprite_.drawString(text, x, y);
+  sprite().setTextColor(color);
+  sprite().drawString(text, x, y);
 }
 
 void Display::drawCenteredText(const char* text, uint16_t color, uint8_t fontSize) {
-  sprite_.setTextColor(color, TFT_TRANSPARENT);
-  sprite_.setTextSize(fontSize);
-  sprite_.setTextDatum(MC_DATUM);  // Middle-Center — спільний для TFT_eSPI і LovyanGFX
-  sprite_.drawString(text, width() / 2, height() / 2);
-  sprite_.setTextDatum(TL_DATUM);  // повертаємо датум за замовчуванням
+  sprite().setTextColor(color, TFT_TRANSPARENT);
+  sprite().setTextSize(fontSize);
+  sprite().setTextDatum(MC_DATUM);  // Middle-Center — спільний для TFT_eSPI і LovyanGFX
+  sprite().drawString(text, width() / 2, height() / 2);
+  sprite().setTextDatum(TL_DATUM);  // повертаємо датум за замовчуванням
 }
 
-void Display::setCursor(int32_t x, int32_t y) { sprite_.setCursor(x, y); }
+void Display::setCursor(int32_t x, int32_t y) { sprite().setCursor(x, y); }
 
 void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* data) {
-  sprite_.pushImage(x, y, w, h, data);
+  sprite_.pushImage(x, y, w, h, data); // !!!
 }
 
-void Display::flush() { sprite_.pushSprite(0, 0); }
+void Display::flush() { 
+  sprite_.pushSprite(0, 0);
+}
 
 int Display::width() const { return width_; }
 

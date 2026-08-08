@@ -2,6 +2,12 @@
 
 #include <ArduinoJson.h>
 
+#include "TLogger.hpp"
+
+namespace {
+  const TLogger kLogger{"asus"};
+}
+
 bool RouterClientListParser::hasEnoughFreeHeap() {
 #if defined(ESP8266) || defined(ESP32)
   return ESP.getFreeHeap() >= kMinFreeHeapBytes;
@@ -16,9 +22,19 @@ bool RouterClientListParser::parse(const String& rawJson, std::vector<RouterClie
   // Стрімінговий (SAX-подібний через filter) парсинг ArduinoJson v7 не потрібен тут —
   // документ від get_clientlist невеликий (список клієнтів мережі), тому deserializeJson
   // у JsonDocument достатньо. JsonDocument v7 сам росте динамічно (без фіксованого розміру).
+  //
+  // ВАЖЛИВО (виміряно на esp32-st7789, без PSRAM): при ~42KB вільного heap на старті
+  // виклику, deserializeJson() для ~17.7KB JSON падає з NoMemory (потрібно приблизно
+  // 1.5-2.5x розміру вихідного JSON під сам JsonDocument). Це проблема загального
+  // бюджету пам'яті програми (буфери дисплею/інше з'їдають heap до цього виклику),
+  // а не самого парсера — виправляється зменшенням споживання пам'яті деінде
+  // в програмі, а не тут.
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, rawJson);
-  if (err) return false;
+  if (err) {
+    kLogger.error("deserializeJson failed: %s (free heap: %u)", err.c_str(), ESP.getFreeHeap());
+    return false;
+  }
 
   JsonObject clientList = doc["get_clientlist"].as<JsonObject>();
   if (clientList.isNull()) return false;

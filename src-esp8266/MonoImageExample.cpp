@@ -17,9 +17,9 @@
 void showFromMemory() {
   /* static const MonoBitmap image(spaceMono128x64, spaceMono128x64Width, spaceMono128x64Height);
 
-  tft.clearDisplay();
-  image.draw(tft, 0, 0, SSD1306_WHITE);
-  tft.display(); */
+  display.clearDisplay();
+  image.draw(display, 0, 0, SSD1306_WHITE);
+  display.display(); */
 }
 
 // --- Варіант 2: картинка з LittleFS (JPEG -> декодування -> 1bpp) ---

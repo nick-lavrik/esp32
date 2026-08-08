@@ -976,11 +976,11 @@ void drawTime() {
 
   int textW = display.textWidth(timeStr);
   int textH = display.fontHeight();
-  int x = (tft.width() - textW) / 2;
+  int x = (display.width() - textW) / 2;
   int y = 30;
 
   // Затираємо попередній текст перед виводом нового
-  // tft.fillRect(0, y, tft.width(), textH, TFT_BLACK);
+  // display.fillRect(0, y, display.width(), textH, TFT_BLACK);
 
   // display.setTextColor(TFT_DARKGREY);
   display.setTextColor(TFT_CYAN);
@@ -998,7 +998,7 @@ void drawTime() {
   x = (display.width() - textW) / 2;
   y = 93;
 
-  // tft.fillRect(0, y, tft.width(), tft.fontHeight(), TFT_BLACK);
+  // display.fillRect(0, y, display.width(), display.fontHeight(), TFT_BLACK);
 
   // display.setTextColor(TFT_DARKGREEN);
   display.setTextColor(TFT_ORANGE);
@@ -1183,37 +1183,9 @@ void setupWiFiIcon() {
   });
 }
 
-void setup() {
-  setupSerial();
-  setupSD();
-  setupLittleFS();
-  setupEventDispatcher();
-  setupConfigStorage();
-  setupSerialCommander();
-  setupBlinkLED();
-  setupDisplay();
-  setupTouchScreen();
-
-  setupWiFi();
-  setupNtpService();
-  setupBackgroundImage();
-  setupTaskCommander();
-  setupLightSensor();
-  setupMqttClient();
-  setupFlipButton();
-  setupWiFiIcon();
-  loadConfig();
-
-  httpServer.setStaticSource(&littleFsSource);
-  // httpServer.setEventDispatcher(&dispatcher);
-  httpServer.begin();
-  Logger::info("HttpServer::begin()");
-  Logger::info("LittlFS::exists('/convert.c') = %s", littleFsSource.exists("/convert.c") ? "yes" : "no");
-  Logger::info("LittleFS test done.");
-
-  display.flush();
-
+void testAsusWRT() {
   Logger::info("====== AsusWRT test script =======");
+  Logger::info("free heap: %u", ESP.getFreeHeap());
 
   const char* path = "/asus-get_clientlist.json";
   File file = LittleFS.open(path, "r");
@@ -1222,23 +1194,84 @@ void setup() {
     return;
   }
 
+  Logger::info("free heap before read: %u", ESP.getFreeHeap());
   String json = file.readString();
   file.close();
+  Logger::info("free heap after read (json size=%u): %u", json.length(), ESP.getFreeHeap());
+
   std::vector<RouterClientInfo> clients;
   if (!RouterClientListParser::parse(json, clients)) {
     Logger::error("can't parse client list json. [%d]", clients.capacity());
   }
 
+  Logger::info("free heap after parse: %u", ESP.getFreeHeap());
+
   RouterClientListIterator it(std::move(clients));
   while (it.hasNext()) {
     const RouterClientInfo& c = it.next();
-    Serial.println(c.name);
+    Logger::info("client.name=%s", c.name.c_str());
   }
+  Logger::info("====== AsusWRT test script =======");
+  Logger::info("");
+}
 
+void setup() {
+  uint32_t freeHeap = ESP.getFreeHeap();
+  int i = 1;
+  setupSerial();
+  Logger::info("free heap before setup: %u", freeHeap);
+  Logger::info("free heap after SetupSerial: %u", ESP.getFreeHeap());
+  setupSD();
+  Logger::info("free heap after SetupSD: %u", ESP.getFreeHeap());
+  setupLittleFS();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 1
+  setupEventDispatcher();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 2
+  setupConfigStorage();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 3
+  setupSerialCommander();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 4
+  setupBlinkLED();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 5
+  setupDisplay();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 6
+  setupTouchScreen();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 7
+  setupWiFi();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 8
+  setupNtpService();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 9
+  setupBackgroundImage();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 10
+  setupTaskCommander();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 11
+  setupLightSensor();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 12
+  setupMqttClient();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 13
+  setupFlipButton();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 14
+  setupWiFiIcon();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 15
+  loadConfig();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 16
+
+  httpServer.setStaticSource(&littleFsSource);
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 17
+  // httpServer.setEventDispatcher(&dispatcher);
+  httpServer.begin();
+  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 18
+  Logger::info("HttpServer::begin()");
+  Logger::info("LittlFS::exists('/convert.c') = %s", littleFsSource.exists("/convert.c") ? "yes" : "no");
+  Logger::info("LittleFS test done.");
+
+  display.flush();
+  testAsusWRT();
   Logger::info("> Ready. Введіть 'list' для перегляду команд.");
 }
 
 void loop() {
+  display.startWrite();
   PrintQueue::flush();
   doPing();
   drawBackgroundImage();
@@ -1253,11 +1286,12 @@ void loop() {
 
   scheduler.loop();
 
+  display.endWrite();
+
 #if BOARD_HAS_TOUCHSCREEN
   touchController.update();
 #endif
 
-  // display.endWrite();
   display.flush();
 
   delay(1);
