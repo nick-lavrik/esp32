@@ -65,13 +65,13 @@ void Display::drawText(int x, int y, const char* text, uint16_t color) {
   sprite().drawString(text, x, y);
 }
 
-void Display::drawCenteredText(const char* text, uint16_t color, uint8_t fontSize) {
+/* void Display::drawCenteredText(const char* text, uint16_t color, uint8_t fontSize) {
   sprite().setTextColor(color, TFT_TRANSPARENT);
   sprite().setTextSize(fontSize);
   sprite().setTextDatum(MC_DATUM);  // Middle-Center — спільний для TFT_eSPI і LovyanGFX
   sprite().drawString(text, width() / 2, height() / 2);
   sprite().setTextDatum(TL_DATUM);  // повертаємо датум за замовчуванням
-}
+} */
 
 void Display::setCursor(int32_t x, int32_t y) { dXY(&x, &y); sprite().setCursor(x, y); }
 

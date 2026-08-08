@@ -41,7 +41,7 @@ public:
   void drawText(int x, int y, const char *text, uint16_t color);
 
   // Малювання тексту по центру екрана
-  void drawCenteredText(const char *text, uint16_t color, uint8_t fontSize = 4);
+  // void drawCenteredText(const char *text, uint16_t color, uint8_t fontSize = 4);
 
   // Виводить накопичений у спрайті кадр на реальний екран.
   // Викликати після того, як усе малювання кадру завершено.
@@ -73,10 +73,11 @@ public:
     dXY(&x, &y); 
     sprite().drawCircle(x, y, r, color);
   }
-  uint16_t drawString(const char *text, int32_t x, int32_t y) {
+
+  /* uint16_t drawString(const char *text, int32_t x, int32_t y) {
     dXY(&x, &y); 
     return sprite().drawString(text, x, y);
-  }
+  } */
 
   int16_t textWidth(const char *string) { return sprite().textWidth(string); }
 

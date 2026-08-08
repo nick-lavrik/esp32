@@ -3,7 +3,7 @@
 SerialCommander::SerialCommander(Stream& serial, char terminator)
     : serial_(serial), terminator_(terminator) {
   // Вбудована команда "list" / "help" — виводить усі зареєстровані команди.
-  registerCommand("list", "Показати список доступних команд",
+  registerCommand("list", "show full command list",
                   [this](const String&) { printList(); });
   // registerCommand("help", "Показати список доступних команд", [this](const String&) {
   // printList(); });
@@ -36,7 +36,7 @@ void SerialCommander::update() {
       buffer_ += c;
       if (buffer_.length() > maxLineLength_) {
         // захист від переповнення буфера, якщо термінатор не прийшов
-        _logger.warn("Рядок занадто довгий, буфер очищено");
+        _logger.warn("command too long, buffer vanished");
         buffer_ = "";
       }
     }

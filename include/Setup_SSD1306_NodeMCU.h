@@ -42,6 +42,10 @@
 #define SDA_PIN 14  // D6
 #define SCL_PIN 12  // D5
 
+namespace {
+  // internal helper - same for TFT_eSPI / TFT_eSprite
+}
+
 // "Пристрій" - сам OLED. Публічний API - підмножина bodmer/TFT_eSPI,
 // якою користується src/Display.h (init/setRotation/getRotation/width/
 // height/startWrite/endWrite).
@@ -80,6 +84,40 @@ public:
     setCursor(x, y);
     print(t);
   }
+
+  // size_t fontHeight() { return 8 * textsize_y; } // вбудований шрифт Adafruit_GFX: комірка 8px по
+  // висоті
+  size_t fontHeight() { return 8; }  // вбудований шрифт Adafruit_GFX: комірка 8px по висоті
+  void setTextFont(uint8_t) {}  // альтернативних шрифтів на SSD1306 немає - no-op
+  void setSwapBytes(bool) {}
+
+  // Кольорові (RGB565) зображення на монохромному екрані не мають сенсу -
+  // цей метод не використовується для NodeMCU+OLED (BackgroundImages
+  // виключені з build_src_filter для env:esp8266), лишений лише для
+  // сумісності сигнатури з src/Display.h.
+  void pushImage(int32_t, int32_t, int32_t, int32_t, const uint16_t*) {}
+
+  /* int16_t textWidth(const char* text) {
+    int16_t x1, y1;
+    uint16_t w, h;
+    getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+    return static_cast<int16_t>(w);
+  } */
+
+  /* uint16_t drawString(const char* text, int32_t x, int32_t y) {
+    int16_t x1, y1;
+    uint16_t w, h;
+    getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+
+    if (_datum == MC_DATUM) {
+      x -= static_cast<int32_t>(w) / 2;
+      y -= static_cast<int32_t>(h) / 2;
+    }
+
+    setCursor(x, y);
+    print(text);
+    return static_cast<uint16_t>(w);
+  } */
 
   // SSD1306 не має пакетної транзакції запису як TFT_eSPI - no-op
   void startWrite() {}

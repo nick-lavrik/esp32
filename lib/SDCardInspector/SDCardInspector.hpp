@@ -77,7 +77,7 @@ public:
     out.println(F("=== SD Card MBR Partition Table ==="));
 
     if (partitions.empty()) {
-      out.println(F("MBR не знайдено (картка, ймовірно, відформатована без таблиці розділів)."));
+      out.println(F("MBR not found (just in case card not formated, or formated without partition table)."));
       return;
     }
 

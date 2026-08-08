@@ -520,7 +520,7 @@ void dumpConfigStorage() {
   }
 
   Logger::info("");
-  Logger::info("Всього записів: %d", entries.size());
+  Logger::info("Total records: %d", entries.size());
   Logger::info("============================================================");
 }
 
@@ -576,22 +576,22 @@ void dumpSDInfo() {
   uint8_t cardType = ACTIVE_SD.cardType();
  
   if (cardType == CARD_NONE) {
-    Logger::info("❌ Картку не вставлено (або тип не визначено).");
+    Logger::info("❌ Card not found (or type not detected).");
     Logger::info("============================================================");
     return;
   }
  
-  Logger::info("✅ Картку успішно знайдено!");
+  Logger::info("✅ Card found!");
  
   // Виводимо тип для деталізації
   if (cardType == CARD_MMC)
-    Logger::info("Тип картки: %s", "MMC");
+    Logger::info("ТCard type: %s", "MMC");
   else if (cardType == CARD_SD)
-    Logger::info("Тип картки: %s", "SDSC");
+    Logger::info("Card type: %s", "SDSC");
   else if (cardType == CARD_SDHC)
-    Logger::info("Тип картки: %s", "SDHC");
+    Logger::info("Card type: %s", "SDHC");
   else
-    Logger::info("Тип картки: %s", "Невідомий тип");
+    Logger::info("Card type: %s", "UnknownType");
  
   Logger::info("------------------------------------------------------------");
   dumpSDlistDir("/", 2);
@@ -600,10 +600,10 @@ void dumpSDInfo() {
   // Виводимо розмір картки
   uint64_t cardSize = ACTIVE_SD.cardSize() / (1024 * 1024);
   // Serial.printf(F("Розмір картки: %llu MB\n"), cardSize);
-  Logger::info("Розмір картки: %s", SizeFormatter::format(ACTIVE_SD.cardSize()));
-  Logger::info("Зайнято місця: %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.usedBytes()),
+  Logger::info("Card size: %s", SizeFormatter::format(ACTIVE_SD.cardSize()));
+  Logger::info("Used: %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.usedBytes()),
                ACTIVE_SD.usedBytes() * 100.0 / ACTIVE_SD.cardSize());
-  Logger::info("Вільно місця:  %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.cardSize() - ACTIVE_SD.usedBytes()),
+  Logger::info("Free:  %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.cardSize() - ACTIVE_SD.usedBytes()),
                (ACTIVE_SD.cardSize() - ACTIVE_SD.usedBytes()) * 100.0 / ACTIVE_SD.cardSize());
  
   Logger::info("============================================================");
@@ -676,15 +676,15 @@ void dumpStatus(const String& section) {
     dumpSDInfo();
 #endif
   } else {
-    Logger::warn("Використання: status sys|cfg|sd|sd+|flash|flash+|littlefs");
+    Logger::warn("use: status sys|cfg|sd|sd+|flash|flash+|littlefs");
   }
 }
 
 void setupSerialCommander() {
-  commandHandler.registerCommand("status", "Показати статус пристрою: status sys|cfg|sd|sd+|flash|flash+|littlefs",
+  commandHandler.registerCommand("status", "show device status state: status sys|cfg|sd|sd+|flash|flash+|littlefs",
                                  [](const String& args) { dumpStatus(args); });
 
-  commandHandler.registerCommand("reboot", "Перезавантажити пристрій", [](const String& args) {
+  commandHandler.registerCommand("reboot", "reboot device (soft reset)", [](const String& args) {
     dispatcher.dispatch(EVT_REBOOT);
 #if defined(BOARD_ESP8266)
     Serial.println("[SystemReset] Rebooting...");
@@ -696,33 +696,33 @@ void setupSerialCommander() {
 #endif
   });
 
-  commandHandler.registerCommand("scan", "Сканувати wi-fi мережі", [](const String& args) { WiFi_scan(); });
+  commandHandler.registerCommand("scan", "scan WiFi networks", [](const String& args) { WiFi_scan(); });
 
-  commandHandler.registerCommand("flip", "перевернути екран", [](const String& args) { display_flip(); });
+  commandHandler.registerCommand("flip", "flip display (180)", [](const String& args) { display_flip(); });
 
-  commandHandler.registerCommand("led", "Керування світлодіодом: led on|off", [](const String& args) {
+  commandHandler.registerCommand("led", "control led: led on|off", [](const String& args) {
     if (args.equalsIgnoreCase("on")) {
-      Logger::info("LED увімкнено");
+      Logger::info("LED ON");
     } else if (args.equalsIgnoreCase("off")) {
-      Logger::info("LED вимкнено");
+      Logger::info("LED OFF");
     } else {
-      Logger::info("Використання: led on|off");
+      Logger::info("use: led on|off");
     }
   });
 
-  commandHandler.registerCommand("clock", "Керування годинником: clock on|off", [](const String& args) {
+  commandHandler.registerCommand("clock", "show hide clock on screen: clock on|off", [](const String& args) {
     if (args.equalsIgnoreCase("on")) {
       show_clock(true);
     } else if (args.equalsIgnoreCase("off")) {
       show_clock(false);
     } else {
-      Logger::info("Керування годинником: clock on|off");
+      Logger::info("use: clock on|off");
     }
   });
 
-  commandHandler.registerCommand("brightness", "Керування яскравістю: brightness 0-100", [](const String& args) {
+  commandHandler.registerCommand("brightness", "control screen brightness: brightness 0-100|auto", [](const String& args) {
     if (args.length() == 0) {
-      Logger::info("Використання: brightness 0-100|auto");
+      Logger::info("use: brightness 0-100|auto");
     } else if (args.equalsIgnoreCase("auto")) {
 #if LIGHT_SENSOR_PIN > 0
       display_brightness(lightSensor.value(), true);
@@ -1194,80 +1194,56 @@ void testAsusWRT() {
     return;
   }
 
-  Logger::info("free heap before read: %u", ESP.getFreeHeap());
+  // Logger::info("free heap before read: %u", ESP.getFreeHeap());
   String json = file.readString();
   file.close();
-  Logger::info("free heap after read (json size=%u): %u", json.length(), ESP.getFreeHeap());
+  // Logger::info("free heap after read (json size=%u): %u", json.length(), ESP.getFreeHeap());
 
   std::vector<RouterClientInfo> clients;
   if (!RouterClientListParser::parse(json, clients)) {
     Logger::error("can't parse client list json. [%d]", clients.capacity());
   }
 
-  Logger::info("free heap after parse: %u", ESP.getFreeHeap());
+  // Logger::info("free heap after parse: %u", ESP.getFreeHeap());
 
   RouterClientListIterator it(std::move(clients));
   while (it.hasNext()) {
     const RouterClientInfo& c = it.next();
     Logger::info("client.name=%s", c.name.c_str());
   }
-  Logger::info("====== AsusWRT test script =======");
+  Logger::info("------ AsusWRT test script -------");
   Logger::info("");
 }
 
 void setup() {
   uint32_t freeHeap = ESP.getFreeHeap();
-  int i = 1;
   setupSerial();
-  Logger::info("free heap before setup: %u", freeHeap);
-  Logger::info("free heap after SetupSerial: %u", ESP.getFreeHeap());
+  Logger::info("free heap memory from scratch: %u", freeHeap);
   setupSD();
-  Logger::info("free heap after SetupSD: %u", ESP.getFreeHeap());
   setupLittleFS();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 1
   setupEventDispatcher();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 2
   setupConfigStorage();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 3
   setupSerialCommander();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 4
   setupBlinkLED();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 5
   setupDisplay();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 6
   setupTouchScreen();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 7
   setupWiFi();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 8
   setupNtpService();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 9
   setupBackgroundImage();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 10
   setupTaskCommander();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 11
   setupLightSensor();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 12
   setupMqttClient();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 13
   setupFlipButton();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 14
   setupWiFiIcon();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 15
   loadConfig();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 16
 
   httpServer.setStaticSource(&littleFsSource);
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 17
   // httpServer.setEventDispatcher(&dispatcher);
   httpServer.begin();
-  Logger::info("free heap step#%d: %u", i++, ESP.getFreeHeap()); // 18
-  Logger::info("HttpServer::begin()");
-  Logger::info("LittlFS::exists('/convert.c') = %s", littleFsSource.exists("/convert.c") ? "yes" : "no");
-  Logger::info("LittleFS test done.");
 
   display.flush();
   testAsusWRT();
-  Logger::info("> Ready. Введіть 'list' для перегляду команд.");
+  Logger::info("> Ready. Enter 'list' for comand list.");
 }
 
 void loop() {
