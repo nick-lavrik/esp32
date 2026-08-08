@@ -70,6 +70,17 @@ public:
   }
   uint8_t getRotation() const { return _rotation; }
 
+  int16_t textWidth(const char* t) { 
+    int16_t x1, y1; uint16_t textWidth, textHeight;
+    getTextBounds(t, 0, 0, &x1, &y1, &textWidth, &textHeight);
+    return textWidth;
+  }
+
+  void drawString(const char* t, int32_t x, int32_t y) {
+    setCursor(x, y);
+    print(t);
+  }
+
   // SSD1306 не має пакетної транзакції запису як TFT_eSPI - no-op
   void startWrite() {}
   void endWrite() {}

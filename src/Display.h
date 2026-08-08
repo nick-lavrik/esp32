@@ -96,13 +96,13 @@ public:
   }
 
 protected:
-#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   void initSprite();
 #endif
 
   // Повертає посилання точного типу (TFT_eSprite& при увімкненому буфері,
   // TFT_eSPI& — при вимкненому), вибір фіксується на етапі КОМПІЛЯЦІЇ
-  // через build flag USE_DISPLAY_BUFFER.
+  // через build flag DISPLAY_SPLIT_COUNT.
   //
   // Це принципово важливо: pushImage() (і інші методи TFT_eSPI/TFT_eSprite)
   // НЕ virtual, тому виклик через посилання звужене до базового TFT_eSPI&
@@ -116,7 +116,7 @@ protected:
   // фіксованим типом. Дві версії методу, обрані препроцесором, — єдиний
   // спосіб отримати саме той конкретний тип, який потрібен для коректної
   // (не-віртуальної) диспетчеризації.
-#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   TFT_eSprite& sprite() { return sprite_; }
 #else
   TFT_eSPI& sprite() { return tft_; }
@@ -124,7 +124,7 @@ protected:
 
 private:
   TFT_eSPI &tft_;
-#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   TFT_eSprite sprite_;  // вся робота з екраном (drawText/clear/...) йде через спрайт,
                         // на реальний дисплей кадр потрапляє лише через flush()
 #endif

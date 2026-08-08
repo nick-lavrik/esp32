@@ -8,7 +8,7 @@
 //   env:esp32-4848s040    -> src/TftInstance_4848S040.cpp
 // Тут ми лише беремо на нього посилання.
 
-#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
 Display::Display() : tft_(tft), sprite_(&tft_) {}
 #else
 Display::Display() : tft_(tft) {}
@@ -21,7 +21,7 @@ void Display::init() {
   width_ = tft_.width();
   height_ = tft_.height();
 
-#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   initSprite();
 #endif
 
@@ -29,7 +29,7 @@ void Display::init() {
   flush();  // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
 }
 
-#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
 void Display::initSprite() {
   // Спрайт на весь розмір екрана — вся подальша робота йде через нього.
   sprite_.setColorDepth(SPRITE_COLOR_DEPTH);  // 16
@@ -51,7 +51,7 @@ void Display::flip() {
 }
 
 void Display::clear(uint16_t color) { 
-#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   sprite_.fillSprite(color);
 #else
   tft_.fillScreen(color);
@@ -78,7 +78,7 @@ void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16
 }
 
 void Display::flush() { 
-#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   sprite().pushSprite(0, 0);
 #endif
   // unbuffered режим: pushImage()/drawX() і так пишуть напряму в tft_,

@@ -942,7 +942,7 @@ void drawTime() {
   static uint32_t lastErrorMs = 0;
   struct tm timeinfo;
   if (!ntp.isSynced()) {
-    const char* msg = "sync fail";
+    const char* msg = "TIME FAIL";
     int x, y;
     display.setTextSize(2);
     display.setTextColor(TFT_RED);
