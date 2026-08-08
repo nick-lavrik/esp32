@@ -1294,5 +1294,5 @@ void loop() {
 
   display.flush();
 
-  delay(1);
+  delay(16);
 }

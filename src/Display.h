@@ -66,10 +66,10 @@ public:
     return sprite().drawString(text, x, y);
   }
 
-  int16_t textWidth(const char *string) { return sprite_.textWidth(string); }
+  int16_t textWidth(const char *string) { return sprite().textWidth(string); }
 
-  size_t print(const char *string) { return sprite_.print(string); }
-  size_t println(const char *string) { return sprite_.println(string); }
+  size_t print(const char *string) { return sprite().print(string); }
+  size_t println(const char *string) { return sprite().println(string); }
   /* void getTextBounds(const char *str, int16_t x, int16_t y,
                   int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h)
   {
@@ -96,13 +96,38 @@ public:
   }
 
 protected:
+#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
   void initSprite();
-  TFT_eSPI& sprite() { return sprite_; }
+#endif
+
+  // Повертає посилання точного типу (TFT_eSprite& при увімкненому буфері,
+  // TFT_eSPI& — при вимкненому), вибір фіксується на етапі КОМПІЛЯЦІЇ
+  // через build flag USE_DISPLAY_BUFFER.
+  //
+  // Це принципово важливо: pushImage() (і інші методи TFT_eSPI/TFT_eSprite)
+  // НЕ virtual, тому виклик через посилання звужене до базового TFT_eSPI&
+  // завжди резолвиться в TFT_eSPI::pushImage() навіть якщо реальний об'єкт —
+  // TFT_eSprite (name hiding, не поліморфізм). Єдиний спосіб уникнути цього —
+  // щоб тип ПОВЕРНЕННЯ sprite() збігався з реальним типом об'єкта.
+  //
+  // Тут #if (не if constexpr) свідомо: потрібна різна СИГНАТУРА методу
+  // (різний тип повернення — TFT_eSprite& чи TFT_eSPI&), а if constexpr не
+  // може змінювати тип повернення функції — лише розгалужувати тіло з уже
+  // фіксованим типом. Дві версії методу, обрані препроцесором, — єдиний
+  // спосіб отримати саме той конкретний тип, який потрібен для коректної
+  // (не-віртуальної) диспетчеризації.
+#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+  TFT_eSprite& sprite() { return sprite_; }
+#else
+  TFT_eSPI& sprite() { return tft_; }
+#endif
 
 private:
   TFT_eSPI &tft_;
+#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
   TFT_eSprite sprite_;  // вся робота з екраном (drawText/clear/...) йде через спрайт,
                         // на реальний дисплей кадр потрапляє лише через flush()
+#endif
 
   int width_ = 0;
   int height_ = 0;

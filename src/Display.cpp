@@ -8,7 +8,11 @@
 //   env:esp32-4848s040    -> src/TftInstance_4848S040.cpp
 // Тут ми лише беремо на нього посилання.
 
+#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
 Display::Display() : tft_(tft), sprite_(&tft_) {}
+#else
+Display::Display() : tft_(tft) {}
+#endif
 
 void Display::init() {
   tft_.init();
@@ -17,15 +21,19 @@ void Display::init() {
   width_ = tft_.width();
   height_ = tft_.height();
 
+#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
   initSprite();
+#endif
+
+  sprite().setSwapBytes(true);
   flush();  // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
 }
 
+#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
 void Display::initSprite() {
   // Спрайт на весь розмір екрана — вся подальша робота йде через нього.
   sprite_.setColorDepth(SPRITE_COLOR_DEPTH);  // 16
   // sprite_.setColorDepth(5);  // 16
-  sprite_.setSwapBytes(true);
   void* buf = sprite_.createSprite(width_, height_);
   if (buf == nullptr) {
     _logger.error("ПОМИЛКА: createSprite() не зміг виділити пам'ять!");
@@ -35,6 +43,7 @@ void Display::initSprite() {
 
   sprite_.fillSprite(TFT_BLACK);
 }
+#endif
 
 void Display::flip() {
   _logger.info("TFT.setRotation(%d)", (tft_.getRotation() + 2) % 4);
@@ -42,7 +51,11 @@ void Display::flip() {
 }
 
 void Display::clear(uint16_t color) { 
+#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
   sprite_.fillSprite(color);
+#else
+  tft_.fillScreen(color);
+#endif
 }
 
 void Display::drawText(int x, int y, const char* text, uint16_t color) {
@@ -61,11 +74,15 @@ void Display::drawCenteredText(const char* text, uint16_t color, uint8_t fontSiz
 void Display::setCursor(int32_t x, int32_t y) { sprite().setCursor(x, y); }
 
 void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* data) {
-  sprite_.pushImage(x, y, w, h, data); // !!!
+  sprite().pushImage(x, y, w, h, data);
 }
 
 void Display::flush() { 
-  sprite_.pushSprite(0, 0);
+#if defined(USE_DISPLAY_BUFFER) && USE_DISPLAY_BUFFER
+  sprite().pushSprite(0, 0);
+#endif
+  // unbuffered режим: pushImage()/drawX() і так пишуть напряму в tft_,
+  // немає накопиченого кадру, який треба "вивести" — no-op.
 }
 
 int Display::width() const { return width_; }

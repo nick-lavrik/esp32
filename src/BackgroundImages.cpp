@@ -68,10 +68,11 @@ extern Display display;
 void drawBackgroundImage() {
   uint16_t width, height;
   const uint16_t* ptr = getBackgroundImage(&width, &height);
-  display.clear();
 
-  if (ptr != nullptr) {
+  if (ptr) {
     display.pushImage((uint32_t)(display.width() - width) / 2,
                       (uint32_t)(display.height() - height) / 2, width, height, ptr);
+  } else {
+    display.clear();
   }
 }
