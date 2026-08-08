@@ -14,8 +14,17 @@
 // (TftInstance.h), прикладний код нижче однаковий для обох плат.
 class Display {
 public:
-  void startWrite() { tft_.startWrite(); }
-  void endWrite() { tft_.endWrite(); }
+  void startWrite() {
+    #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT > 0
+    _activeSplitBlock = (_activeSplitBlock + 1) % DISPLAY_SPLIT_COUNT;
+    // _logger.debug("active split block = %d", _activeSplitBlock); delay(600);
+    #endif
+    tft_.startWrite(); 
+  }
+
+  void endWrite() { 
+    tft_.endWrite(); 
+  }
 
   explicit Display();
   void flip();
@@ -57,12 +66,15 @@ public:
   void setTextSize(uint8_t size) { sprite().setTextSize(size); }
 
   void drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) {
-    sprite().drawRect(x, y, w, h, color);
+    dXY(&x, &y); sprite().drawRect(x, y, w, h, color);
   }
+
   void drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color) {
+    dXY(&x, &y); 
     sprite().drawCircle(x, y, r, color);
   }
   uint16_t drawString(const char *text, int32_t x, int32_t y) {
+    dXY(&x, &y); 
     return sprite().drawString(text, x, y);
   }
 
@@ -77,12 +89,19 @@ public:
   } */
 
   void drawBitmap( int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor) {
+    dXY(&x, &y); 
     sprite().drawBitmap(x, y, bitmap, w, h, fgcolor);
   };
     /*drawBitmap( int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor, uint16_t bgcolor),
     drawXBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor),
     drawXBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor, uint16_t bgcolor),*/
 
+  template <typename T>
+  void dXY(T* x, T* y) {
+    #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT > 0
+    *y = *y - static_cast<T>(_activeSplitBlock * (height() / DISPLAY_SPLIT_COUNT));
+    #endif
+  }
 
   template <typename... Args>
   size_t printf(const __FlashStringHelper *ifsh, const Args &...args) {
@@ -125,6 +144,7 @@ protected:
 private:
   TFT_eSPI &tft_;
 #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
+  int8_t _activeSplitBlock = 0;
   TFT_eSprite sprite_;  // вся робота з екраном (drawText/clear/...) йде через спрайт,
                         // на реальний дисплей кадр потрапляє лише через flush()
 #endif

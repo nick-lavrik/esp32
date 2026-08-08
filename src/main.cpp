@@ -741,7 +741,7 @@ void setupSerialCommander() {
 void setupBackgroundImage() {
 #if defined(LITTLEFS_BACKGROUND_IMAGE)
   spaceImage.loadFromLittleFS(LITTLEFS_BACKGROUND_IMAGE,
-                              SPRITE_COLOR_DEPTH > 8 ? JpegColorDepth::RGB565 : JpegColorDepth::RGB332);
+                              SPRITE_COLOR_DEPTH > 8 ? JpegColorDepth::RGB565 : JpegColorDepth::RGB332); // 16 | 8
   setBackgroundImage(spaceImage);
 #endif
 }
@@ -1276,23 +1276,20 @@ void loop() {
   doPing();
   drawBackgroundImage();
   drawSystemInfo();
-
   mqtt.loop();
   commandHandler.update();
-
   if (showClock) drawTime();
 
   // sendEmail();
-
   scheduler.loop();
 
   display.endWrite();
 
 #if BOARD_HAS_TOUCHSCREEN
-  touchController.update();
+//  touchController.update();
 #endif
 
   display.flush();
 
-  delay(16);
+  delay(1);
 }

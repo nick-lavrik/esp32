@@ -34,7 +34,8 @@ void Display::initSprite() {
   // Спрайт на весь розмір екрана — вся подальша робота йде через нього.
   sprite_.setColorDepth(SPRITE_COLOR_DEPTH);  // 16
   // sprite_.setColorDepth(5);  // 16
-  void* buf = sprite_.createSprite(width_, height_);
+  void* buf = sprite_.createSprite(width_, height_ / DISPLAY_SPLIT_COUNT);
+  _logger.info("initSprite(%d, %d, depth=%d)", width_, height_ / DISPLAY_SPLIT_COUNT, SPRITE_COLOR_DEPTH);
   if (buf == nullptr) {
     _logger.error("ПОМИЛКА: createSprite() не зміг виділити пам'ять!");
     _logger.error("Потрібно: %d байт, вільно (heap): %u байт", width_ * height_ * 2,
@@ -59,6 +60,7 @@ void Display::clear(uint16_t color) {
 }
 
 void Display::drawText(int x, int y, const char* text, uint16_t color) {
+  dXY(&x, &y); 
   sprite().setTextColor(color);
   sprite().drawString(text, x, y);
 }
@@ -71,15 +73,18 @@ void Display::drawCenteredText(const char* text, uint16_t color, uint8_t fontSiz
   sprite().setTextDatum(TL_DATUM);  // повертаємо датум за замовчуванням
 }
 
-void Display::setCursor(int32_t x, int32_t y) { sprite().setCursor(x, y); }
+void Display::setCursor(int32_t x, int32_t y) { dXY(&x, &y); sprite().setCursor(x, y); }
 
 void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* data) {
+  dXY(&x, &y); 
   sprite().pushImage(x, y, w, h, data);
 }
 
 void Display::flush() { 
 #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
-  sprite().pushSprite(0, 0);
+  int x = 0, y = 0;
+  y = y + (_activeSplitBlock * (height() / DISPLAY_SPLIT_COUNT));
+  sprite().pushSprite(x, y);
 #endif
   // unbuffered режим: pushImage()/drawX() і так пишуть напряму в tft_,
   // немає накопиченого кадру, який треба "вивести" — no-op.
