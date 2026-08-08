@@ -1286,7 +1286,7 @@ void loop() {
   display.endWrite();
 
 #if BOARD_HAS_TOUCHSCREEN
-//  touchController.update();
+ touchController.update();
 #endif
 
   display.flush();
