@@ -71,6 +71,7 @@
 #include <LittleFsStaticSource.hpp>
 #include <Logger.hpp>
 #include <MqttClient.hpp>
+#include <MqttKeyGenerator.hpp>
 #include <NtpService.hpp>
 #include <PrintQueue.hpp>
 #include <RwLock.hpp>
@@ -100,6 +101,9 @@ const char* CFG_SHOW_CLOCK = "clock";
 const char* CFG_BLINK_LED = "blink";  // ESP8266 BLINK_LED_PIN dependency
 const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
+// runtime override для MQTT_TOPIC_PREFIX (напр. dev/prod/qa/local, регіон, тощо); порожнє
+// -> дефолт з secrets.ini
+const char* CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix";
 
 TouchScreenConfig makeTouchScreenConfig() {
   TouchScreenConfig c;
@@ -157,6 +161,7 @@ MqttConfig makeMqttConfig() {
   config.lwtTopic = MQTT_LWT_TOPIC;
   config.lwtOfflineMessage = MQTT_LWT_MSG_OFFLINE;
   config.lwtOnlineMessage = MQTT_LWT_MSG_ONLINE;
+  config.prefix = MQTT_TOPIC_PREFIX;  // build-time дефолт; runtime override - setupMqttClient()
 
   return config;
 }
@@ -173,6 +178,9 @@ SerialCommander commandHandler;
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 MqttClient mqtt(makeMqttConfig());
+// runtime override поверх MqttConfig::prefix; заповнюється лише за наявності
+// CFG_MQTT_TOPIC_PREFIX в ConfigStorage, див. setupMqttClient()
+MqttKeyGenerator mqttTopicPrefixOverride;
 
 LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
@@ -327,18 +335,27 @@ void setupLittleFS() {
 void setupMqttClient() {
   static TLogger _logger{"mqtt"};
 
+  // Runtime override - лише якщо реально збережено в ConfigStorage; інакше mqtt сам
+  // застосує _config.prefix (build-time дефолт з secrets.ini) через _defaultKeyGenerator.
+  String storedPrefix = configStorage.getString(CFG_MQTT_TOPIC_PREFIX, "");
+  if (storedPrefix.length() > 0) {
+    mqttTopicPrefixOverride.setPrefix(storedPrefix.c_str());
+    mqtt.setKeyGenerator(&mqttTopicPrefixOverride);  // ДО begin()
+  }
+
   mqtt.begin();
+  _logger.info("topic prefix = '%s'", mqtt.keyGenerator().prefix().c_str());
 
   mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
 
-  mqtt.addStringListener("mykola-lavryk/#", [](const char* topic, const char* payload) {
+  mqtt.addStringListener("#", [](const char* topic, const char* payload) {
     // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.info(">>> %s::%s", topic, payload);
   });
 
   // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
-  mqtt.addStringListener("mykola-lavryk/devices/+/status", [](const char* topic, const char* payload) {
+  mqtt.addStringListener("devices/+/status", [](const char* topic, const char* payload) {
     char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.info("%s %-45.45s LWT:%s", t, topic, payload);
   });
@@ -348,37 +365,52 @@ void setupMqttClient() {
 #if LIGHT_SENSOR_PIN > 0
   // publish mqtt
   lightSensor.addListener([]() {
-      _logger.debug("mykola-lavryk/devices/" PIO_PIOENV "/light-sensor => %d", lightSensor.value());
-      mqtt.publishNumber<int>("mykola-lavryk/devices/" PIO_PIOENV "/light-sensor", (int)lightSensor.value());
+      _logger.debug("devices/" PIO_PIOENV "/light-sensor => %d", lightSensor.value());
+      mqtt.publishNumber<int>("devices/" PIO_PIOENV "/light-sensor", (int)lightSensor.value());
   });
-  _logger.info("mykola-lavryk/devices/" PIO_PIOENV "/light-sensor MQTT done.");
+  _logger.info("devices/" PIO_PIOENV "/light-sensor MQTT done.");
 #else
   // subscribe on mqtt
   mqtt.addNumberListener<int>(
-    "mykola-lavryk/devices/+/light-sensor",
+    "devices/+/light-sensor",
     [](const char* topic, int value) {
       char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t)); 
       _logger.info("%s %-45s val:%d%%", t, topic, value); 
     });
-  _logger.info("mykola-lavryk/devices/+/light-sensor listen");
+  _logger.info("devices/+/light-sensor listen");
 #endif
 
   commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
-    _logger.info("isConnected = %s", mqtt.isConnected() ? "yes" : "no");
+    _logger.info("isConnected = %s, topic prefix = '%s'", mqtt.isConnected() ? "yes" : "no",
+                 mqtt.keyGenerator().prefix().c_str());
   });
+
+  commandHandler.registerCommand(
+      "mqtt-prefix", "get/set MQTT topic prefix (eg. dev/prod/qa/eu-west1): mqtt-prefix [prefix]",
+      [](const String args) {
+        if (args.length() == 0) {
+          _logger.info("mqtt topic prefix = '%s'", mqtt.keyGenerator().prefix().c_str());
+          return;
+        }
+        configStorage.setString(CFG_MQTT_TOPIC_PREFIX, args);
+        _logger.info("saved '%s' -> reboot required to take effect (topics already "
+                     "subscribed with old prefix)",
+                     args.c_str());
+      });
 
   static uint32_t i = 0;
   mqtt.addNumberListener<uint32_t>(
-    "mykola-lavryk/int32/#",
+    "int32/#",
     [](const char* t, uint32_t v) {
       char w[9] = ""; ntp.ftime("%H:%M:%S", w, sizeof(w)); 
       _logger.info("%s %-45.45s int:%d", w, t, v); 
     });
 
   scheduler.addCronTask(1 * 60 * 1000UL,
-                        []() { mqtt.publishNumber<uint32_t>("mykola-lavryk/int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
+                        []() { mqtt.publishNumber<uint32_t>("int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
 
-  _logger.info("%s:%d (%s) lwt:%s", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID, MQTT_LWT_TOPIC);
+  _logger.info("%s:%d (%s) lwt:%s", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID,
+               mqtt.keyGenerator().key(MQTT_LWT_TOPIC).c_str());
 }
 
 void setupSD() {
