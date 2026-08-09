@@ -10,12 +10,12 @@
 //
 // Використання:
 //   MqttKeyGenerator keyGen("dev");
-//   keyGen.key("mykola-lavryk/devices/esp32-st7789/status");
-//   // -> "dev/mykola-lavryk/devices/esp32-st7789/status"
+//   keyGen.key("devices/esp32-st7789/status");
+//   // -> "dev/devices/esp32-st7789/status"
 //
 //   keyGen.setPrefix("prod");
-//   keyGen.key("mykola-lavryk/#");
-//   // -> "prod/mykola-lavryk/#"  (wildcard-топіки '+' / '#' обробляються так само,
+//   keyGen.key("#");
+//   // -> "prod/#"  (wildcard-топіки '+' / '#' обробляються так само,
 //   //    як звичайний topic - генератор лише додає top-level сегмент)
 class MqttKeyGenerator {
 public:
