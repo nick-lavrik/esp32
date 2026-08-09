@@ -329,7 +329,7 @@ void setupMqttClient() {
 
   mqtt.begin();
 
-  mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message");
+  mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
 
   mqtt.addStringListener("mykola-lavryk/#", [](const char* topic, const char* payload) {
@@ -421,6 +421,14 @@ void setupSD() {
   return;
 }
 
+int getWiFiQuality(long rssi) {
+  if (rssi >= -50) return 100;
+  if (rssi <= -100) return 0;
+  
+  // Лінійна інтерполяція між -100 dBm (0%) та -50 dBm (100%)
+  return map(rssi, -100, -50, 0, 100); 
+}
+
 void dumpSystemInfo() {
   Logger::info("======== ESP32 CHIP INFO ==================================");
 
@@ -468,9 +476,17 @@ void dumpSystemInfo() {
     Logger::info("Free PSRAM:  %d bytes (%.2f Mb)", ESP.getFreePsram() / 1024.0 / 1024.0);
   }
 #endif
+/*
+Шпаргалка: як розуміти значення dBm
+Оскільки значення RSSI від'ємні, чим ближче воно до нуля, тим кращий сигнал:
+- від -30 до -50 dBm — Ідеальний сигнал (мікроконтролер стоїть впритул до роутера).
+- від -60 до -67 dBm — Хороший, стабільний сигнал (достатній для передачі великих обсягів даних чи потокового відео).
+- від -70 до -80 dBm — Слабкий сигнал (працювати буде, але можливі затримки або втрата пакетів).
+- -90 dBm і гірше — Критичний рівень (зв'язок постійно обриватиметься).
+*/
 
   Logger::info("");
-  Logger::info("WiFi SSID:%s", WiFi.SSID().c_str());
+  Logger::info("WiFi SSID: %s (%d dBm / %d%%)", WiFi.SSID().c_str(), WiFi.RSSI(), getWiFiQuality(WiFi.RSSI()));
   if (WiFi.status() == WL_CONNECTED) {
     Logger::info("WiFi   IP: %s", WiFi.localIP().toString().c_str());
   } else {
@@ -942,7 +958,7 @@ void drawTime() {
   static uint32_t lastErrorMs = 0;
   struct tm timeinfo;
   if (!ntp.isSynced()) {
-    const char* msg = "TIME FAIL";
+    const char* msg = "TIME SYNC";
     int x, y;
     display.setTextSize(2);
     display.setTextColor(TFT_RED);
@@ -1029,25 +1045,31 @@ void drawTime() {
   // x = (TFT_WIDTH - textW) / 2;
   display.setCursor(TFT_WIDTH - textW, 0);
   display.print(timeStr);
-/* #elif BOARD_4848S040
-  int x = 1; int y = 1; int f = 0;
-  display.setTextColor(TFT_WHITE);
-  display.setTextSize(1);
-  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 1
-  display.setTextColor(TFT_GREENYELLOW);
-  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 2
-  ++f; // display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 3
-  display.setTextColor(TFT_ORANGE);
-  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d info %s", f, timeStr); y += 3 + display.fontHeight(); // 4
-  display.setTextColor(TFT_DARKGREY);
-  ++f; // display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 5
-  display.setTextColor(TFT_DARKGREEN);
-  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d -. %s", f, timeStr); y += 3 + display.fontHeight(); // 6
+#elif BOARD_4848S040
+  int16_t x = 0, y = 8;
+  uint16_t textW, textH;
+  // display.setTextFont(7); display.setTextSize(1); // великий "цифровий" шрифт (тільки цифри та ":")
+  // display.setTextFont(6); display.setTextSize(1); // великий - красивий
+  // display.setTextFont(4); display.setTextSize(1); // середній / так собі
+  // display.setTextFont(2); display.setTextSize(2); // середній / не красиво взагалі
+  display.setTextFont(1);  display.setTextSize(2); //  pretty nice
   display.setTextColor(TFT_CYAN);
-  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d +, %s", f, timeStr); y += 3 + display.fontHeight(); // 7
-  display.setTextColor(TFT_MAGENTA);
-  ++f; display.setTextFont(f); display.setCursor(x, y); display.printf("%d %s", f, timeStr); y += 3 + display.fontHeight(); // 8
-  display.setTextFont(1); */
+
+  // display.getTextBounds(timeStr, 0, 0, &x1, &y1, &textW, &textH);
+  textW = display.textWidth(timeStr);
+  display.setCursor(display.width() - 16 - textW, y);
+  display.print(timeStr);
+  y += display.fontHeight();
+
+  display.setTextFont(2);
+  display.setTextSize(1);
+  display.setTextColor(TFT_ORANGE);
+  ntp.ftime("%d.%m.%Y", timeStr, sizeof(timeStr));
+  display.setCursor(display.width() - 16 - textW + (textW - display.textWidth(timeStr)) / 1, y);
+  display.print(timeStr);
+
+  display.setTextFont(1);
+  display.setTextSize(1);
 #else
   display.setTextSize(2);
   display.setTextColor(TFT_LIGHTGREY);
@@ -1155,6 +1177,8 @@ void setupWiFiIcon() {
 
   #if defined(BOARD_ESP8266)
     const int p[2] = {display.width() - 16, display.height() - 16};
+  #elif defined(BOARD_ESP32_S3_LCD147)
+    const int p[2] = {display.width() - 16, display.height() - 16};
   #else
     const int p[2] = {display.width() - 16, 0};
   #endif
@@ -1241,8 +1265,10 @@ void setup() {
   // httpServer.setEventDispatcher(&dispatcher);
   httpServer.begin();
 
-  display.flush();
+  // display.flush();
   testAsusWRT();
+  Logger::debug("free heap memory: %u", ESP.getFreeHeap());
+  Logger::info("");
   Logger::info("> Ready. Enter 'list' for comand list.");
 }
 
