@@ -6,10 +6,12 @@
 #include <WiFiClientSecure.h>
 
 #include <cstring>
+#include <string>
 #include <type_traits>
 #include <vector>
 
 #include "MqttConfig.hpp"
+#include "MqttKeyGenerator.hpp"
 #include "MqttListenerEntry.hpp"
 
 // Спільний MQTT-клієнт (plain / TLS, з auth або без), з підпискою через лістенери.
@@ -18,9 +20,38 @@
 // ОБМЕЖЕННЯ: PubSubClient використовує C-style callback (function pointer),
 // тому активним може бути лише ОДИН екземпляр MqttClient одночасно
 // (static-трамплін на _instance).
+//
+// Topic-префікс (напр. dev/prod/qa/local, регіон, тощо): застосовується автоматично до ВСІХ
+// топіків (publish/subscribe/unsubscribe/addListener і похідні, LWT). Джерело - або
+// MqttConfig::prefix (build-time дефолт), або зовнішній MqttKeyGenerator через
+// setKeyGenerator() (напр. ConfigStorage-override), викликаний ДО begin(). Топік у
+// callback листенера - це вже фактичний (префіксований) topic з брокера.
+//
+//   MqttConfig config;
+//   config.prefix = MQTT_TOPIC_PREFIX;    // build-time дефолт з secrets.ini
+//   MqttClient mqtt(config);
+//   ...
+//   String stored = configStorage.getString("mqtt-prefix", "");
+//   static MqttKeyGenerator override;
+//   if (stored.length() > 0) {            // runtime override - лише якщо реально є в сторедж
+//     override.setPrefix(stored.c_str());
+//     mqtt.setKeyGenerator(&override);    // ДО begin()
+//   }
+//   mqtt.begin();
 class MqttClient {
 public:
   explicit MqttClient(const MqttConfig& config);
+
+  // Pointer injection (ESP32 style): виклик ДО begin() (точніше - до першого
+  // addListener()/publish()/subscribe()/connect()) - інакше вже додані listeners лишаться
+  // зі старим (baked-in) топіком, див. addListener().
+  // Якщо не викликати взагалі - використовується внутрішній генератор з _config.prefix
+  // (build-time дефолт з secrets.ini).
+  void setKeyGenerator(MqttKeyGenerator* keyGenerator);
+
+  // Активний генератор (injected через setKeyGenerator(), або _defaultKeyGenerator з
+  // _config.prefix, якщо нічого не injected). Валідний завжди, навіть до begin().
+  const MqttKeyGenerator& keyGenerator() const;
 
   void begin();
   void loop();
@@ -137,7 +168,12 @@ private:
   void handleMessage(char* topic, uint8_t* payload, unsigned int length);
   static void staticCallback(char* topic, uint8_t* payload, unsigned int length);
 
+  // topic == nullptr -> "" (порожній std::string). Застосовує _keyGenerator, якщо injected.
+  std::string resolveTopic(const char* topic) const;
+
   MqttConfig _config;
+  MqttKeyGenerator _defaultKeyGenerator;  // з _config.prefix; fallback, якщо нічого не injected
+  MqttKeyGenerator* _keyGenerator = nullptr;
   WiFiClient _plainClient;
   WiFiClientSecure _secureClient;
   PubSubClient _mqttClient;

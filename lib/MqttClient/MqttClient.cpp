@@ -8,10 +8,29 @@
 
 MqttClient* MqttClient::_instance = nullptr;
 
-MqttClient::MqttClient(const MqttConfig& config) : _config(config) {}
+MqttClient::MqttClient(const MqttConfig& config)
+    : _config(config), _defaultKeyGenerator(config.prefix) {}
+
+void MqttClient::setKeyGenerator(MqttKeyGenerator* keyGenerator) { _keyGenerator = keyGenerator; }
+
+const MqttKeyGenerator& MqttClient::keyGenerator() const {
+  return _keyGenerator != nullptr ? *_keyGenerator : _defaultKeyGenerator;
+}
+
+std::string MqttClient::resolveTopic(const char* topic) const {
+  if (_keyGenerator != nullptr) {
+    return _keyGenerator->key(topic);
+  }
+  return topic != nullptr ? std::string(topic) : std::string();
+}
 
 void MqttClient::begin() {
   _instance = this;
+
+  // Якщо setKeyGenerator() не викликали заздалегідь - fallback на _config.prefix.
+  if (_keyGenerator == nullptr) {
+    _keyGenerator = &_defaultKeyGenerator;
+  }
 
   if (_config.useTls) {
     if (_config.caCert != nullptr) {
@@ -54,7 +73,8 @@ void MqttClient::disconnect(const char* customOfflineMessage) {
   bool hasMessage = message != nullptr && message[0] != '\0';
 
   if (_mqttClient.connected() && hasLwtTopic && hasMessage) {
-    publish(_config.lwtTopic, message, _config.lwtRetain);
+    std::string lwtTopic = resolveTopic(_config.lwtTopic);
+    _mqttClient.publish(lwtTopic.c_str(), message, _config.lwtRetain);
   }
 
   _mqttClient.disconnect();
@@ -68,12 +88,17 @@ bool MqttClient::connect() {
       _config.lwtOnlineMessage != nullptr && _config.lwtOnlineMessage[0] != '\0';
   bool hasLwt = hasLwtTopic && hasOfflineMessage;
 
+  // Резолвимо LWT topic ОДИН раз (через _keyGenerator, якщо injected) і тримаємо
+  // std::string живим на весь виклик connect(), бо PubSubClient::connect() лише
+  // зберігає переданий const char* (не копіює його).
+  std::string lwtTopic = hasLwtTopic ? resolveTopic(_config.lwtTopic) : std::string();
+
   bool ok;
   if (hasLwt) {
     ok = _config.useAuth ? _mqttClient.connect(_config.clientId, _config.username, _config.password,
-                                               _config.lwtTopic, _config.lwtQos, _config.lwtRetain,
+                                               lwtTopic.c_str(), _config.lwtQos, _config.lwtRetain,
                                                _config.lwtOfflineMessage)
-                         : _mqttClient.connect(_config.clientId, _config.lwtTopic, _config.lwtQos,
+                         : _mqttClient.connect(_config.clientId, lwtTopic.c_str(), _config.lwtQos,
                                                _config.lwtRetain, _config.lwtOfflineMessage);
   } else {
     ok = _config.useAuth ? _mqttClient.connect(_config.clientId, _config.username, _config.password)
@@ -84,7 +109,7 @@ bool MqttClient::connect() {
     resubscribeAll();
 
     if (hasLwtTopic && hasOnlineMessage) {
-      publish(_config.lwtTopic, _config.lwtOnlineMessage, _config.lwtRetain);
+      _mqttClient.publish(lwtTopic.c_str(), _config.lwtOnlineMessage, _config.lwtRetain);
     }
   }
 
@@ -92,27 +117,35 @@ bool MqttClient::connect() {
 }
 
 bool MqttClient::publish(const char* topic, const char* payload, bool retained) {
-  return _mqttClient.publish(topic, payload, retained);
+  std::string fullTopic = resolveTopic(topic);
+  return _mqttClient.publish(fullTopic.c_str(), payload, retained);
 }
 
 bool MqttClient::publish(const char* topic, const uint8_t* payload, unsigned int length,
                          bool retained) {
-  return _mqttClient.publish(topic, payload, length, retained);
+  std::string fullTopic = resolveTopic(topic);
+  return _mqttClient.publish(fullTopic.c_str(), payload, length, retained);
 }
 
-bool MqttClient::subscribe(const char* topic) { return _mqttClient.subscribe(topic); }
+bool MqttClient::subscribe(const char* topic) {
+  std::string fullTopic = resolveTopic(topic);
+  return _mqttClient.subscribe(fullTopic.c_str());
+}
 
-bool MqttClient::unsubscribe(const char* topic) { return _mqttClient.unsubscribe(topic); }
+bool MqttClient::unsubscribe(const char* topic) {
+  std::string fullTopic = resolveTopic(topic);
+  return _mqttClient.unsubscribe(fullTopic.c_str());
+}
 
 MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback callback) {
   MqttListenerEntry entry;
   entry.id = _nextListenerId++;
-  entry.topic = topic;
+  entry.topic = resolveTopic(topic).c_str();
   entry.callback = callback;
   _listeners.push_back(entry);
 
   if (_mqttClient.connected()) {
-    _mqttClient.subscribe(topic);
+    _mqttClient.subscribe(entry.topic.c_str());
   }
 
   return entry.id;

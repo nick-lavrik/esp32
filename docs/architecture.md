@@ -18,7 +18,7 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 ## Плати (PlatformIO environments)
 
 | env | Плата | Дисплей | Особливості |
-|---|---|---|---|
+| :--- | :--- | :--- | :--- |
 | `esp32-4848s040` | GUITION/Sunton ESP32-4848S040C (ESP32-S3) | RGB-панель ST7701, 480×480, LovyanGFX | touch (GT911), SD, PSRAM, 320KB RAM, 16MB Flash |
 | `esp32-st7789` | ESP32 Dev Module + ST7789 SPI | 240×320, `bodmer/TFT_eSPI` | touch (XPT2046), SD, light sensor, 320KB RAM, 4MB Flash |
 | `ttgo-t1` | LilyGO T-Display (класична, ESP32) | 135×240, `bodmer/TFT_eSPI` | без SD, без touch, 320KB RAM, 16MB Flash |
@@ -30,7 +30,7 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 ## Ключові бібліотеки (спільні + платформо-специфічні)
 
 | Бібліотека | Призначення |
-|---|---|
+| :--- | :--- |
 | `lovyan03/LovyanGFX` | рендеринг для `esp32-4848s040` (RGB-панель) |
 | `bodmer/TFT_eSPI` | рендеринг для `esp32-st7789` та `ttgo-t1` (SPI TFT) |
 | `adafruit/Adafruit SSD1306` + `Adafruit GFX` | рендеринг для `esp8266` (I2C OLED) |
@@ -47,6 +47,26 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 `ConfigStorage` (NVS-конфіг), `TouchScreen` (events/swipe/hold + point mapping),
 `JpegImage`, `AnalogSensor`, `MqttClient`, `NtpService`, `HttpServer`, `SDCardInspector`,
 `EspPartitionInspector`, `SystemReset`, `SerialCommander`, `Logger`, `HeapMonitor`, `RwLock`.
+
+### MQTT topic-префікс (`MqttKeyGenerator`)
+
+`lib/MqttClient/MqttKeyGenerator.{hpp,cpp}` — рознесення MQTT-каналів на одному брокері
+(наприклад `dev`/`prod`/`qa`/`local`, регіон, тенант тощо). Формат: `{prefix}/{topic}`.
+
+- `MqttClient::setKeyGenerator(MqttKeyGenerator*)` — pointer injection (nullptr = без
+  префікса, як було раніше). Застосовується автоматично до **всіх** топіків:
+  `publish`/`subscribe`/`unsubscribe`/`addListener` (і похідних `addStringListener`/
+  `addJsonListener`/`addStructListener`/`addNumberListener`), а також до LWT topic
+  (`connect()`/`disconnect()`).
+- Топік у callback листенера — це вже фактичний (префіксований) topic з брокера, без
+  автоматичного striping префікса назад.
+- Джерело prefix: build-time дефолт `MqttConfig::prefix` (з `MQTT_TOPIC_PREFIX` /
+  `secrets.mqtt_topic_prefix`), опційно перекривається runtime-значенням з
+  `ConfigStorage` (ключ `CFG_MQTT_TOPIC_PREFIX = "mqtt-prefix"`) — override injected
+  через `setKeyGenerator()` **лише якщо** значення реально збережено в NVS
+  (`src/main.cpp::setupMqttClient()`). Serial-команда `mqtt-prefix [prefix]` —
+  переглянути/змінити й зберегти в NVS; **зміна вимагає reboot** (топіки вже
+  засабскрайблені зі старим префіксом).
 
 ## Функціонал (актуальний, за `src/main.cpp`)
 
@@ -93,6 +113,7 @@ ColumnLimit: 120
 ```
 
 Плюс правила іменування (з project instructions, clang-format це не покриває):
+
 - приватні змінні-члени класу — префікс `_`
 - імена методів/членів — `camelCase`
 - ім'я класу/структури — `PascalCase`
@@ -104,6 +125,12 @@ ColumnLimit: 120
 Перед комітом бажано прогнати `clang-format -i` на змінених `.cpp`/`.h`/`.hpp` файлах.
 
 ## Changelog
+
+- 2026-08-09 — додано `MqttKeyGenerator` (`lib/MqttClient/`): topic-префікс (dev/prod/qa/
+  local, регіон, тощо) для всіх MQTT-топіків, injected в `MqttClient` через
+  `setKeyGenerator()` (fallback — `MqttConfig::prefix`, build-time). Новий build flag
+  `MQTT_TOPIC_PREFIX` (з `secrets.ini`, `secrets.mqtt_topic_prefix`), ConfigStorage-override
+  через ключ `mqtt-prefix` і serial-команду `mqtt-prefix [prefix]` (потребує reboot).
 
 - 2026-08-04 — файл повністю переписано на основі актуального `platformio.ini` та коду
   репозиторію (`nick-lavrik/esp32`, гілка `master`). Попередня версія описувала проєкт

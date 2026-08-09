@@ -31,4 +31,11 @@ struct MqttConfig {
   const char* lwtOnlineMessage = nullptr;
   uint8_t lwtQos = 0;
   bool lwtRetain = false;
+
+  // Topic-префікс за замовчуванням (напр. dev/prod/qa/local, регіон, тощо) для
+  // MqttKeyGenerator. ОБОВ'ЯЗКОВО build-time літерал (макрос/секрет з secrets.ini), як
+  // host/clientId - NEVER Arduino::String::c_str() (temporary -> dangling pointer).
+  // Використовується автоматично, якщо MqttClient::setKeyGenerator() не викликали до
+  // begin() з окремим (напр. ConfigStorage-based) генератором. nullptr/"" -> без префікса.
+  const char* prefix = nullptr;
 };
