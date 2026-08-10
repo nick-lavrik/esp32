@@ -132,7 +132,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
 
   _loaded = true;
   _logger.info("Loaded %dx%d, depth: %d біт, buffer: %u B, memory: %s", _width,
-               _height, (int)depth, (unsigned)bufferBytes, _usedPsram ? "PSRAM" : "внутрішня RAM");
+               _height, (int)depth, (unsigned)bufferBytes, _usedPsram ? "PSRAM" : "RAM");
   return true;
 }
 
