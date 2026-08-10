@@ -6,6 +6,7 @@
 
 // Глибина кольору, з якою зберігається декодоване зображення в пам'яті
 enum class JpegColorDepth : uint8_t {
+  RGB888 = 24,  // 3 байти/піксель, без втрат при конвертації з RGB565 (5-6-5 -> 8-8-8)
   RGB565 = 16,  // 2 байти/піксель, повна якість кольору, 16bit
   RGB332 = 8,   // 1 байт/піксель, вдвічі менше пам'яті
   MONO1 = 1  // 1 біт/піксель (поріг яскравості), формат Adafruit_GFX::drawBitmap
@@ -17,6 +18,7 @@ public:
   ~JpegImage();
 
   // depth визначає, скільки пам'яті займе фінальний буфер:
+  // RGB888 -> width*height*3 байт
   // RGB565 -> width*height*2 байт
   // RGB332 -> width*height*1 байт
   // MONO1  -> rowStrideBytes()*height (з округленням рядка до байта)
@@ -40,6 +42,7 @@ public:
 
   // Типізовані геттери з перевіркою поточної глибини кольору.
   // Повертають nullptr, якщо зображення завантажено з іншою глибиною.
+  const uint8_t *bufferRGB888() const;  // 3 байти/піксель, порядок R,G,B
   const uint16_t *bufferRGB565() const;
   const uint8_t *bufferRGB332() const;
   const uint8_t *bufferMono1() const;  // формат, сумісний з Adafruit_GFX::drawBitmap
@@ -47,6 +50,17 @@ public:
 private:
   static bool jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
   void freeBuffer();
+
+  // Конвертація одного пікселя RGB565 -> RGB888 (розширення 5/6 біт до 8 біт кожного каналу).
+  // destRow[0]=R, destRow[1]=G, destRow[2]=B.
+  static inline void rgb565to888(uint16_t c, uint8_t *destPixel) {
+    uint8_t r5 = (c >> 11) & 0x1F;
+    uint8_t g6 = (c >> 5) & 0x3F;
+    uint8_t b5 = c & 0x1F;
+    destPixel[0] = (r5 << 3) | (r5 >> 2);
+    destPixel[1] = (g6 << 2) | (g6 >> 4);
+    destPixel[2] = (b5 << 3) | (b5 >> 2);
+  }
 
   // Конвертація одного пікселя RGB565 -> RGB332 (3-3-2 біт)
   static inline uint8_t rgb565to332(uint16_t c) {

@@ -1,0 +1,35 @@
+# Кастомна partition-таблиця для esp32-4848s040 (без OTA)
+#
+# Flash: 16 MB (0x1000000), board_upload.flash_size вже виставлено в platformio.ini.
+# Плата має і SD-картку (BOARD_HAS_SD=1), і LittleFS — LittleFS тут в основному під
+# фонові JPEG (LITTLEFS_BACKGROUND_IMAGE) і статику вбудованого HTTP-сервера,
+# основне сховище — SD.
+#
+# OTA не використовується — один app-розділ замість двох (ota_0/ota_1).
+#
+# ВАЖЛИВО: app-розділ навмисно розташований на стандартній адресі 0x10000,
+# бо PlatformIO (platform-espressif32) у поточній версії ігнорує
+# board_upload.offset_address і завжди пише firmware.bin саме на 0x10000.
+#
+# app-розділ 4Mb (з запасом) — debug build (build_type=debug) з LovyanGFX,
+# ESP Mail Client, TJpg_Decoder і повним набором фонтів (LOAD_FONT2/4/6/7/8)
+# суттєво більший за app на st7789/ttgo-t1.
+#
+# Розділ під LittleFS названо (і типізовано) як 'spiffs' — стандартна
+# назва за замовчуванням для LittleFS.begin() без додаткових параметрів.
+#
+# Розділ 'coredump' потрібен esp_core_dump (Arduino-ESP32), щоб зберігати
+# дамп пам'яті після краху для подальшого аналізу через espcoredump.py.
+# Без нього застосунок працює нормально, лише пише попередження при бут.
+#
+# app      - 0x400000 - 4Mb    (запас під debug + LovyanGFX + ESP Mail Client)
+# nvs      - 0x0F0000 - 960Kb  (з запасом під ConfigStorage)
+# coredump - 0x010000 - 64Kb
+# littlefs - 0xAF0000 - ~10.9Mb (фонові JPEG, статика HTTP-сервера)
+#
+# Name,      Type,  SubType,   Offset,    Size,      Flags
+phy_init,    data,  phy,       0x009000,  0x001000,
+app,         app,   factory,   0x010000,  0x400000,
+coredump,    data,  coredump,  0x410000,  0x010000,
+nvs,         data,  nvs,       0x420000,  0x0F0000,
+spiffs,      data,  spiffs,    0x510000,  0xAF0000,

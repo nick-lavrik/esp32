@@ -94,7 +94,12 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   if (depth == JpegColorDepth::MONO1) {
     bufferBytes = (size_t)((jpegWidth + 7) / 8) * jpegHeight;
   } else {
-    size_t bytesPerPixel = (depth == JpegColorDepth::RGB565) ? 2 : 1;
+    size_t bytesPerPixel = 1;
+    if (depth == JpegColorDepth::RGB888) {
+      bytesPerPixel = 3;
+    } else if (depth == JpegColorDepth::RGB565) {
+      bytesPerPixel = 2;
+    }
     bufferBytes = (size_t)jpegWidth * jpegHeight * bytesPerPixel;
   }
 
@@ -159,7 +164,12 @@ bool JpegImage::jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h,
 
     uint16_t *srcRow = bitmap + (row * w);
 
-    if (self->_depth == JpegColorDepth::RGB565) {
+    if (self->_depth == JpegColorDepth::RGB888) {
+      uint8_t *destRow = (uint8_t *)self->_buffer + (size_t)(destY * self->_width + x) * 3;
+      for (uint16_t col = 0; col < copyWidth; col++) {
+        rgb565to888(srcRow[col], destRow + (size_t)col * 3);
+      }
+    } else if (self->_depth == JpegColorDepth::RGB565) {
       uint16_t *destRow = (uint16_t *)self->_buffer + (destY * self->_width) + x;
       memcpy(destRow, srcRow, copyWidth * sizeof(uint16_t));
     } else if (self->_depth == JpegColorDepth::RGB332) {
@@ -191,7 +201,12 @@ size_t JpegImage::bufferSizeBytes() const {
   if (_depth == JpegColorDepth::MONO1) {
     return rowStrideBytes() * _height;
   }
-  size_t bpp = (_depth == JpegColorDepth::RGB565) ? 2 : 1;
+  size_t bpp = 1;
+  if (_depth == JpegColorDepth::RGB888) {
+    bpp = 3;
+  } else if (_depth == JpegColorDepth::RGB565) {
+    bpp = 2;
+  }
   return (size_t)_width * _height * bpp;
 }
 
@@ -205,6 +220,14 @@ size_t JpegImage::rowStrideBytes() const {
 void JpegImage::setMonoThreshold(uint8_t threshold) { _monoThreshold = threshold; }
 
 void *JpegImage::buffer() const { return _buffer; }
+
+const uint8_t *JpegImage::bufferRGB888() const {
+  if (_depth != JpegColorDepth::RGB888) {
+    return nullptr;
+  }
+
+  return static_cast<const uint8_t *>(_buffer);
+}
 
 const uint16_t *JpegImage::bufferRGB565() const {
   if (_depth != JpegColorDepth::RGB565) {
