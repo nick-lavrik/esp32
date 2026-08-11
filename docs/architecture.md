@@ -46,7 +46,10 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 
 Власні внутрішні бібліотеки в `lib/`: `EventDispatcher`, `TaskController` (cron/job scheduler),
 `ConfigStorage` (NVS-конфіг), `TouchScreen` (events/swipe/hold + point mapping),
-`JpegImage`, `AnalogSensor`, `MqttClient`, `NtpService`, `HttpServer`, `SDCardInspector`,
+`JpegImage`, `Pixel` (value-type для пер-піксельних обчислень), `ImageEffects`
+(ефекти над буфером `JpegImage`: desaturate/lighten/darken/tint/contrast/sepia/hue-rotate/
+thermal/invert/threshold/dithering/box-blur — усе in-place, без копії буфера на весь кадр),
+`AnalogSensor`, `MqttClient`, `NtpService`, `HttpServer`, `SDCardInspector`,
 `EspPartitionInspector`, `SystemReset`, `SerialCommander`, `Logger`, `HeapMonitor`, `RwLock`.
 
 ### MQTT topic-префікс (`MqttKeyGenerator`)
@@ -127,6 +130,15 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-08-11 — додано `lib/JpegImage/Pixel.hpp` (struct-based value-type для пер-піксельних
+  RGB332/RGB565/RGB888 обчислень, уніфіковані `unpack`/`pack<T>()` за типом аргументу,
+  ланцюжок `fx*`-методів) та `lib/JpegImage/ImageEffects.{hpp,cpp}` (клас над `JpegImage`:
+  desaturate/lighten/darken/tint/contrast/sepia/hue-rotate/thermal/invert/threshold/dithering/
+  box-blur, усе in-place, без буфера на весь кадр — критично для плат без PSRAM). Ефекти
+  свідомо винесені з `JpegImage` в окремий клас (різна відповідальність: декодування JPEG
+  vs трансформація буфера; `SerialCommander` залежить лише від `ImageEffects`, не тягне
+  JPEG-специфіку). Додано serial-команду `blur <radius> [passes]` над `spaceImage`
+  (лише під `#if defined(LITTLEFS_BACKGROUND_IMAGE)`).
 - 2026-08-09 — таблиця плат: додано колонку платформи (ESP32/ESP32-S3/ESP8266) в
   "Плата", деталізовано "Дисплей" (width×height, color depth, controller, driver@version),
   додано рядок `esp32-s3-lcd147`.

@@ -67,6 +67,7 @@
 #include <EventDispatcher.hpp>
 #include <GmailSender.hpp>
 #include <HttpServer.hpp>
+#include <ImageEffects.hpp>
 #include <JpegImage.hpp>
 #include <LittleFsStaticSource.hpp>
 #include <Logger.hpp>
@@ -782,6 +783,35 @@ void setupSerialCommander() {
       display_brightness(args.toInt(), false);
     }
   });
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "blur", "blur background image: blur <radius 1-8> [passes 1-3, default 1]",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: blur <radius 1-8> [passes 1-3, default 1]");
+          return;
+        }
+
+        int spaceIdx = args.indexOf(' ');
+        int radius = (spaceIdx < 0 ? args : args.substring(0, spaceIdx)).toInt();
+        int passes = (spaceIdx < 0) ? 1 : args.substring(spaceIdx + 1).toInt();
+        if (passes < 1) passes = 1;
+
+        if (radius < 1 || radius > 8) {
+          Logger::info("radius must be 1-8");
+          return;
+        }
+        if (passes > 3) {
+          Logger::info("passes clamped to 3 (heavier passes take long on-device)");
+          passes = 3;
+        }
+
+        bool ok = ImageEffects::applyBoxBlur(spaceImage, (uint8_t)radius, (uint8_t)passes);
+        Logger::info(ok ? "blur applied: radius=%d passes=%d" : "blur failed (image not loaded?)",
+                     radius, passes);
+      });
+#endif
 
   Logger::info("SerialCommander setup done");
 }
