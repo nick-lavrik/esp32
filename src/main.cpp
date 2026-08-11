@@ -813,6 +813,53 @@ void setupSerialCommander() {
       });
 #endif
 
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "desaturate", "blur background image: desaturate <factor 0.0-1.0>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: desaturate <factor 0.0-1.0>");
+          return;
+        }
+
+        float factor = args.toFloat();
+
+        bool ok = ImageEffects::applyDesaturate(spaceImage, factor);
+        Logger::info(ok ? "desaturate applied: factor=%f" : "desaturate failed (image not loaded?)",
+                     factor);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "darken", "darken background image: darken <factor 0.0-1.0>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: darken <factor 0.0-1.0>");
+          return;
+        }
+
+        float factor = args.toFloat();
+
+        bool ok = ImageEffects::applyDarken(spaceImage, factor);
+        Logger::info(ok ? "darken applied: factor=%f" : "darken failed (image not loaded?)",
+                     factor);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "background", "load background image: background <LittleFS path>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: background <LittleFS path>");
+          return;
+        }
+
+        spaceImage.loadFromLittleFS(args.c_str());
+
+      });
+#endif
   Logger::info("SerialCommander setup done");
 }
 

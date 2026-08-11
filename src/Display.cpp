@@ -26,6 +26,7 @@ void Display::init() {
 #endif
 
   sprite().setSwapBytes(true);
+  tft_.setSwapBytes(true);
   flush();  // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
 }
 
