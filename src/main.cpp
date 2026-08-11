@@ -842,6 +842,24 @@ void setupSerialCommander() {
       });
 #endif
 
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "sepia", "sepia background image: sepia <amount 0.0-1.0>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: sepia <amount 0.0-1.0>");
+          return;
+        }
+
+        float amount = args.toFloat();
+
+        bool ok = ImageEffects::applySepia(spaceImage, amount);
+        Logger::info(ok ? "sepia applied: amount=%f" : "sepia failed (image not loaded?)",
+                     amount);
+      });
+#endif
+
 #if defined(LITTLEFS_BACKGROUND_IMAGE)
   commandHandler.registerCommand(
       "desaturate", "blur background image: desaturate <factor 0.0-1.0>",
