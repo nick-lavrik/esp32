@@ -8,8 +8,8 @@
 enum class JpegColorDepth : uint8_t {
   RGB888 = 24,  // 3 байти/піксель, без втрат при конвертації з RGB565 (5-6-5 -> 8-8-8)
   RGB565 = 16,  // 2 байти/піксель, повна якість кольору, 16bit
-  RGB332 = 8,   // 1 байт/піксель, вдвічі менше пам'яті
-  MONO1 = 1  // 1 біт/піксель (поріг яскравості), формат Adafruit_GFX::drawBitmap
+  RGB332 =  8,  // 1 байт/піксель, вдвічі менше пам'яті
+  MONO1  =  1   // 1 біт/піксель (поріг яскравості), формат Adafruit_GFX::drawBitmap
 };
 
 class JpegImage {
@@ -42,10 +42,10 @@ public:
 
   // Типізовані геттери з перевіркою поточної глибини кольору.
   // Повертають nullptr, якщо зображення завантажено з іншою глибиною.
-  const uint8_t *bufferRGB888() const;  // 3 байти/піксель, порядок R,G,B
+  const uint8_t  *bufferRGB888() const;  // 3 байти/піксель, порядок R,G,B
   const uint16_t *bufferRGB565() const;
-  const uint8_t *bufferRGB332() const;
-  const uint8_t *bufferMono1() const;  // формат, сумісний з Adafruit_GFX::drawBitmap
+  const uint8_t  *bufferRGB332() const;
+  const uint8_t  *bufferMono1()  const;  // формат, сумісний з Adafruit_GFX::drawBitmap
 
 private:
   static bool jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
