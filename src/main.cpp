@@ -815,6 +815,35 @@ void setupSerialCommander() {
 
 #if defined(LITTLEFS_BACKGROUND_IMAGE)
   commandHandler.registerCommand(
+      "tint", "tint background image: tint <RRGGBB hex> [alpha 0.0-1.0, default 0.5]",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: tint <RRGGBB hex> [alpha 0.0-1.0, default 0.5]");
+          return;
+        }
+
+        int spaceIdx = args.indexOf(' ');
+        String hex = (spaceIdx < 0 ? args : args.substring(0, spaceIdx));
+        float alpha = (spaceIdx < 0) ? 0.5f : args.substring(spaceIdx + 1).toFloat();
+
+        if (hex.length() != 6) {
+          Logger::info("color must be 6 hex chars, e.g. FF8800");
+          return;
+        }
+        if (alpha < 0.0f) alpha = 0.0f;
+        if (alpha > 1.0f) alpha = 1.0f;
+
+        uint32_t rgb = strtoul(hex.c_str(), nullptr, 16);
+        Pixel tint = Pixel::unpack(rgb);
+
+        bool ok = ImageEffects::applyTint(spaceImage, tint, alpha);
+        Logger::info(ok ? "tint applied: color=%s alpha=%.2f" : "tint failed (image not loaded?)",
+                     hex.c_str(), alpha);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
       "desaturate", "blur background image: desaturate <factor 0.0-1.0>",
       [](const String& args) {
         if (args.length() == 0) {
@@ -860,6 +889,7 @@ void setupSerialCommander() {
 
       });
 #endif
+
   Logger::info("SerialCommander setup done");
 }
 

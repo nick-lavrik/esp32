@@ -252,7 +252,7 @@ extern uint16_t* my_screen_buffer;
 // в памяти ESP32 после того, как TJpg_Decoder заполнил ваш экранный буфер:
 void process_background_image() {
     // ШАГ 1: Попиксельная обработка (Насыщенность -> Осветление -> Тонирование)
-    FloatPixel target_ui_tint = {0.9f, 0.95f, 1.0f}; // Нежно-голубой оттенок UI
+    FloatPixel target_ui_tint = {0.9f, 0.95f, 1.0f}; // Нежно-голубой оттенок UI (E6F3FF)
 
     for (int i = 0; i < (SCREEN_WIDTH * SCREEN_HEIGHT); i++) {
         // 1. Читаем исходный пиксель из буфера (допустим, экран RGB565)
