@@ -90,6 +90,34 @@ bool ImageEffects::applyThreshold(JpegImage &image, float threshold) {
   return applyPerPixel(image, [&](Pixel &p) { p.fxThreshold(threshold); });
 }
 
+bool ImageEffects::applyGamma(JpegImage &image, float gamma) {
+  return applyPerPixel(image, [&](Pixel &p) { p.fxGamma(gamma); });
+}
+
+bool ImageEffects::applyPosterize(JpegImage &image, int levels) {
+  return applyPerPixel(image, [&](Pixel &p) { p.fxPosterize(levels); });
+}
+
+bool ImageEffects::applySolarize(JpegImage &image, float threshold) {
+  return applyPerPixel(image, [&](Pixel &p) { p.fxSolarize(threshold); });
+}
+
+bool ImageEffects::applyDuotone(JpegImage &image, const Pixel &dark, const Pixel &light) {
+  return applyPerPixel(image, [&](Pixel &p) { p.fxDuotone(dark, light); });
+}
+
+bool ImageEffects::applyColorBalance(JpegImage &image, float rMul, float gMul, float bMul) {
+  return applyPerPixel(image, [&](Pixel &p) { p.fxColorBalance(rMul, gMul, bMul); });
+}
+
+bool ImageEffects::applyNoise(JpegImage &image, float amount) {
+  return applyPerPixel(image, [&](Pixel &p) {
+    p.r += (random(-1000, 1001) / 1000.0f) * amount;
+    p.g += (random(-1000, 1001) / 1000.0f) * amount;
+    p.b += (random(-1000, 1001) / 1000.0f) * amount;
+  });
+}
+
 void ImageEffects::applyOrderedDither(JpegImage &image, float spread) {
   uint16_t w = image.width();
   uint16_t h = image.height();
@@ -220,5 +248,295 @@ bool ImageEffects::applyBoxBlur(JpegImage &image, uint8_t radius, uint8_t passes
   }
 
   free(lineBuffer);
+  return true;
+}
+
+bool ImageEffects::applyVignette(JpegImage &image, float strength) {
+  if (image.colorDepth() == JpegColorDepth::MONO1) {
+    _logger.warn("vignette: MONO1 не підтримується");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+  if (strength < 0.0f) strength = 0.0f;
+  if (strength > 1.0f) strength = 1.0f;
+
+  uint16_t w = image.width();
+  uint16_t h = image.height();
+  float cx = w / 2.0f;
+  float cy = h / 2.0f;
+  float maxDist = sqrtf(cx * cx + cy * cy);
+  if (maxDist < 1.0f) maxDist = 1.0f;
+
+  for (uint16_t y = 0; y < h; y++) {
+    for (uint16_t x = 0; x < w; x++) {
+      float dx = x - cx;
+      float dy = y - cy;
+      float dist = sqrtf(dx * dx + dy * dy) / maxDist;  // 0.0 в центрі .. ~1.0 у кутах
+      float darken = 1.0f - strength * dist * dist;
+      if (darken < 0.0f) darken = 0.0f;
+
+      size_t idx = (size_t)y * w + x;
+      Pixel p = getPixel(image, idx);
+      p.fxDarken(darken);
+      setPixel(image, idx, p);
+    }
+  }
+  return true;
+}
+
+bool ImageEffects::applyPixelate(JpegImage &image, uint8_t blockSize) {
+  if (blockSize < 2) {
+    return false;
+  }
+  if (image.colorDepth() == JpegColorDepth::MONO1) {
+    _logger.warn("pixelate: MONO1 не підтримується");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+
+  uint16_t w = image.width();
+  uint16_t h = image.height();
+
+  for (uint16_t by = 0; by < h; by += blockSize) {
+    uint16_t bh = ((uint16_t)(by + blockSize) <= h) ? blockSize : (h - by);
+    for (uint16_t bx = 0; bx < w; bx += blockSize) {
+      uint16_t bw = ((uint16_t)(bx + blockSize) <= w) ? blockSize : (w - bx);
+
+      float rSum = 0, gSum = 0, bSum = 0;
+      uint32_t count = 0;
+      for (uint16_t y = by; y < by + bh; y++) {
+        for (uint16_t x = bx; x < bx + bw; x++) {
+          Pixel p = getPixel(image, (size_t)y * w + x);
+          rSum += p.r;
+          gSum += p.g;
+          bSum += p.b;
+          count++;
+        }
+      }
+      Pixel avg{rSum / count, gSum / count, bSum / count};
+
+      for (uint16_t y = by; y < by + bh; y++) {
+        for (uint16_t x = bx; x < bx + bw; x++) {
+          setPixel(image, (size_t)y * w + x, avg);
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool ImageEffects::applyScanlines(JpegImage &image, float darkenFactor) {
+  if (image.colorDepth() == JpegColorDepth::MONO1) {
+    _logger.warn("scanlines: MONO1 не підтримується");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+
+  uint16_t w = image.width();
+  uint16_t h = image.height();
+
+  for (uint16_t y = 1; y < h; y += 2) {
+    for (uint16_t x = 0; x < w; x++) {
+      size_t idx = (size_t)y * w + x;
+      Pixel p = getPixel(image, idx);
+      p.fxDarken(darkenFactor);
+      setPixel(image, idx, p);
+    }
+  }
+  return true;
+}
+
+bool ImageEffects::applyChromaticAberration(JpegImage &image, uint8_t offsetPx) {
+  if (offsetPx < 1) {
+    return false;
+  }
+  if (image.colorDepth() == JpegColorDepth::MONO1) {
+    _logger.warn("chromaticAberration: MONO1 не підтримується");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+
+  uint16_t w = image.width();
+  uint16_t h = image.height();
+
+  Pixel *lineBuffer = (Pixel *)malloc(w * sizeof(Pixel));
+  if (lineBuffer == nullptr) {
+    _logger.error("chromaticAberration: не вистачило пам'яті на line buffer (%u px)", w);
+    return false;
+  }
+
+  for (uint16_t y = 0; y < h; y++) {
+    for (uint16_t x = 0; x < w; x++) {
+      lineBuffer[x] = getPixel(image, (size_t)y * w + x);
+    }
+    for (uint16_t x = 0; x < w; x++) {
+      int rx = (int)x - offsetPx;
+      if (rx < 0) rx = 0;
+      int bx = (int)x + offsetPx;
+      if (bx >= w) bx = w - 1;
+
+      Pixel out{lineBuffer[rx].r, lineBuffer[x].g, lineBuffer[bx].b};
+      setPixel(image, (size_t)y * w + x, out);
+    }
+  }
+
+  free(lineBuffer);
+  return true;
+}
+
+// Спільна техніка для 3x3-згорток (Sobel/emboss): 3 рядкові буфери (prev/cur/next),
+// що котяться вниз по кадру - не потрібен буфер на весь кадр. Крайні пікселі рядка/
+// кадру - clamp-to-edge (дублювання межового пікселя/рядка).
+namespace {
+float lumaAtClamped(const Pixel *row, int x, uint16_t w) {
+  if (x < 0) x = 0;
+  if (x >= w) x = w - 1;
+  return row[x].lumaRec709();
+}
+}  // namespace
+
+bool ImageEffects::applySobelEdges(JpegImage &image) {
+  if (image.colorDepth() == JpegColorDepth::MONO1) {
+    _logger.warn("sobelEdges: MONO1 не підтримується");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+
+  uint16_t w = image.width();
+  uint16_t h = image.height();
+  if (w < 3 || h < 3) {
+    _logger.warn("sobelEdges: потрібно щонайменше 3x3 пікселі");
+    return false;
+  }
+
+  Pixel *prevRow = (Pixel *)malloc(w * sizeof(Pixel));
+  Pixel *curRow = (Pixel *)malloc(w * sizeof(Pixel));
+  Pixel *nextRow = (Pixel *)malloc(w * sizeof(Pixel));
+  if (prevRow == nullptr || curRow == nullptr || nextRow == nullptr) {
+    _logger.error("sobelEdges: не вистачило пам'яті на 3 рядкові буфери (%u px кожен)", w);
+    free(prevRow);
+    free(curRow);
+    free(nextRow);
+    return false;
+  }
+
+  for (uint16_t x = 0; x < w; x++) {
+    curRow[x] = getPixel(image, x);            // рядок y=0
+    nextRow[x] = getPixel(image, (size_t)w + x);  // рядок y=1
+    prevRow[x] = curRow[x];                     // clamp-to-edge для верхньої межі
+  }
+
+  for (uint16_t y = 0; y < h; y++) {
+    for (uint16_t x = 0; x < w; x++) {
+      int xi = x;
+      float gx = -lumaAtClamped(prevRow, xi - 1, w) + lumaAtClamped(prevRow, xi + 1, w) -
+                 2.0f * lumaAtClamped(curRow, xi - 1, w) + 2.0f * lumaAtClamped(curRow, xi + 1, w) -
+                 lumaAtClamped(nextRow, xi - 1, w) + lumaAtClamped(nextRow, xi + 1, w);
+      float gy = -lumaAtClamped(prevRow, xi - 1, w) - 2.0f * lumaAtClamped(prevRow, xi, w) -
+                 lumaAtClamped(prevRow, xi + 1, w) + lumaAtClamped(nextRow, xi - 1, w) +
+                 2.0f * lumaAtClamped(nextRow, xi, w) + lumaAtClamped(nextRow, xi + 1, w);
+
+      float mag = sqrtf(gx * gx + gy * gy);
+      if (mag > 1.0f) mag = 1.0f;
+      setPixel(image, (size_t)y * w + x, Pixel{mag, mag, mag});
+    }
+
+    // Зсув вікна на рядок вниз: те, що щойно записали в image (рядок y), більше не
+    // читаємо - наступному кроку потрібні лише вже кешовані prev/cur/next.
+    Pixel *tmp = prevRow;
+    prevRow = curRow;
+    curRow = nextRow;
+    nextRow = tmp;
+
+    uint16_t nextY = ((uint16_t)(y + 2) < h) ? (uint16_t)(y + 2) : (h - 1);
+    for (uint16_t x = 0; x < w; x++) {
+      nextRow[x] = getPixel(image, (size_t)nextY * w + x);
+    }
+  }
+
+  free(prevRow);
+  free(curRow);
+  free(nextRow);
+  return true;
+}
+
+bool ImageEffects::applyEmboss(JpegImage &image, float strength) {
+  if (image.colorDepth() == JpegColorDepth::MONO1) {
+    _logger.warn("emboss: MONO1 не підтримується");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+
+  uint16_t w = image.width();
+  uint16_t h = image.height();
+  if (w < 3 || h < 3) {
+    _logger.warn("emboss: потрібно щонайменше 3x3 пікселі");
+    return false;
+  }
+
+  Pixel *prevRow = (Pixel *)malloc(w * sizeof(Pixel));
+  Pixel *curRow = (Pixel *)malloc(w * sizeof(Pixel));
+  Pixel *nextRow = (Pixel *)malloc(w * sizeof(Pixel));
+  if (prevRow == nullptr || curRow == nullptr || nextRow == nullptr) {
+    _logger.error("emboss: не вистачило пам'яті на 3 рядкові буфери (%u px кожен)", w);
+    free(prevRow);
+    free(curRow);
+    free(nextRow);
+    return false;
+  }
+
+  for (uint16_t x = 0; x < w; x++) {
+    curRow[x] = getPixel(image, x);
+    nextRow[x] = getPixel(image, (size_t)w + x);
+    prevRow[x] = curRow[x];
+  }
+
+  // Класична emboss-матриця, масштабована на strength:
+  //   [-2 -1  0]
+  //   [-1  1  1]
+  //   [ 0  1  2]
+  for (uint16_t y = 0; y < h; y++) {
+    for (uint16_t x = 0; x < w; x++) {
+      int xi = x;
+      float conv = strength * (-2.0f * lumaAtClamped(prevRow, xi - 1, w) -
+                                1.0f * lumaAtClamped(prevRow, xi, w) +
+                                0.0f * lumaAtClamped(prevRow, xi + 1, w) -
+                                1.0f * lumaAtClamped(curRow, xi - 1, w) +
+                                1.0f * lumaAtClamped(curRow, xi + 1, w) +
+                                0.0f * lumaAtClamped(nextRow, xi - 1, w) +
+                                1.0f * lumaAtClamped(nextRow, xi, w) +
+                                2.0f * lumaAtClamped(nextRow, xi + 1, w));
+      float val = conv + 0.5f;
+      if (val < 0.0f) val = 0.0f;
+      if (val > 1.0f) val = 1.0f;
+      setPixel(image, (size_t)y * w + x, Pixel{val, val, val});
+    }
+
+    Pixel *tmp = prevRow;
+    prevRow = curRow;
+    curRow = nextRow;
+    nextRow = tmp;
+
+    uint16_t nextY = ((uint16_t)(y + 2) < h) ? (uint16_t)(y + 2) : (h - 1);
+    for (uint16_t x = 0; x < w; x++) {
+      nextRow[x] = getPixel(image, (size_t)nextY * w + x);
+    }
+  }
+
+  free(prevRow);
+  free(curRow);
+  free(nextRow);
   return true;
 }

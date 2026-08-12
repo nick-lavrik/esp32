@@ -913,6 +913,300 @@ void setupSerialCommander() {
 
 #if defined(LITTLEFS_BACKGROUND_IMAGE)
   commandHandler.registerCommand(
+      "lighten", "lighten background image: lighten <factor 0.0-1.0>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: lighten <factor 0.0-1.0>");
+          return;
+        }
+
+        float factor = args.toFloat();
+
+        bool ok = ImageEffects::applyLighten(spaceImage, factor);
+        Logger::info(ok ? "lighten applied: factor=%f" : "lighten failed (image not loaded?)",
+                     factor);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "invert", "invert background image colors, no args",
+      [](const String& args) {
+        bool ok = ImageEffects::applyInvert(spaceImage);
+        Logger::info(ok ? "invert applied" : "invert failed (image not loaded?)");
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "threshold", "threshold background image: threshold <level 0.0-1.0, default 0.5>",
+      [](const String& args) {
+        float threshold = (args.length() == 0) ? 0.5f : args.toFloat();
+
+        bool ok = ImageEffects::applyThreshold(spaceImage, threshold);
+        Logger::info(ok ? "threshold applied: level=%f" : "threshold failed (image not loaded?)",
+                     threshold);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "hue", "rotate hue of background image: hue <angle degrees 0-360>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: hue <angle degrees 0-360>");
+          return;
+        }
+
+        float degrees = args.toFloat();
+        float radians = degrees * (float)M_PI / 180.0f;
+
+        bool ok = ImageEffects::applyHueRotate(spaceImage, radians);
+        Logger::info(ok ? "hue applied: degrees=%f" : "hue failed (image not loaded?)", degrees);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "thermal", "thermal-camera effect on background image, no args",
+      [](const String& args) {
+        bool ok = ImageEffects::applyThermal(spaceImage);
+        Logger::info(ok ? "thermal applied" : "thermal failed (image not loaded?)");
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "gamma", "gamma-correct background image: gamma <value, e.g. 1.4>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: gamma <value, e.g. 1.4>");
+          return;
+        }
+
+        float gamma = args.toFloat();
+        if (gamma <= 0.0f) {
+          Logger::info("gamma must be > 0.0");
+          return;
+        }
+
+        bool ok = ImageEffects::applyGamma(spaceImage, gamma);
+        Logger::info(ok ? "gamma applied: value=%f" : "gamma failed (image not loaded?)", gamma);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "posterize", "posterize background image: posterize <levels, >=2>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: posterize <levels, >=2>");
+          return;
+        }
+
+        int levels = args.toInt();
+        if (levels < 2) {
+          Logger::info("levels must be >= 2");
+          return;
+        }
+
+        bool ok = ImageEffects::applyPosterize(spaceImage, levels);
+        Logger::info(ok ? "posterize applied: levels=%d" : "posterize failed (image not loaded?)",
+                     levels);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "solarize", "solarize background image: solarize <threshold 0.0-1.0, default 0.5>",
+      [](const String& args) {
+        float threshold = (args.length() == 0) ? 0.5f : args.toFloat();
+
+        bool ok = ImageEffects::applySolarize(spaceImage, threshold);
+        Logger::info(ok ? "solarize applied: threshold=%f" : "solarize failed (image not loaded?)",
+                     threshold);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "duotone", "duotone background image: duotone <dark RRGGBB> <light RRGGBB>",
+      [](const String& args) {
+        int spaceIdx = args.indexOf(' ');
+        if (spaceIdx < 0) {
+          Logger::info("use: duotone <dark RRGGBB> <light RRGGBB>");
+          return;
+        }
+
+        String darkHex = args.substring(0, spaceIdx);
+        String lightHex = args.substring(spaceIdx + 1);
+        lightHex.trim();
+
+        if (darkHex.length() != 6 || lightHex.length() != 6) {
+          Logger::info("both colors must be 6 hex chars, e.g. duotone 1a0033 ffcc88");
+          return;
+        }
+
+        Pixel dark = Pixel::unpack((uint32_t)strtoul(darkHex.c_str(), nullptr, 16));
+        Pixel light = Pixel::unpack((uint32_t)strtoul(lightHex.c_str(), nullptr, 16));
+
+        bool ok = ImageEffects::applyDuotone(spaceImage, dark, light);
+        Logger::info(ok ? "duotone applied: dark=%s light=%s"
+                        : "duotone failed (image not loaded?)",
+                     darkHex.c_str(), lightHex.c_str());
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "balance", "color-balance background image: balance <rMul> <gMul> <bMul>",
+      [](const String& args) {
+        String rest = args;
+        rest.trim();
+        int i1 = rest.indexOf(' ');
+        if (i1 < 0) {
+          Logger::info("use: balance <rMul> <gMul> <bMul>");
+          return;
+        }
+        String tok1 = rest.substring(0, i1);
+        rest = rest.substring(i1 + 1);
+        rest.trim();
+        int i2 = rest.indexOf(' ');
+        if (i2 < 0) {
+          Logger::info("use: balance <rMul> <gMul> <bMul>");
+          return;
+        }
+        String tok2 = rest.substring(0, i2);
+        String tok3 = rest.substring(i2 + 1);
+
+        float rMul = tok1.toFloat();
+        float gMul = tok2.toFloat();
+        float bMul = tok3.toFloat();
+
+        bool ok = ImageEffects::applyColorBalance(spaceImage, rMul, gMul, bMul);
+        Logger::info(ok ? "balance applied: r=%f g=%f b=%f" : "balance failed (image not loaded?)",
+                     rMul, gMul, bMul);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "noise", "add grain noise to background image: noise <amount 0.0-1.0>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: noise <amount 0.0-1.0>");
+          return;
+        }
+
+        float amount = args.toFloat();
+
+        bool ok = ImageEffects::applyNoise(spaceImage, amount);
+        Logger::info(ok ? "noise applied: amount=%f" : "noise failed (image not loaded?)", amount);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "vignette", "vignette background image: vignette <strength 0.0-1.0>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: vignette <strength 0.0-1.0>");
+          return;
+        }
+
+        float strength = args.toFloat();
+
+        bool ok = ImageEffects::applyVignette(spaceImage, strength);
+        Logger::info(ok ? "vignette applied: strength=%f" : "vignette failed (image not loaded?)",
+                     strength);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "pixelate", "pixelate background image: pixelate <blockSize, >=2>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: pixelate <blockSize, >=2>");
+          return;
+        }
+
+        int blockSize = args.toInt();
+        if (blockSize < 2 || blockSize > 255) {
+          Logger::info("blockSize must be 2-255");
+          return;
+        }
+
+        bool ok = ImageEffects::applyPixelate(spaceImage, (uint8_t)blockSize);
+        Logger::info(ok ? "pixelate applied: blockSize=%d" : "pixelate failed (image not loaded?)",
+                     blockSize);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "scanlines", "scanlines on background image: scanlines <darkenFactor 0.0-1.0>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: scanlines <darkenFactor 0.0-1.0>");
+          return;
+        }
+
+        float darkenFactor = args.toFloat();
+
+        bool ok = ImageEffects::applyScanlines(spaceImage, darkenFactor);
+        Logger::info(ok ? "scanlines applied: darkenFactor=%f"
+                        : "scanlines failed (image not loaded?)",
+                     darkenFactor);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "chromatic", "chromatic aberration on background image: chromatic <offsetPx, >=1>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: chromatic <offsetPx, >=1>");
+          return;
+        }
+
+        int offsetPx = args.toInt();
+        if (offsetPx < 1 || offsetPx > 255) {
+          Logger::info("offsetPx must be 1-255");
+          return;
+        }
+
+        bool ok = ImageEffects::applyChromaticAberration(spaceImage, (uint8_t)offsetPx);
+        Logger::info(ok ? "chromatic applied: offsetPx=%d"
+                        : "chromatic failed (image not loaded?)",
+                     offsetPx);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "sobel", "edge detection (Sobel) on background image, no args",
+      [](const String& args) {
+        bool ok = ImageEffects::applySobelEdges(spaceImage);
+        Logger::info(ok ? "sobel applied" : "sobel failed (image not loaded, or smaller than 3x3?)");
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "emboss", "emboss background image: emboss [strength, default 1.0]",
+      [](const String& args) {
+        float strength = (args.length() == 0) ? 1.0f : args.toFloat();
+
+        bool ok = ImageEffects::applyEmboss(spaceImage, strength);
+        Logger::info(ok ? "emboss applied: strength=%f"
+                        : "emboss failed (image not loaded, or smaller than 3x3?)",
+                     strength);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
       "dither", "ordered dithering (Bayer 8x8) on background image, no args",
       [](const String& args) {
         bool ok = false;

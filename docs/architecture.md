@@ -130,6 +130,19 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-08-12 (3) — усі спецефекти (існуючі й нові) підключено до `SerialCommander` під
+  `#if defined(LITTLEFS_BACKGROUND_IMAGE)`: `lighten`, `invert`, `threshold`, `hue`,
+  `thermal`, `gamma`, `posterize`, `solarize`, `duotone`, `balance`, `noise`, `vignette`,
+  `pixelate`, `scanlines`, `chromatic`, `sobel`, `emboss` (доповнюють вже наявні
+  `blur`/`tint`/`contrast`/`sepia`/`desaturate`/`darken`/`dither`/`background`). Повний
+  список команд і параметрів — таблиця в `docs/image_effects.md`.
+- 2026-08-12 (2) — додано 12 нових ефектів: пер-піксельні `fxGamma`, `fxPosterize`,
+  `fxSolarize`, `fxDuotone`, `fxColorBalance` (`Pixel.hpp`) та буфер-вайд `applyVignette`,
+  `applyPixelate`, `applyScanlines`, `applyChromaticAberration`, `applySobelEdges`,
+  `applyEmboss`, `applyNoise` (`ImageEffects`). `applySobelEdges`/`applyEmboss` використовують
+  спільну 3-рядкову (prev/cur/next) техніку згортки 3x3 без буфера на весь кадр.
+  Повний довідник усіх ефектів (існуючих і нових) з параметрами та прикладами —
+  `docs/image_effects.md`.
 - 2026-08-12 — `ImageEffects::applyDithering` (тільки RGB332) розбито на три окремі методи
   за глибиною кольору: `applyDitheringRGB332`, `applyDitheringRGB565`, `applyDitheringRGB888`.
   Кожен перевіряє `colorDepth()` під свою назву й повертає `false` при невідповідності.

@@ -132,6 +132,57 @@ struct Pixel {
     return *this;
   }
 
+  // gamma: 1.0f = без змін, >1.0f - світліше в напівтонах, <1.0f - темніше
+  Pixel &fxGamma(float gamma) {
+    float invGamma = 1.0f / gamma;
+    r = powf(clampf(r), invGamma);
+    g = powf(clampf(g), invGamma);
+    b = powf(clampf(b), invGamma);
+    return *this;
+  }
+
+  // levels: кількість рівнів на канал (>=2). 2 = чистий Ч/Б по кожному каналу,
+  // 4-8 - плаский "постер"-вигляд. Банди, які лишає posterize, добре маскуються
+  // подальшим applyDitheringRGB* (ImageEffects)
+  Pixel &fxPosterize(int levels) {
+    if (levels < 2) {
+      return *this;
+    }
+    float steps = (float)(levels - 1);
+    r = roundf(clampf(r) * steps) / steps;
+    g = roundf(clampf(g) * steps) / steps;
+    b = roundf(clampf(b) * steps) / steps;
+    return *this;
+  }
+
+  // threshold: 0.0-1.0. Кожен канал вище порогу інвертується окремо (класичний
+  // фотографічний solarize - на відміну від fxThreshold, лишає кольори, не Ч/Б)
+  Pixel &fxSolarize(float threshold) {
+    if (r > threshold) r = 1.0f - r;
+    if (g > threshold) g = 1.0f - g;
+    if (b > threshold) b = 1.0f - b;
+    return *this;
+  }
+
+  // Дуотон: інтерполяція між dark і light за яскравістю пікселя.
+  // fxSepia - окремий випадок duotone з фіксованою теплою парою кольорів.
+  Pixel &fxDuotone(const Pixel &dark, const Pixel &light) {
+    float luma = lumaRec709();
+    r = dark.r + (light.r - dark.r) * luma;
+    g = dark.g + (light.g - dark.g) * luma;
+    b = dark.b + (light.b - dark.b) * luma;
+    return *this;
+  }
+
+  // Незалежне множення каналів - теплий/холодний баланс без зміни яскравості/контрасту.
+  // rMul/gMul/bMul: 1.0f = без змін, приклад для теплішого відтінку: (1.1f, 1.0f, 0.9f)
+  Pixel &fxColorBalance(float rMul, float gMul, float bMul) {
+    r *= rMul;
+    g *= gMul;
+    b *= bMul;
+    return *this;
+  }
+
   // angle: радіани (0 .. 2*PI) - обертання Hue навколо осі яскравості
   Pixel &fxHueRotate(float angle) {
     float cosA = cosf(angle);
