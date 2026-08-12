@@ -6,15 +6,19 @@
 #include "Display.h"
 
 #if BACKGROUND_IMAGES_COUNT >= 1
-#include "../assets/space-01.h"
+#include "../assets/background-01-320x240.h"
 #endif
 
 #if BACKGROUND_IMAGES_COUNT >= 2
-#include "../assets/space-02.h"
+#include "../assets/background-02-320x240.h"
 #endif
 
 #if BACKGROUND_IMAGES_COUNT >= 3
-#include "../assets/space-03.h"
+#include "../assets/background-03-320x240.h"
+#endif
+
+#if BACKGROUND_IMAGES_COUNT >= 4
+#include "../assets/background-04-320x240.h"
 #endif
 
 static JpegImage* _activeInstance = nullptr;
@@ -23,13 +27,16 @@ void setBackgroundImage(JpegImage& image) { _activeInstance = &image; }
 
 const uint16_t* const backgroundImages[BACKGROUND_IMAGES_COUNT] PROGMEM = {
 #if BACKGROUND_IMAGES_COUNT >= 1
-    backgroundSpace01,
+    background_01,
 #endif
 #if BACKGROUND_IMAGES_COUNT >= 2
-    backgroundSpace02,
+    background_02,
 #endif
 #if BACKGROUND_IMAGES_COUNT >= 3
-    backgroundSpace03,
+    background_03,
+#endif
+#if BACKGROUND_IMAGES_COUNT >= 4
+    background_04,
 #endif
 };
 
