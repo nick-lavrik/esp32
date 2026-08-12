@@ -45,9 +45,11 @@ class ImageEffects {
   static bool applyThreshold(JpegImage &image, float threshold = 0.5f);
 
   // Впорядкований дизеринг (матриця Байєра 8x8) - прибирає смуги градієнта.
-  // Має сенс лише для RGB332 (низька розрядність каналів); для інших глибин
-  // повертає false.
-  static bool applyDithering(JpegImage &image);
+  // Кожен метод перевіряє, що `image.colorDepth()` відповідає його назві, і
+  // повертає false інакше (не перепаковує піксель у "чужу" розрядність).
+  static bool applyDitheringRGB332(JpegImage &image);
+  static bool applyDitheringRGB565(JpegImage &image);
+  static bool applyDitheringRGB888(JpegImage &image);
 
   // Box blur у 2 проходи (горизонтальний + вертикальний), з тимчасовим буфером
   // лише в один рядок/стовпець (не на весь кадр).
@@ -57,6 +59,11 @@ class ImageEffects {
  private:
   static Pixel getPixel(const JpegImage &image, size_t index);
   static void setPixel(JpegImage &image, size_t index, const Pixel &p);
+
+  // Спільний прохід ordered-дизерингу: додає Bayer-шум заданої амплітуди (`spread`,
+  // масштаб під квантування конкретної глибини кольору) перед запаковкою пікселя назад.
+  // Викликач (applyDitheringRGB*) відповідає за перевірку colorDepth()/isLoaded().
+  static void applyOrderedDither(JpegImage &image, float spread);
 
   template <typename Fn>
   static bool applyPerPixel(JpegImage &image, Fn &&fn) {

@@ -1210,19 +1210,22 @@ void drawTime() {
   // display.setTextFont(4); display.setTextSize(1); // середній / так собі
   // display.setTextFont(2); display.setTextSize(2); // середній / не красиво взагалі
   display.setTextFont(1);  display.setTextSize(2); //  pretty nice
-  display.setTextColor(TFT_CYAN);
+  // display.setTextColor(TFT_CYAN);
+  // display.setTextColor(TFT_MAGENTA);
+  display.setTextColor(TFT_DARKGREY);
 
   // display.getTextBounds(timeStr, 0, 0, &x1, &y1, &textW, &textH);
   textW = display.textWidth(timeStr);
-  display.setCursor(display.width() - 16 - textW, y);
+  display.setCursor(display.width() - 10 - textW, y);
   display.print(timeStr);
   y += display.fontHeight();
 
   display.setTextFont(2);
   display.setTextSize(1);
-  display.setTextColor(TFT_ORANGE);
+  // display.setTextColor(TFT_ORANGE);
   ntp.ftime("%d.%m.%Y", timeStr, sizeof(timeStr));
-  display.setCursor(display.width() - 16 - textW + (textW - display.textWidth(timeStr)) / 1, y);
+  // display.setCursor(display.width() - 10 - textW + (textW - display.textWidth(timeStr)) / 2, y);
+  display.setCursor(display.width() - 10 - display.textWidth(timeStr), y);
   display.print(timeStr);
 
   display.setTextFont(1);
@@ -1335,6 +1338,10 @@ void setupWiFiIcon() {
   #if defined(BOARD_ESP8266)
     const int p[2] = {display.width() - 16, display.height() - 16};
   #elif defined(BOARD_ESP32_S3_LCD147)
+    const int p[2] = {display.width() - 16, display.height() - 16};
+  #elif defined(BOARD_4848S040)
+    const int p[2] = {display.width() - 16, display.height() - 16};
+  #elif defined(BOARD_ST7789)
     const int p[2] = {display.width() - 16, display.height() - 16};
   #else
     const int p[2] = {display.width() - 16, 0};

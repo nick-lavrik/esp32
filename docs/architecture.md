@@ -130,6 +130,13 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-08-12 — `ImageEffects::applyDithering` (тільки RGB332) розбито на три окремі методи
+  за глибиною кольору: `applyDitheringRGB332`, `applyDitheringRGB565`, `applyDitheringRGB888`.
+  Кожен перевіряє `colorDepth()` під свою назву й повертає `false` при невідповідності.
+  Спільний прохід (Bayer 8x8) винесено в приватний `applyOrderedDither(image, spread)`,
+  амплітуда шуму підібрана під квантування конкретної глибини (RGB332: 0.14, RGB565: 0.03,
+  RGB888: 0.004 - на RGB888 ефект практично непомітний, бо квантування вже немає, метод
+  існує заради єдиного інтерфейсу команд для всіх плат).
 - 2026-08-11 — додано `lib/JpegImage/Pixel.hpp` (struct-based value-type для пер-піксельних
   RGB332/RGB565/RGB888 обчислень, уніфіковані `unpack`/`pack<T>()` за типом аргументу,
   ланцюжок `fx*`-методів) та `lib/JpegImage/ImageEffects.{hpp,cpp}` (клас над `JpegImage`:

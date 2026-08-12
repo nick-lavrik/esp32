@@ -90,16 +90,7 @@ bool ImageEffects::applyThreshold(JpegImage &image, float threshold) {
   return applyPerPixel(image, [&](Pixel &p) { p.fxThreshold(threshold); });
 }
 
-bool ImageEffects::applyDithering(JpegImage &image) {
-  if (image.colorDepth() != JpegColorDepth::RGB332) {
-    _logger.warn("dithering: підтримується лише RGB332");
-    return false;
-  }
-  if (!image.isLoaded()) {
-    return false;
-  }
-
-  const float spread = 0.14f;  // інтенсивність шуму під 3-бітну сітку каналів
+void ImageEffects::applyOrderedDither(JpegImage &image, float spread) {
   uint16_t w = image.width();
   uint16_t h = image.height();
 
@@ -114,6 +105,49 @@ bool ImageEffects::applyDithering(JpegImage &image) {
       setPixel(image, idx, p);
     }
   }
+}
+
+bool ImageEffects::applyDitheringRGB332(JpegImage &image) {
+  if (image.colorDepth() != JpegColorDepth::RGB332) {
+    _logger.warn("ditheringRGB332: зображення не в RGB332");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+  // 3-бітні R/G (крок 1/7) і 2-бітний B (крок 1/3) - беремо спред під R/G,
+  // саме вони найпомітніші для ока, B все одно "грубий" незалежно від дизерингу.
+  applyOrderedDither(image, 0.14f);
+  return true;
+}
+
+bool ImageEffects::applyDitheringRGB565(JpegImage &image) {
+  if (image.colorDepth() != JpegColorDepth::RGB565) {
+    _logger.warn("ditheringRGB565: зображення не в RGB565");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+  // 5-бітні R/B (крок 1/31 = 0.032) і 6-бітний G (крок 1/63 = 0.016) - спред
+  // між ними, ближче до R/B (вони "грубіші" й банди на них помітніші).
+  applyOrderedDither(image, 0.03f);
+  return true;
+}
+
+bool ImageEffects::applyDitheringRGB888(JpegImage &image) {
+  if (image.colorDepth() != JpegColorDepth::RGB888) {
+    _logger.warn("ditheringRGB888: зображення не в RGB888");
+    return false;
+  }
+  if (!image.isLoaded()) {
+    return false;
+  }
+  // 8-бітний крок (1/255 = 0.0039) - оку майже непомітний. Метод існує заради
+  // єдиного інтерфейсу команд для всіх плат; візуального ефекту на RGB888
+  // практично не буде (тут немає подальшого квантування, яке дизеринг мав би
+  // "розмити").
+  applyOrderedDither(image, 0.004f);
   return true;
 }
 
