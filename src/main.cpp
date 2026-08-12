@@ -845,6 +845,23 @@ void setupSerialCommander() {
 
 #if defined(LITTLEFS_BACKGROUND_IMAGE)
   commandHandler.registerCommand(
+      "contrast", "contrast background image: contrast <factor 0.0-1.0>",
+      [](const String& args) {
+        if (args.length() == 0) {
+          Logger::info("use: contrast <factor 0.0-1.0>");
+          return;
+        }
+
+        float factor = args.toFloat();
+
+        bool ok = ImageEffects::applyContrast(spaceImage, factor);
+        Logger::info(ok ? "contrast applied: factor=%f" : "contrast failed (image not loaded?)",
+                     factor);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
       "sepia", "sepia background image: sepia <amount 0.0-1.0>",
       [](const String& args) {
         if (args.length() == 0) {
@@ -891,6 +908,29 @@ void setupSerialCommander() {
         bool ok = ImageEffects::applyDarken(spaceImage, factor);
         Logger::info(ok ? "darken applied: factor=%f" : "darken failed (image not loaded?)",
                      factor);
+      });
+#endif
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  commandHandler.registerCommand(
+      "dither", "ordered dithering (Bayer 8x8) on background image, no args",
+      [](const String& args) {
+        bool ok = false;
+        switch (spaceImage.colorDepth()) {
+          case JpegColorDepth::RGB332:
+            ok = ImageEffects::applyDitheringRGB332(spaceImage);
+            break;
+          case JpegColorDepth::RGB565:
+            ok = ImageEffects::applyDitheringRGB565(spaceImage);
+            break;
+          case JpegColorDepth::RGB888:
+            ok = ImageEffects::applyDitheringRGB888(spaceImage);
+            break;
+          default:
+            Logger::info("dither: unsupported color depth (MONO1?)");
+            return;
+        }
+        Logger::info(ok ? "dither applied" : "dither failed (image not loaded?)");
       });
 #endif
 
