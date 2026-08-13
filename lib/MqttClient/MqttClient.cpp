@@ -47,6 +47,7 @@ void MqttClient::begin() {
     _mqttClient.setClient(_plainClient);
   }
 
+  _mqttClient.setSocketTimeout(2);
   _mqttClient.setServer(_config.host, _config.port);
   _mqttClient.setBufferSize(_config.bufferSize);
   _mqttClient.setCallback(MqttClient::staticCallback);

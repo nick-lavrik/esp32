@@ -18,6 +18,14 @@ void Display::init() {
   tft_.init();
   tft_.setRotation(TFT_ROTATION);
 
+  // Регістр 0x36 керує відображенням. 
+  // Біти MX (6-й) та MY (7-й) відповідають за дзеркальність по X та Y.
+  // tft_.writeCommand(0x36); 
+  // tft_.writeData(0); // Стандарт
+  // gfx->writeData(0x40); // Дзеркало по горизонталі (MX=1)
+  // gfx->writeData(0x80); // Дзеркало по вертикалі (MY=1)
+  // gfx->writeData(0xC0); // Обидва (MX=1, MY=1)
+
   width_ = tft_.width();
   height_ = tft_.height();
 
@@ -26,7 +34,7 @@ void Display::init() {
 #endif
 
   sprite().setSwapBytes(true);
-  tft_.setSwapBytes(true);
+  // tft_.setSwapBytes(true);
   flush();  // одразу показуємо чорний кадр, щоб не лишався сміттєвий вміст VRAM
 }
 
