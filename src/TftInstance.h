@@ -12,6 +12,8 @@
 #include "Setup_ST7701_4848S040.h"  // визначає клас LGFX + alias TFT_eSPI
 #elif defined(BOARD_ESP8266)
 #include "Setup_SSD1306_NodeMCU.h"  // TFT_eSPI/TFT_eSprite-сумісна обгортка над Adafruit_SSD1306
+#elif defined(BOARD_ESP32_C6)
+#include "Setup_JD9853_C6.h"  // TFT_eSPI/TFT_eSprite-сумісна обгортка над Arduino_GFX (JD9853)
 #else
 #include <TFT_eSPI.h>  // справжній bodmer/TFT_eSPI (ST7789, SPI)
 #endif

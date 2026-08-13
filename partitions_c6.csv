@@ -1,0 +1,31 @@
+# Кастомна partition-таблиця для esp32-c6 (без OTA)
+#
+# Flash: 8 MB (0x800000), board_upload.flash_size вже виставлено в platformio.ini.
+#
+# OTA не використовується — один app-розділ замість двох (ota_0/ota_1).
+#
+# ВАЖЛИВО: app-розділ навмисно розташований на стандартній адресі 0x10000,
+# бо PlatformIO (platform-espressif32) у поточній версії ігнорує
+# board_upload.offset_address і завжди пише firmware.bin саме на 0x10000.
+#
+# app-розділ 2Mb — з запасом під Arduino_GFX + мережевий стек (WiFi/MQTT/
+# HTTP-сервер), без PSRAM тому й без LovyanGFX/великих буферів.
+#
+# Розділ під LittleFS названо (і типізовано) як 'spiffs' — стандартна
+# назва за замовчуванням для LittleFS.begin() без додаткових параметрів.
+#
+# Розділ 'coredump' потрібен esp_core_dump (Arduino-ESP32), щоб зберігати
+# дамп пам'яті після краху для подальшого аналізу через espcoredump.py.
+# Без нього застосунок працює нормально, лише пише попередження при бут.
+#
+# app      - 0x200000 - 2Mb
+# nvs      - 0x0F0000 - 960Kb  (з запасом під ConfigStorage)
+# coredump - 0x010000 - 64Kb
+# littlefs - 0x4F0000 - ~5.06Mb (BackgroundImages/JPEG, статика HTTP-сервера)
+#
+# Name,      Type,  SubType,   Offset,    Size,      Flags
+phy_init,    data,  phy,       0x009000,  0x001000,
+app,         app,   factory,   0x010000,  0x200000,
+coredump,    data,  coredump,  0x210000,  0x010000,
+nvs,         data,  nvs,       0x220000,  0x0F0000,
+spiffs,      data,  spiffs,    0x310000,  0x4F0000,

@@ -23,6 +23,7 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 | `esp32-s3-lcd147` | **ESP32-S3**, Waveshare ESP32-S3-LCD-1.47 | 172×320, RGB565, ST7789, TFT_eSPI@^2.5.43 | без touch, SD_MMC, PSRAM, 320KB RAM, 16MB Flash |
 | `esp32-st7789` | **ESP32**, ESP32 Dev Module + ST7789 SPI | 240×320, RGB565, ST7789, TFT_eSPI@^2.5.43 | touch (XPT2046), SD, light sensor, 320KB RAM, 4MB Flash |
 | `ttgo-t1` | **ESP32**, LilyGO T-Display | 135×240, RGB565, ST7789, TFT_eSPI@^2.5.43 | без SD, без touch, 320KB RAM, 16MB Flash |
+| `esp32-c6` | **ESP32-C6** (RISC-V), Waveshare ESP32-C6-LCD-1.47 | 172×320, RGB565, JD9853 (ST7789-сумісний), `moononournation/Arduino_GFX@^1.6.0` | SD (SPI, шина спільна з дисплеєм: SCK=1/MOSI=2, окремі MISO=3/CS=4), БЕЗ PSRAM, 320KB RAM, 8MB Flash, без touch/IMU (заплановано: AXS5106L touch, QMI8658A IMU) |
 | `esp8266` | **ESP8266**, NodeMCU ESP8266 + SSD1306 OLED | 128×64, монохром (1bit), SSD1306, Adafruit SSD1306@^2.5.13 | без SD/touch, 80KB RAM, 4MB Flash |
 
 Усі environments — `framework = arduino`, `-std=gnu++17`. ESP-IDF v5.5.4 / Arduino Core 3.3.9
@@ -159,6 +160,18 @@ ColumnLimit: 120
   vs трансформація буфера; `SerialCommander` залежить лише від `ImageEffects`, не тягне
   JPEG-специфіку). Додано serial-команду `blur <radius> [passes]` над `spaceImage`
   (лише під `#if defined(LITTLEFS_BACKGROUND_IMAGE)`).
+- 2026-08-13 — додано плату `esp32-c6` (Waveshare ESP32-C6-LCD-1.47, JD9853 172×320,
+  RISC-V, без PSRAM). Дисплей JD9853 не підтримується LovyanGFX/TFT_eSPI (вже в проєкті) —
+  командно сумісний з ST7789, тому підключено `moononournation/Arduino_GFX` як третю
+  графічну бібліотеку лише для цієї плати, обгорнуту в TFT_eSPI/TFT_eSprite-сумісний
+  фасад `include/Setup_ArduinoGFX_C6.h` (той самий підхід, що й `Setup_SSD1306_NodeMCU.h`
+  для esp8266) — `src/Display.h`/`.cpp` лишились без змін. "Спрайт" — обгортка над
+  `Arduino_Canvas`, `pushSprite()` реалізовано через `draw16bitRGBBitmap()` напряму
+  в tft_ (Arduino_Canvas не підтримує рантайм-зсув output x/y, потрібний для
+  `DISPLAY_SPLIT_COUNT`). Перший коміт: дисплей + WiFi/NTP/MQTT/SD/serial, без touch
+  (AXS5106L) і IMU (QMI8658A) — окрема задача. Партиції: `partitions_c6.csv` (8MB,
+  без OTA). Піни, TFT_ROTATION, offset'и JD9853 і DISPLAY_SPLIT_COUNT потребують
+  валідації на реальному пристрої.
 - 2026-08-09 — таблиця плат: додано колонку платформи (ESP32/ESP32-S3/ESP8266) в
   "Плата", деталізовано "Дисплей" (width×height, color depth, controller, driver@version),
   додано рядок `esp32-s3-lcd147`.
