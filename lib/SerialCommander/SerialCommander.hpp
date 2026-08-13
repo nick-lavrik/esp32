@@ -24,6 +24,9 @@ public:
   // Викликати щоразу в loop(). Неблокуючий.
   void update();
 
+  // виконати команду 
+  void execute(const char* line);
+
   // Максимальна довжина буфера рядка
   // (захист від переповнення, якщо хтось шле дані без термінатора).
   void setMaxLineLength(size_t maxLen) { maxLineLength_ = maxLen; }

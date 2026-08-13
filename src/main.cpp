@@ -355,6 +355,12 @@ void setupMqttClient() {
     _logger.info(">>> %s::%s", topic, payload);
   });
 
+  mqtt.addStringListener("command/" MQTT_CLIENT_ID, [](const char* topic, const char* payload) {
+    // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
+    _logger.warn("command %s", payload);
+    commandHandler.execute(payload);
+  });
+
   // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
   mqtt.addStringListener("devices/+/status", [](const char* topic, const char* payload) {
     char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
@@ -387,18 +393,42 @@ void setupMqttClient() {
   });
 
   commandHandler.registerCommand(
-      "mqtt-prefix", "get/set MQTT topic prefix (eg. dev/prod/qa/eu-west1): mqtt-prefix [prefix]",
-      [](const String args) {
-        if (args.length() == 0) {
-          _logger.info("mqtt topic prefix = '%s'", mqtt.keyGenerator().prefix().c_str());
-          return;
-        }
-        configStorage.setString(CFG_MQTT_TOPIC_PREFIX, args);
-        _logger.info("saved '%s' -> reboot required to take effect (topics already "
-                     "subscribed with old prefix)",
-                     args.c_str());
-      });
+    "publish", "publish message in MQTT: publish <topic> <message>",
+    [](const String args) {
+      if (args.length() == 0) {
+        _logger.info("use: publish <topic> <payload>");
+        return;
+      }
 
+      int spaceIdx = args.indexOf(' ');
+      if (spaceIdx < 0) {
+        _logger.info("use: publish <topic> <payload>");
+        return;
+      }
+
+      String topic = args.substring(0, spaceIdx);
+      String message = args.substring(spaceIdx + 1);
+      message.trim();
+      bool ok = mqtt.publish(topic.c_str(), message.c_str());
+      _logger.info("publish (%s:%s) %s", topic.c_str(), message.c_str(), ok ? "success" : "fail");
+    }
+  );
+
+  commandHandler.registerCommand(
+    "mqtt-prefix", "get/set MQTT topic prefix (eg. dev/prod/qa/eu-west1): mqtt-prefix [prefix]",
+    [](const String args) {
+      if (args.length() == 0) {
+        _logger.info("mqtt topic prefix = '%s'", mqtt.keyGenerator().prefix().c_str());
+        return;
+      }
+      configStorage.setString(CFG_MQTT_TOPIC_PREFIX, args);
+      _logger.info("saved '%s' -> reboot required to take effect (topics already "
+                    "subscribed with old prefix)",
+                    args.c_str());
+    }
+  );
+
+  /*
   static uint32_t i = 0;
   mqtt.addNumberListener<uint32_t>(
     "int32/#",
@@ -407,8 +437,11 @@ void setupMqttClient() {
       _logger.info("%s %-45.45s int:%d", w, t, v); 
     });
 
-  scheduler.addCronTask(1 * 60 * 1000UL,
-                        []() { mqtt.publishNumber<uint32_t>("int32/" MQTT_CLIENT_ID, (uint32_t)++i); });
+  scheduler.addCronTask(
+    1 * 60 * 1000UL,
+    []() { mqtt.publishNumber<uint32_t>("int32/" MQTT_CLIENT_ID, (uint32_t)++i); }
+  );
+  */
 
   _logger.info("%s:%d (%s) lwt:%s", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID,
                mqtt.keyGenerator().key(MQTT_LWT_TOPIC).c_str());
@@ -784,7 +817,7 @@ void setupSerialCommander() {
     }
   });
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // blur <radius 1-8> [passes 1-3, default 1] 
   commandHandler.registerCommand(
       "blur", "blur background image: blur <radius 1-8> [passes 1-3, default 1]",
       [](const String& args) {
@@ -813,7 +846,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // tint background image: tint <RRGGBB hex> [alpha 0.0-1.0, default 0.5]
   commandHandler.registerCommand(
       "tint", "tint background image: tint <RRGGBB hex> [alpha 0.0-1.0, default 0.5]",
       [](const String& args) {
@@ -842,8 +875,7 @@ void setupSerialCommander() {
       });
 #endif
 
-
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // contrast background image: contrast <factor 0.0-1.0>
   commandHandler.registerCommand(
       "contrast", "contrast background image: contrast <factor 0.0-1.0>",
       [](const String& args) {
@@ -860,7 +892,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // sepia background image: sepia <amount 0.0-1.0>
   commandHandler.registerCommand(
       "sepia", "sepia background image: sepia <amount 0.0-1.0>",
       [](const String& args) {
@@ -877,9 +909,9 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // desaturate background image: desaturate <factor 0.0-1.0>
   commandHandler.registerCommand(
-      "desaturate", "blur background image: desaturate <factor 0.0-1.0>",
+      "desaturate", "desaturate background image: desaturate <factor 0.0-1.0>",
       [](const String& args) {
         if (args.length() == 0) {
           Logger::info("use: desaturate <factor 0.0-1.0>");
@@ -894,7 +926,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // darken background image: darken <factor 0.0-1.0>
   commandHandler.registerCommand(
       "darken", "darken background image: darken <factor 0.0-1.0>",
       [](const String& args) {
@@ -911,7 +943,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // lighten background image: lighten <factor 0.0-1.0>
   commandHandler.registerCommand(
       "lighten", "lighten background image: lighten <factor 0.0-1.0>",
       [](const String& args) {
@@ -928,7 +960,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // invert background image colors, no args
   commandHandler.registerCommand(
       "invert", "invert background image colors, no args",
       [](const String& args) {
@@ -937,7 +969,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // threshold background image: threshold <level 0.0-1.0, default 0.5>
   commandHandler.registerCommand(
       "threshold", "threshold background image: threshold <level 0.0-1.0, default 0.5>",
       [](const String& args) {
@@ -949,7 +981,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // rotate hue of background image: hue <angle degrees 0-360>
   commandHandler.registerCommand(
       "hue", "rotate hue of background image: hue <angle degrees 0-360>",
       [](const String& args) {
@@ -966,7 +998,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // thermal-camera effect on background image, no args
   commandHandler.registerCommand(
       "thermal", "thermal-camera effect on background image, no args",
       [](const String& args) {
@@ -975,7 +1007,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // gamma-correct background image: gamma <value, e.g. 1.4>
   commandHandler.registerCommand(
       "gamma", "gamma-correct background image: gamma <value, e.g. 1.4>",
       [](const String& args) {
@@ -995,7 +1027,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // posterize background image: posterize <levels, >=2>
   commandHandler.registerCommand(
       "posterize", "posterize background image: posterize <levels, >=2>",
       [](const String& args) {
@@ -1016,7 +1048,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // solarize background image: solarize <threshold 0.0-1.0, default 0.5>
   commandHandler.registerCommand(
       "solarize", "solarize background image: solarize <threshold 0.0-1.0, default 0.5>",
       [](const String& args) {
@@ -1028,7 +1060,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // duotone background image: duotone <dark RRGGBB> <light RRGGBB>
   commandHandler.registerCommand(
       "duotone", "duotone background image: duotone <dark RRGGBB> <light RRGGBB>",
       [](const String& args) {
@@ -1057,7 +1089,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // color-balance background image: balance <rMul> <gMul> <bMul>
   commandHandler.registerCommand(
       "balance", "color-balance background image: balance <rMul> <gMul> <bMul>",
       [](const String& args) {
@@ -1089,9 +1121,9 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // noise: add grain noise to background image: noise <amount 0.0-1.0>
   commandHandler.registerCommand(
-      "noise", "add grain noise to background image: noise <amount 0.0-1.0>",
+      "noise", "noise: add grain noise to background image: noise <amount 0.0-1.0>",
       [](const String& args) {
         if (args.length() == 0) {
           Logger::info("use: noise <amount 0.0-1.0>");
@@ -1105,7 +1137,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // vignette background image: vignette <strength 0.0-1.0>
   commandHandler.registerCommand(
       "vignette", "vignette background image: vignette <strength 0.0-1.0>",
       [](const String& args) {
@@ -1122,7 +1154,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // pixelate background image: pixelate <blockSize, >=2>
   commandHandler.registerCommand(
       "pixelate", "pixelate background image: pixelate <blockSize, >=2>",
       [](const String& args) {
@@ -1143,7 +1175,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // scanlines on background image: scanlines <darkenFactor 0.0-1.0>
   commandHandler.registerCommand(
       "scanlines", "scanlines on background image: scanlines <darkenFactor 0.0-1.0>",
       [](const String& args) {
@@ -1161,7 +1193,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // chromatic aberration on background image: chromatic <offsetPx, >=1>
   commandHandler.registerCommand(
       "chromatic", "chromatic aberration on background image: chromatic <offsetPx, >=1>",
       [](const String& args) {
@@ -1183,7 +1215,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // edge detection (Sobel) on background image, no args
   commandHandler.registerCommand(
       "sobel", "edge detection (Sobel) on background image, no args",
       [](const String& args) {
@@ -1192,7 +1224,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // emboss background image: emboss [strength, default 1.0]
   commandHandler.registerCommand(
       "emboss", "emboss background image: emboss [strength, default 1.0]",
       [](const String& args) {
@@ -1205,7 +1237,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // dither: ordered dithering (Bayer 8x8) on background image, no args
   commandHandler.registerCommand(
       "dither", "ordered dithering (Bayer 8x8) on background image, no args",
       [](const String& args) {
@@ -1228,7 +1260,7 @@ void setupSerialCommander() {
       });
 #endif
 
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(LITTLEFS_BACKGROUND_IMAGE) // background: load background image: background <LittleFS path>
   commandHandler.registerCommand(
       "background", "load background image: background <LittleFS path>",
       [](const String& args) {

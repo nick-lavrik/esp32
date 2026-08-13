@@ -43,6 +43,10 @@ void SerialCommander::update() {
   }
 }
 
+void SerialCommander::execute(const char* line) {
+  processLine(String{line});
+}
+
 void SerialCommander::processLine(const String& line) {
   String name, args;
   splitFirstToken(line, name, args);
