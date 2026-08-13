@@ -1568,7 +1568,7 @@ void drawTime() {
   // x = (TFT_WIDTH - textW) / 2;
   display.setCursor(TFT_WIDTH - textW, 0);
   display.print(timeStr);
-#elif BOARD_4848S040
+#elif BOARD_4848S040 || BOARD_ST7789
   int16_t x = 0, y = 8;
   uint16_t textW, textH;
   // display.setTextFont(7); display.setTextSize(1); // великий "цифровий" шрифт (тільки цифри та ":")
