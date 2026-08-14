@@ -1,5 +1,6 @@
 #pragma once
 
+#if USE_MQTT_CLIENT
 #include <Arduino.h>
 
 #include "AnalogSensor.hpp"
@@ -56,3 +57,4 @@ private:
   uint8_t _lastPublishedPercent = 0;
   bool _hasPublished = false;
 };
+#endif

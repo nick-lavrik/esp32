@@ -1,5 +1,7 @@
 #pragma once
 
+#if __has_include(<PubSubClient.>)
+#define HAS_MQTT_CLIENT 1
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFiClient.h>
@@ -185,3 +187,7 @@ private:
 
   static MqttClient* _instance;
 };
+
+#else
+#define HAS_MQTT_CLIENT 0
+#endif

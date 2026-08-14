@@ -1,6 +1,9 @@
+
+#if USE_MQTT_CLIENT
 #include "AnalogSensorMqttReporter.hpp"
 
 #include <ArduinoJson.h>
+
 
 AnalogSensorMqttReporter::AnalogSensorMqttReporter(AnalogSensor& sensor, MqttClient& mqttClient,
                                                    const char* topic, uint32_t intervalMs,
@@ -52,3 +55,4 @@ void AnalogSensorMqttReporter::_publish(uint8_t percent) {
       _hasPublished = true;
   } */
 }
+#endif

@@ -154,6 +154,8 @@ TouchScreenConfig makeTouchScreenConfig() {
 
   return c;
 }
+
+#if USE_MQTT_CLIENT
 MqttConfig makeMqttConfig() {
   MqttConfig config;
   config.host = MQTT_HOST, config.port = MQTT_PORT, config.clientId = MQTT_CLIENT_ID;
@@ -166,6 +168,7 @@ MqttConfig makeMqttConfig() {
 
   return config;
 }
+#endif
 
 bool showClock = true;
 bool isAutoBrightness = false;
@@ -178,10 +181,13 @@ JpegImage spaceImage;
 SerialCommander commandHandler;
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
+
+#if USE_MQTT_CLIENT
 MqttClient mqtt(makeMqttConfig());
 // runtime override поверх MqttConfig::prefix; заповнюється лише за наявності
 // CFG_MQTT_TOPIC_PREFIX в ConfigStorage, див. setupMqttClient()
 MqttKeyGenerator mqttTopicPrefixOverride;
+#endif
 
 LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
@@ -334,6 +340,7 @@ void setupLittleFS() {
 }
 
 void setupMqttClient() {
+  #if USE_MQTT_CLIENT
   static TLogger _logger{"mqtt"};
 
   // Runtime override - лише якщо реально збережено в ConfigStorage; інакше mqtt сам
@@ -445,6 +452,9 @@ void setupMqttClient() {
 
   _logger.info("%s:%d (%s) lwt:%s", MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID,
                mqtt.keyGenerator().key(MQTT_LWT_TOPIC).c_str());
+  #else
+  Logger::warn("MQTT client disabled!");
+  #endif
 }
 
 void setupSD() {
@@ -1294,7 +1304,7 @@ void setupConfigStorage() {
 void loadConfig() {
   showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
   isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
-  display_brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50), isAutoBrightness);
+  display_brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 100), isAutoBrightness);
   Logger::info("ConfigStorage load done");
 
   Logger::info("\t- %s = %s", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
@@ -1791,12 +1801,12 @@ void setup() {
   setupWiFiIcon();
   loadConfig();
 
-  httpServer.setStaticSource(&littleFsSource);
-  // httpServer.setEventDispatcher(&dispatcher);
-  httpServer.begin();
+  // httpServer.setStaticSource(&littleFsSource);
+  // // httpServer.setEventDispatcher(&dispatcher);
+  // httpServer.begin();
 
   // display.flush();
-  testAsusWRT();
+  // testAsusWRT();
   Logger::debug("free heap memory: %u", ESP.getFreeHeap());
   Logger::info("");
   Logger::info("> Ready. Enter 'list' for comand list.");
@@ -1813,9 +1823,11 @@ void loop() {
     return;
   } */
 
+  #if USE_MQTT_CLIENT
   if (WiFi.isConnected()) {
     mqtt.loop();
   }
+  #endif
 
   commandHandler.update();
   if (showClock) drawTime();

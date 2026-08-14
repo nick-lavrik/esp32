@@ -12,6 +12,7 @@
 
 #include "MqttTopicMatcher.hpp"
 
+#if USE_MQTT_CLIENT
 MqttClient* MqttClient::_instance = nullptr;
 
 MqttClient::MqttClient(const MqttConfig& config)
@@ -260,3 +261,4 @@ void MqttClient::staticCallback(char* topic, uint8_t* payload, unsigned int leng
     _instance->handleMessage(topic, payload, length);
   }
 }
+#endif
