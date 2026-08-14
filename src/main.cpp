@@ -155,7 +155,7 @@ TouchScreenConfig makeTouchScreenConfig() {
   return c;
 }
 
-#if USE_MQTT_CLIENT
+#if HAS_MQTT_CLIENT
 MqttConfig makeMqttConfig() {
   MqttConfig config;
   config.host = MQTT_HOST, config.port = MQTT_PORT, config.clientId = MQTT_CLIENT_ID;
@@ -182,7 +182,7 @@ SerialCommander commandHandler;
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
-#if USE_MQTT_CLIENT
+#if HAS_MQTT_CLIENT
 MqttClient mqtt(makeMqttConfig());
 // runtime override поверх MqttConfig::prefix; заповнюється лише за наявності
 // CFG_MQTT_TOPIC_PREFIX в ConfigStorage, див. setupMqttClient()
@@ -340,7 +340,7 @@ void setupLittleFS() {
 }
 
 void setupMqttClient() {
-  #if USE_MQTT_CLIENT
+  #if HAS_MQTT_CLIENT
   static TLogger _logger{"mqtt"};
 
   // Runtime override - лише якщо реально збережено в ConfigStorage; інакше mqtt сам
@@ -1823,7 +1823,7 @@ void loop() {
     return;
   } */
 
-  #if USE_MQTT_CLIENT
+  #if HAS_MQTT_CLIENT
   if (WiFi.isConnected()) {
     mqtt.loop();
   }

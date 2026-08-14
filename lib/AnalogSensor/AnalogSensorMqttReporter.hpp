@@ -1,6 +1,6 @@
 #pragma once
 
-#if USE_MQTT_CLIENT
+#if HAS_MQTT_CLIENT
 #include <Arduino.h>
 
 #include "AnalogSensor.hpp"

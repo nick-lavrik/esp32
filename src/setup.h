@@ -30,7 +30,7 @@ void setupSerial() {
   // - офіційний фікс: TX стає неблокуючим, зайві байти відкидаються
   // замість очікування хоста. ESP8266 (класичний UART, не native USB)
   // цього методу не має.
-  // Serial.setTxTimeoutMs(0);
+  Serial.setTxTimeoutMs(0);
 #endif
   delay(200);
   Logger::info("");

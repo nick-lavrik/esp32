@@ -1,4 +1,4 @@
-// Setup_ArduinoGFX_C6.h
+// Setup_JD9853_C6.h
 // TFT_eSPI-сумісний шар над moononournation/Arduino_GFX для JD9853 (172x320).
 //
 // Плата: Waveshare ESP32-C6-LCD-1.47 (ESP32-C6, JD9853 SPI, 172x320, без PSRAM)
@@ -6,28 +6,38 @@
 // https://docs.waveshare.com/ESP32-C6-Touch-LCD-1.47
 //
 // ПРИЧИНА: bodmer/TFT_eSPI і lovyan03/LovyanGFX (вже використовуються в
-// проєкті) не мають драйвера JD9853. Контролер командно-сумісний з ST7789
-// (підтверджено офіційною демкою Waveshare і moononournation/Arduino_GFX
-// issue #693) — тому тут третя графічна бібліотека лише для цієї плати,
-// обгорнута у TFT_eSPI/TFT_eSprite-сумісний фасад (той самий підхід, що й
+// проєкті) не мають драйвера JD9853. Контролер лише БАЗОВО командно-
+// сумісний з ST7789 (той самий opcode-набір WRITE_COMMAND_8/WRITE_C8_D8/...
+// з Arduino_GFX) - але generic ST7789 init-послідовність з бібліотеки
+// (яку викликає звичайний begin()) дає НЕПРАВИЛЬНИЙ результат: білий
+// екран (з IPS=true), дзеркало, неправильні кольори (з IPS=false).
+// Справжня причина - JD9853 потребує ВЛАСНУ init-послідовність з
+// вендорським unlock-регістром (0xDF 0x98 0x53) і повним набором
+// gamma/voltage-регістрів, яких у generic ST7789-init просто немає.
+//
+// Ця послідовність (jd9853_reg_init_operations нижче) взята з
+// andreimagic/ESP32_C6_Touch_LCD_1_47_LVGL_Animated_Clock (MIT), той
+// самий Waveshare ESP32-C6-Touch-LCD-1.47, перевірено автором на
+// реальному пристрої - дисплей/SD/IMU/консоль/WiFi стабільні, без жодних
+// програмних компенсацій (свап R/B, нестандартна ротація тощо), які були
+// в попередніх ітераціях цього файлу і які тепер прибрано.
+//
+// Третя графічна бібліотека лише для цієї плати, обгорнута у
+// TFT_eSPI/TFT_eSprite-сумісний фасад (той самий підхід, що й
 // Setup_SSD1306_NodeMCU.h для esp8266), щоб src/Display.h/.cpp (спільний
 // прикладний код для ВСІХ плат) лишались без змін.
 //
 // Підключається через src/TftInstance.h за BOARD_ESP32_C6 (аналогічно тому,
 // як Setup_ST7701_4848S040.h підключається за BOARD_4848S040).
 //
-// ВАЖЛИВО: піни, офсети (34, 0, 34, 0) і IPS=false підтверджені офіційною
-// демкою Waveshare для цієї ж плати (wiki ESP32-C6-Touch-LCD-1.47) і робочим
-// прикладом на GitHub (moononournation/Arduino_GFX, discussion #693) —
-// саме неправильний IPS (був true, треба false) давав білий/інвертований
-// екран. Ротація (TFT_ROTATION) і мірорринг залежать від фізичного монтажу
-// панелі в корпусі — якщо після фіксу IPS зображення дзеркальне, спробуйте
-// TFT_ROTATION 1/2/3 (build_flags у platformio.ini) замість 0.
-//
-// TF-картка на цій платі — звичайний SPI, ШИНА СПІЛЬНА З ДИСПЛЕЄМ
-// (SCK=1, MOSI=2, окремі MISO=3 і CS=4) — на відміну від esp32-s3-lcd147
-// (там SD_MMC). SDCardInspector/SD.begin(SD_CS) підключаються так само,
-// як на esp32-st7789/esp32-4848s040.
+// SPI-шина - ЄДИНА, СПІЛЬНА з TF-карткою (Arduino_HWSPI їде на глобальному
+// об'єкті `SPI`, не створює власний хост). `SPI.begin(SD_SCK, SD_MISO,
+// SD_MOSI, SD_CS)` викликається в src/main.cpp::setupSD() - обов'язково
+// ПЕРЕД setupDisplay() (вже так у поточному порядку setup()). Раніше тут
+// був окремий Arduino_ESP32SPI з власним SPI-хостом на тих самих пінах,
+// що конфліктувало з SD (perimanSetPinBus: No deinit function for type
+// SPI_MASTER_SCK/MOSI) і, ймовірно, спричиняло частину нестабільності.
+// Піни: SCK=1, MOSI=2, окремі MISO=3 (лише SD) і CS=4 (SD) / 14 (LCD).
 
 #pragma once
 
@@ -49,27 +59,21 @@
 #define TFT_BL 23
 #define TFT_BACKLIGHT_ON HIGH
 
-// ---------- Кольори (RGB565) ----------
-// ПРИМІТКА: JD9853 на цій платі фізично BGR, а Arduino_ST7789::setRotation()
-// (бібліотечний код) завжди пише в MADCTL RGB-біт (0x00) - параметра для
-// BGR там немає. Спроба виправити це через ENDIAN-біт команди RAMCTRL
-// (0xB0) НЕ спрацювала на реальному залізі (це біт порядку байтів SPI-
-// передачі, не порядку R/B каналів) - тому лишаємо простий і перевірений
-// на пристрої програмний свап R/B у власних константах. Стосується лише
-// іменованих кольорів (TFT_RED тощо); сирі RGB565-дані з декодера JPEG
-// (BackgroundImages) цим НЕ покриваються - поки що не актуально
-// (BACKGROUND_IMAGES_COUNT=0 для цієї плати), при увімкненні зображень
-// знадобиться або свап R/B байтів в JpegImage callback, або правильний
-// апаратний фікс (потребує JD9853-специфічної документації, не ST7789).
+// ---------- Кольори (RGB565) — стандартні значення TFT_eSPI/Adafruit_GFX.
+// Попередній свап R/B був компенсацією за НЕПРАВИЛЬНУ (generic ST7789)
+// init-послідовність. З правильною, апаратно перевіреною послідовністю
+// для JD9853 (jd9853RegInit() нижче) свап не потрібен - підтверджено
+// референсним проєктом на реальному пристрої (andreimagic/
+// ESP32_C6_Touch_LCD_1_47_LVGL_Animated_Clock, MIT).
 #define TFT_BLACK 0x0000
 #define TFT_WHITE 0xFFFF
-#define TFT_RED 0x001F     // було 0xF800
+#define TFT_RED 0xF800
 #define TFT_GREEN 0x07E0
 #define TFT_DARKGREEN 0x03E0
-#define TFT_YELLOW 0x07FF  // було 0xFFE0
-#define TFT_CYAN 0xFFE0    // було 0x07FF
+#define TFT_YELLOW 0xFFE0
+#define TFT_CYAN 0x07FF
 #define TFT_MAGENTA 0xF81F
-#define TFT_ORANGE 0x05BF  // було 0xFDA0
+#define TFT_ORANGE 0xFDA0
 #define TFT_DARKGREY 0x7BEF
 #define TFT_LIGHTGREY 0xC618
 
@@ -77,128 +81,75 @@
 #define TL_DATUM 0
 #define MC_DATUM 4
 
-
-static const uint8_t __st7789_type1_init_operations[] = {
+// Справжня, апаратно підтверджена init-послідовність JD9853 (НЕ generic
+// ST7789 з бібліотеки Arduino_GFX - той дає білий екран/неправильні
+// кольори/дзеркало, бо це різні чіпи, лише командно-сумісні на базовому
+// рівні). Джерело: andreimagic/ESP32_C6_Touch_LCD_1_47_LVGL_Animated_Clock
+// (lcd_reg_init(), MIT), той самий Waveshare ESP32-C6-Touch-LCD-1.47,
+// перевірено автором на реальному пристрої (дисплей/SD/IMU/консоль/WiFi
+// стабільні). Викликається з init() ПІСЛЯ begin() (яке лишень відкриває
+// SPI-шину і шле generic ST7789 sleep-out/color-mode, не критично що саме)
+// і ПЕРЕД setRotation() (0x36 тут навмисно 0x00 - фінальний MADCTL все
+// одно перезаписує бібліотечний Arduino_ST7789::setRotation()).
+static const uint8_t jd9853_reg_init_operations[] = {
     BEGIN_WRITE,
-    WRITE_COMMAND_8, ST7789_SLPOUT, // 2: Out of sleep mode, no args, w/delay
+    WRITE_COMMAND_8, 0x11,
     END_WRITE,
-
-    DELAY, ST7789_SLPOUT_DELAY,
-
+    DELAY, 120,
     BEGIN_WRITE,
-    WRITE_C8_D8, ST7789_COLMOD, 0x55, // 3: Set color mode, 16-bit color
-    // MADCTL (0x36) тут НЕ пишемо: Display::init() викликає
-    // tft_.setRotation(TFT_ROTATION) одразу після tft_.init(), і цей
-    // виклик все одно миттєво перезаписує MADCTL - будь-яке значення
-    // тут було б мертвим кодом. Орієнтація повністю контролюється
-    // через TFT_ROTATION (build_flags, platformio.ini).
-
-    WRITE_C8_BYTES, 0xB0, 2,
-    0x00, 0xF0, // порядок байтів SPI-передачі пікселя (НЕ порядок R/B каналів)
-
-    WRITE_C8_BYTES, 0xB2, 5,
-    0x0C, 0x0C, 0x00, 0x33, 0x33,
-
-    WRITE_C8_D8, 0xB7, 0x35,
-    WRITE_C8_D8, 0xBB, 0x19,
-    WRITE_C8_D8, 0xC0, 0x2C,
-    WRITE_C8_D8, 0xC2, 0x01,
-    WRITE_C8_D8, 0xC3, 0x12,
-    WRITE_C8_D8, 0xC4, 0x20,
-    WRITE_C8_D8, 0xC6, 0x0F,
-
-    WRITE_C8_D16, 0xD0, 0xA4, 0xA1,
-
-    WRITE_C8_BYTES, 0xE0, 14,
-    0b11110000, // V63P3, V63P2, V63P1, V63P0,  V0P3,  V0P2,  V0P1,  V0P0
-    0b00001001, //     0,     0,  V1P5,  V1P4,  V1P3,  V1P2,  V1P1,  V1P0
-    0b00010011, //     0,     0,  V2P5,  V2P4,  V2P3,  V2P2,  V2P1,  V2P0
-    0b00010010, //     0,     0,     0,  V4P4,  V4P3,  V4P2,  V4P1,  V4P0
-    0b00010010, //     0,     0,     0,  V6P4,  V6P3,  V6P2,  V6P1,  V6P0
-    0b00101011, //     0,     0,  J0P1,  J0P0, V13P3, V13P2, V13P1, V13P0
-    0b00111100, //     0, V20P6, V20P5, V20P4, V20P3, V20P2, V20P1, V20P0
-    0b01000100, //     0, V36P2, V36P1, V36P0,     0, V27P2, V27P1, V27P0
-    0b01001011, //     0, V43P6, V43P5, V43P4, V43P3, V43P2, V43P1, V43P0
-    0b00011011, //     0,     0,  J1P1,  J1P0, V50P3, V50P2, V50P1, V50P0
-    0b00011000, //     0,     0,     0, V57P4, V57P3, V57P2, V57P1, V57P0
-    0b00010111, //     0,     0,     0, V59P4, V59P3, V59P2, V59P1, V59P0
-    0b00011101, //     0,     0, V61P5, V61P4, V61P3, V61P2, V61P1, V61P0
-    0b00100001, //     0,     0, V62P5, V62P4, V62P3, V62P2, V62P1, V62P0
-
-    WRITE_C8_BYTES, 0XE1, 14,
-    0b11110000, // V63P3, V63P2, V63P1, V63P0,  V0P3,  V0P2,  V0P1,  V0P0
-    0b00001001, //     0,     0,  V1P5,  V1P4,  V1P3,  V1P2,  V1P1,  V1P0
-    0b00010011, //     0,     0,  V2P5,  V2P4,  V2P3,  V2P2,  V2P1,  V2P0
-    0b00001100, //     0,     0,     0,  V4N4,  V4N3,  V4N2,  V4N1,  V4N0
-    0b00001101, //     0,     0,     0,  V6N4,  V6N3,  V6N2,  V6N1,  V6N0
-    0b00100111, //     0,     0,  J0N1,  J0N0, V13N3, V13N2, V13N1, V13N0
-    0b00111011, //     0, V20N6, V20N5, V20N4, V20N3, V20N2, V20N1, V20N0
-    0b01000100, //     0, V36N2, V36N1, V36N0,     0, V27N2, V27N1, V27N0
-    0b01001101, //     0, V43N6, V43N5, V43N4, V43N3, V43N2, V43N1, V43N0
-    0b00001011, //     0,     0,  J1N1,  J1N0, V50N3, V50N2, V50N1, V50N0
-    0b00010111, //     0,     0,     0, V57N4, V57N3, V57N2, V57N1, V57N0
-    0b00010111, //     0,     0,     0, V59N4, V59N3, V59N2, V59N1, V59N0
-    0b00011101, //     0,     0, V61N5, V61N4, V61N3, V61N2, V61N1, V61N0
-    0b00100001, //     0,     0, V62N5, V62N4, V62N3, V62N2, V62N1, V62N0
-
-    WRITE_COMMAND_8, ST7789_NORON, // 4: Normal display on, no args, w/delay
+    WRITE_C8_D16, 0xDF, 0x98, 0x53,  // unlock vendor-specific регістри
+    WRITE_C8_D8, 0xB2, 0x23,
+    WRITE_COMMAND_8, 0xB7,
+    WRITE_BYTES, 4, 0x00, 0x47, 0x00, 0x6F,
+    WRITE_COMMAND_8, 0xBB,
+    WRITE_BYTES, 6, 0x1C, 0x1A, 0x55, 0x73, 0x63, 0xF0,
+    WRITE_C8_D16, 0xC0, 0x44, 0xA4,
+    WRITE_C8_D8, 0xC1, 0x16,
+    WRITE_COMMAND_8, 0xC3,
+    WRITE_BYTES, 8, 0x7D, 0x07, 0x14, 0x06, 0xCF, 0x71, 0x72, 0x77,
+    WRITE_COMMAND_8, 0xC4,
+    WRITE_BYTES, 12, 0x00, 0x00, 0xA0, 0x79, 0x0B, 0x0A, 0x16, 0x79, 0x0B, 0x0A, 0x16, 0x82,
+    WRITE_COMMAND_8, 0xC8,
+    WRITE_BYTES, 32,
+    0x3F, 0x32, 0x29, 0x29, 0x27, 0x2B, 0x27, 0x28,
+    0x28, 0x26, 0x25, 0x17, 0x12, 0x0D, 0x04, 0x00,
+    0x3F, 0x32, 0x29, 0x29, 0x27, 0x2B, 0x27, 0x28,
+    0x28, 0x26, 0x25, 0x17, 0x12, 0x0D, 0x04, 0x00,
+    WRITE_COMMAND_8, 0xD0,
+    WRITE_BYTES, 5, 0x04, 0x06, 0x6B, 0x0F, 0x00,
+    WRITE_C8_D16, 0xD7, 0x00, 0x30,
+    WRITE_C8_D8, 0xE6, 0x14,
+    WRITE_C8_D8, 0xDE, 0x01,
+    WRITE_COMMAND_8, 0xB7,
+    WRITE_BYTES, 5, 0x03, 0x13, 0xEF, 0x35, 0x35,
+    WRITE_COMMAND_8, 0xC1,
+    WRITE_BYTES, 3, 0x14, 0x15, 0xC0,
+    WRITE_C8_D16, 0xC2, 0x06, 0x3A,
+    WRITE_C8_D16, 0xC4, 0x72, 0x12,
+    WRITE_C8_D8, 0xBE, 0x00,
+    WRITE_C8_D8, 0xDE, 0x02,
+    WRITE_COMMAND_8, 0xE5,
+    WRITE_BYTES, 3, 0x00, 0x02, 0x00,
+    WRITE_COMMAND_8, 0xE5,
+    WRITE_BYTES, 3, 0x01, 0x02, 0x00,
+    WRITE_C8_D8, 0xDE, 0x00,
+    WRITE_C8_D8, 0x35, 0x00,
+    WRITE_C8_D8, 0x3A, 0x05,
+    WRITE_COMMAND_8, 0x2A,
+    WRITE_BYTES, 4, 0x00, 0x22, 0x00, 0xCD,
+    WRITE_COMMAND_8, 0x2B,
+    WRITE_BYTES, 4, 0x00, 0x00, 0x01, 0x3F,
+    WRITE_C8_D8, 0xDE, 0x02,
+    WRITE_COMMAND_8, 0xE5,
+    WRITE_BYTES, 3, 0x00, 0x02, 0x00,
+    WRITE_C8_D8, 0xDE, 0x00,
+    WRITE_C8_D8, 0x36, 0x00,  // тимчасовий MADCTL - перезапишеться setRotation()
+    WRITE_COMMAND_8, 0x21,
     END_WRITE,
-
     DELAY, 10,
-
     BEGIN_WRITE,
-    WRITE_COMMAND_8, ST7789_DISPON, // 5: Main screen turn on, no args, w/delay
+    WRITE_COMMAND_8, 0x29,
     END_WRITE};
-
-static const uint8_t __st7789_type2_init_operations[] = {
-    BEGIN_WRITE,
-    WRITE_C8_D8, ST7789_COLMOD, 0x55, // 3: Set color mode, 16-bit color
-
-    WRITE_C8_BYTES, 0xB2, 5,
-    0x0C, 0x0C, 0x00, 0x33, 0x33,
-
-    WRITE_C8_D8, 0xB4, 0x01,
-    WRITE_C8_D16, 0xC0, 0x2C, 0x2D,
-    WRITE_C8_D8, 0xC5, 0x2E,
-
-    WRITE_COMMAND_8, ST7789_SLPOUT,
-    END_WRITE,
-
-    DELAY, ST7789_SLPOUT_DELAY,
-
-    BEGIN_WRITE,
-    WRITE_COMMAND_8, ST7789_DISPON,
-    END_WRITE};
-
-static const uint8_t __st7789_type3_init_operations[] = {
-    BEGIN_WRITE,
-    WRITE_C8_D8, ST7789_COLMOD, 0x55, // 3: Set color mode, 16-bit color
-    WRITE_COMMAND_8, ST7789_SLPOUT,
-    END_WRITE,
-
-    DELAY, ST7789_SLPOUT_DELAY,
-
-    BEGIN_WRITE,
-    WRITE_COMMAND_8, ST7789_DISPON,
-    END_WRITE};
-
-/*
-// ─── Display ─────────────────────────────────────────────────────────────────
-// Arduino_DataBus *bus = new Arduino_HWSPI(
-//   15, // DC
-//   14, // CS 
-//    1, // SCK 
-//    2, // MOSI
-// );
-// Arduino_GFX    *gfx = new Arduino_ST7789(
-//    bus,
-//     22, // RST
-//      0, // rotation
-//  false, // IPS
-//    172, // width
-//    320, // height
-//    34, 0, 34, 0);
-*/
 
 // "Пристрій" - фізичний JD9853/ST7789-сумісний дисплей. Публічний API, яким
 // користується src/Display.h/.cpp (init/setRotation/getRotation/width/height/
@@ -209,15 +160,18 @@ static const uint8_t __st7789_type3_init_operations[] = {
 class TFT_eSPI : public Arduino_ST7789 {
  public:
   TFT_eSPI()
-      : Arduino_ST7789(new Arduino_HWSPI(TFT_DC, TFT_CS, TFT_SCLK, TFT_MOSI),
-                        TFT_RST, 0 /* rotation - виставляється окремо через setRotation() */,
-                        false /* true IPS */, TFT_WIDTH, TFT_HEIGHT,
-                        34 /* col offset1 */, 0 /* row offset1 */, 34 /* col offset2 */, 0 /* row offset2 */) {}
+      : Arduino_ST7789(_bus = new Arduino_HWSPI(TFT_DC, TFT_CS, TFT_SCLK, TFT_MOSI), TFT_RST,
+                        0 /* rotation - виставляється окремо через setRotation() */,
+                        false /* IPS */, TFT_WIDTH, TFT_HEIGHT, 34 /* col offset1 */,
+                        0 /* row offset1 */, 34 /* col offset2 */, 0 /* row offset2 */) {}
 
   void init() {
     if (!begin()) {
       Logger::error("[TFT_eSPI/JD9853] begin() failed - перевір піни/проводку SPI");
     }
+    // Справжня реєстрова послідовність JD9853 (див. коментар вище) -
+    // ЗАМІНЮЄ generic ST7789 init, який begin() щойно надіслав.
+    _bus->batchOperation(jd9853_reg_init_operations, sizeof(jd9853_reg_init_operations));
 
 #if defined(TFT_BL)
     pinMode(TFT_BL, OUTPUT);
@@ -245,6 +199,21 @@ class TFT_eSPI : public Arduino_ST7789 {
     setCursor(x, y);
     print(t);
   }
+
+ private:
+  // Зберігаємо власний вказівник на bus (той самий об'єкт, що передається
+  // в Arduino_ST7789), бо базовий _bus у бібліотеці protected/недоступний
+  // напряму для batchOperation() поза родиною Arduino_TFT.
+  //
+  // НАВМИСНО БЕЗ "= nullptr" тут! Присвоєння _bus = new Arduino_HWSPI(...)
+  // в списку аргументів базового конструктора (нижче) виконується ПІД ЧАС
+  // обчислення цих аргументів - до того, як власна фаза ініціалізації
+  // членів похідного класу взагалі починається. Якби тут був default
+  // member initializer (= nullptr), він спрацював би ПІСЛЯ виклику
+  // базового конструктора Arduino_ST7789(...) і затер би щойно присвоєне
+  // значення - саме це й стався: init() потім викликав _bus->batchOperation()
+  // на nullptr (Guru Meditation: Load access fault, Setup_JD9853_C6.h:174).
+  Arduino_DataBus *_bus;
 };
 
 /**

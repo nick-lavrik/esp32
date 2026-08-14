@@ -1,5 +1,5 @@
 
-#if USE_MQTT_CLIENT
+#if HAS_MQTT_CLIENT
 #include "AnalogSensorMqttReporter.hpp"
 
 #include <ArduinoJson.h>

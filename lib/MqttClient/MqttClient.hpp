@@ -1,6 +1,6 @@
 #pragma once
 
-#if __has_include(<PubSubClient.>)
+#if __has_include(<PubSubClient.h>)
 #define HAS_MQTT_CLIENT 1
 #include <ArduinoJson.h>
 #include <PubSubClient.h>

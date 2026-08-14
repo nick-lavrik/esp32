@@ -12,7 +12,7 @@
 
 #include "MqttTopicMatcher.hpp"
 
-#if USE_MQTT_CLIENT
+#if HAS_MQTT_CLIENT
 MqttClient* MqttClient::_instance = nullptr;
 
 MqttClient::MqttClient(const MqttConfig& config)
