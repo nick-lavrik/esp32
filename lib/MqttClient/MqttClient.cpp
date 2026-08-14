@@ -2,6 +2,12 @@
 
 #include <Arduino.h>
 
+#if defined(ESP8266)
+#include <ESP8266WiFi.h>
+#else
+#include <WiFi.h>
+#endif
+
 #include <algorithm>
 
 #include "MqttTopicMatcher.hpp"
@@ -54,6 +60,21 @@ void MqttClient::begin() {
 }
 
 void MqttClient::loop() {
+  // ВАЖЛИВО: не намагатись підключитись, якщо WiFi ще не встановив
+  // з'єднання. Без цієї перевірки NetworkClient::connect() (усередині
+  // PubSubClient::connect()) щоразу заново резолвить hostname через
+  // сирі lwIP DNS-виклики. Якщо в цей момент паралельно "висить"
+  // незавершений DNS-запит SNTP (lib/NtpService) - наприклад тому, що
+  // WiFi ще не приєднався до жодної точки доступу і обидва запити
+  // повторюються в циклі - повторний виклик dns_gethostbyname() з
+  // Arduino loop-задачі (без TCPIP core lock) може зачепити callback
+  // цього незавершеного SNTP-запиту й впасти в
+  // "assert failed: udp_new_ip_type ... Required to lock TCPIP core
+  // functionality!" (панік, перезавантаження). Це відомий клас багів
+  // lwIP/arduino-esp32 при конкурентних DNS-резолвах з не-tcpip задачі,
+  // і реконект-цикл MQTT без WiFi-гейту - найпростіший спосіб його
+  // спровокувати. Актуально для БУДЬ-ЯКОЇ плати з нестабільним WiFi,
+  // не тільки esp32-c6.
   if (!_mqttClient.connected()) {
     uint32_t now = millis();
     if (now - _lastReconnectAttempt >= _config.reconnectIntervalMs) {

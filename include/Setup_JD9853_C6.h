@@ -49,18 +49,29 @@
 #define TFT_BL 23
 #define TFT_BACKLIGHT_ON HIGH
 
-// ---------- Кольори (RGB565) — ті самі константи, яких потребує src/Display.h/.cpp ----------
-#define TFT_BLACK 0x0000  // було 0x0000
-#define TFT_WHITE 0xFFFF  // було 0xFFFF
-#define TFT_RED 0x001F  // було 0xF800
-#define TFT_GREEN 0x07E0  // було 0x07E0
-#define TFT_DARKGREEN 0x03E0  // було 0x03E0
+// ---------- Кольори (RGB565) ----------
+// ПРИМІТКА: JD9853 на цій платі фізично BGR, а Arduino_ST7789::setRotation()
+// (бібліотечний код) завжди пише в MADCTL RGB-біт (0x00) - параметра для
+// BGR там немає. Спроба виправити це через ENDIAN-біт команди RAMCTRL
+// (0xB0) НЕ спрацювала на реальному залізі (це біт порядку байтів SPI-
+// передачі, не порядку R/B каналів) - тому лишаємо простий і перевірений
+// на пристрої програмний свап R/B у власних константах. Стосується лише
+// іменованих кольорів (TFT_RED тощо); сирі RGB565-дані з декодера JPEG
+// (BackgroundImages) цим НЕ покриваються - поки що не актуально
+// (BACKGROUND_IMAGES_COUNT=0 для цієї плати), при увімкненні зображень
+// знадобиться або свап R/B байтів в JpegImage callback, або правильний
+// апаратний фікс (потребує JD9853-специфічної документації, не ST7789).
+#define TFT_BLACK 0x0000
+#define TFT_WHITE 0xFFFF
+#define TFT_RED 0x001F     // було 0xF800
+#define TFT_GREEN 0x07E0
+#define TFT_DARKGREEN 0x03E0
 #define TFT_YELLOW 0x07FF  // було 0xFFE0
-#define TFT_CYAN 0xFFE0  // було 0x07FF
-#define TFT_MAGENTA 0xF81F  // було 0xF81F
+#define TFT_CYAN 0xFFE0    // було 0x07FF
+#define TFT_MAGENTA 0xF81F
 #define TFT_ORANGE 0x05BF  // було 0xFDA0
-#define TFT_DARKGREY 0x7BEF  // було 0x7BEF
-#define TFT_LIGHTGREY 0xC618  // було 0xC618
+#define TFT_DARKGREY 0x7BEF
+#define TFT_LIGHTGREY 0xC618
 
 // Датуми тексту (підмножина TFT_eSPI, якої вистачає src/Display.cpp)
 #define TL_DATUM 0
@@ -76,13 +87,14 @@ static const uint8_t __st7789_type1_init_operations[] = {
 
     BEGIN_WRITE,
     WRITE_C8_D8, ST7789_COLMOD, 0x55, // 3: Set color mode, 16-bit color
-    // WRITE_C8_D8, 0x36, 0x00, // Стандарт
-    // WRITE_C8_D8, 0x36, 0x40, // Дзеркало по горизонталі (MX=1)
-    // WRITE_C8_D8, 0x36, 0x80, // Дзеркало по вертикалі (MY=1)
-    WRITE_C8_D8, 0x36, 0x60, // Обмін X та Y + Дзеркало
+    // MADCTL (0x36) тут НЕ пишемо: Display::init() викликає
+    // tft_.setRotation(TFT_ROTATION) одразу після tft_.init(), і цей
+    // виклик все одно миттєво перезаписує MADCTL - будь-яке значення
+    // тут було б мертвим кодом. Орієнтація повністю контролюється
+    // через TFT_ROTATION (build_flags, platformio.ini).
 
     WRITE_C8_BYTES, 0xB0, 2,
-    0x00, 0xF0, // 0xF0 MSB first, 0xF8 LSB first
+    0x00, 0xF0, // порядок байтів SPI-передачі пікселя (НЕ порядок R/B каналів)
 
     WRITE_C8_BYTES, 0xB2, 5,
     0x0C, 0x0C, 0x00, 0x33, 0x33,
@@ -170,36 +182,42 @@ static const uint8_t __st7789_type3_init_operations[] = {
     WRITE_COMMAND_8, ST7789_DISPON,
     END_WRITE};
 
-
+/*
+// ─── Display ─────────────────────────────────────────────────────────────────
+// Arduino_DataBus *bus = new Arduino_HWSPI(
+//   15, // DC
+//   14, // CS 
+//    1, // SCK 
+//    2, // MOSI
+// );
+// Arduino_GFX    *gfx = new Arduino_ST7789(
+//    bus,
+//     22, // RST
+//      0, // rotation
+//  false, // IPS
+//    172, // width
+//    320, // height
+//    34, 0, 34, 0);
+*/
 
 // "Пристрій" - фізичний JD9853/ST7789-сумісний дисплей. Публічний API, яким
 // користується src/Display.h/.cpp (init/setRotation/getRotation/width/height/
 // startWrite/endWrite/fillScreen/setCursor/print/...), успадкований від
 // Arduino_ST7789/Arduino_GFX без змін; тут додається лише те, чого немає
 // (init() з підсвіткою, textWidth/drawString-обгортки в стилі TFT_eSPI).
+// Arduino_ST7789(new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCLK, TFT_MOSI),
 class TFT_eSPI : public Arduino_ST7789 {
  public:
   TFT_eSPI()
-      : Arduino_ST7789(new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCLK, TFT_MOSI, TFT_MISO),
+      : Arduino_ST7789(new Arduino_HWSPI(TFT_DC, TFT_CS, TFT_SCLK, TFT_MOSI),
                         TFT_RST, 0 /* rotation - виставляється окремо через setRotation() */,
-                        false /* true IPS */, TFT_WIDTH, TFT_HEIGHT, 34 /* col offset1 */,
-                        0 /* row offset1 */, 34 /* col offset2 */, 0 /* row offset2 */,
-                        __st7789_type1_init_operations, sizeof(__st7789_type1_init_operations)) {}
+                        false /* true IPS */, TFT_WIDTH, TFT_HEIGHT,
+                        34 /* col offset1 */, 0 /* row offset1 */, 34 /* col offset2 */, 0 /* row offset2 */) {}
 
   void init() {
     if (!begin()) {
       Logger::error("[TFT_eSPI/JD9853] begin() failed - перевір піни/проводку SPI");
     }
-
-    // Передача команди безпосередньо в контролер ST7789
-    // tft.writeCommand(0x36); // Регістр MADCTL (Memory Data Access Control)
-
-    // Залежно від вашої бібліотеки та поточної орієнтації, 
-    // спробуйте підібрати одне з цих значень:
-    // tft.writeData(0x00); // Стандартний режим
-    // tft.writeData(0x40); // Дзеркало по Y
-    // tft.writeData(0x20); // Дзеркало по X
-    // tft.writeData(0x60); // Обмін X та Y + Дзеркало
 
 #if defined(TFT_BL)
     pinMode(TFT_BL, OUTPUT);
@@ -252,7 +270,15 @@ class TFT_eSprite {
 
   void *createSprite(int32_t w, int32_t h) {
     _canvas = new Arduino_Canvas(w, h, _tft);
-    if (!_canvas->begin()) {
+    // GFX_SKIP_OUTPUT_BEGIN - ІНАКШЕ canvas->begin() повторно викликає
+    // _tft->begin(), переініціалізовуючи SPI-шину дисплея (вже
+    // проініціалізовану раніше в Display::init() -> tft_.init()).
+    // Без цього прапорця на реальному пристрої видно
+    // "addApbChangeCallback(): duplicate" і
+    // "perimanSetPinBus(): No deinit function for type SPI_MASTER_SCK/MOSI"
+    // при кожному старті - подвійна ініціалізація SPI на льоту.
+    // (moononournation/Arduino_GFX, discussion #346)
+    if (!_canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) {
       Logger::error("[TFT_eSprite/Arduino_Canvas] begin() failed - недостатньо памʼяті?");
       delete _canvas;
       _canvas = nullptr;

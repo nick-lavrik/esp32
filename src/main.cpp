@@ -1808,7 +1808,15 @@ void loop() {
   doPing();
   drawBackgroundImage();
   drawSystemInfo();
-  mqtt.loop();
+
+  /* if (WiFi.status() != WL_CONNECTED) {
+    return;
+  } */
+
+  if (WiFi.isConnected()) {
+    mqtt.loop();
+  }
+
   commandHandler.update();
   if (showClock) drawTime();
 
