@@ -1295,6 +1295,13 @@ void setupBackgroundImage() {
   #if BOARD_ESP32_C6
   ImageEffects::applyDarken(spaceImage, 0.15);
   #endif
+  
+  #if BOARD_ESP32_S3_LCD147
+  ImageEffects::applyDesaturate(spaceImage, 0.3);
+  // ImageEffects::applyBoxBlur(spaceImage, 2);
+  ImageEffects::applyVignette(spaceImage, 0.3);
+  ImageEffects::applyDarken(spaceImage, 0.3);
+  #endif
 #endif
 }
 

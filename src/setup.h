@@ -18,7 +18,7 @@ void setupSerial() {
   // #endif
 
   Serial.begin(115200);
-#if !defined(BOARD_ESP8266)
+#if defined(BOARD_ESP32_C6) // !defined(BOARD_ESP8266)
   // Native USB CDC (HWCDC на ESP32-C3/C6/H2, USBCDC на ESP32-S2/S3) може
   // ЗАВИСНУТИ НАЗАВЖДИ в Serial.print()/flush(), якщо хост тимчасово не
   // встигає вичитувати TX-буфер (відомий баг arduino-esp32, issue #9172:
