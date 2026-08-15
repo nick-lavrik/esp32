@@ -14,8 +14,8 @@ void setupWiFi() {
 #if defined(BOARD_ESP8266)
   WiFi.mode(WIFI_STA);
 #endif
-  WiFi.begin(ssid, password);
   WiFi.setSleep(false);
+  WiFi.begin(ssid, password);
   // Modem sleep (power-save) вимкнено для ВСІХ плат: раніше рятувало від
   // "сміття в моніторі" на ttgo-t1, і, ймовірно, причина затримок 2-3с у
   // mqtt.loop()/hostByName() на esp32-c6 (WiFi6-чипи агресивніше

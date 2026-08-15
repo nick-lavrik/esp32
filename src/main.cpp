@@ -1791,6 +1791,8 @@ void testAsusWRT() {
   Logger::info("------ AsusWRT test script -------");
   Logger::info("");
 }
+
+#if ESP32
 void testRawTcpConnect() {
   static uint32_t lastTest = 0;
   if (millis() - lastTest < 5000) return;
@@ -1802,7 +1804,11 @@ void testRawTcpConnect() {
   Logger::warn("raw TCP connect: %s, took %ums", ok ? "OK" : "FAIL", dt);
   if (ok) testClient.stop();
 }
-
+#else
+void testRawTcpConnect() {
+  Logger::error("I don't have WiFiClient");
+}
+#endif
 void setup() {
   uint32_t freeHeap = ESP.getFreeHeap();
   setupSerial();
@@ -1839,7 +1845,9 @@ void setup() {
   Logger::info("> Ready. Enter 'list' for comand list.");
 }
 
+#if ESP32
 #include <esp_wifi.h> // Обов'язково додайте цей системний заголовок
+#endif
 int wifi_state = 0;
 void loop() {
   display.startWrite();
@@ -1852,6 +1860,7 @@ void loop() {
     return;
   } */
 
+  #if ESP32
   // if (WiFi.status() == WL_CONNECTED) {
   if (wifi_state == 0 && WiFi.isConnected()) {
     Logger::info("WIFI connected");
@@ -1866,6 +1875,7 @@ void loop() {
     Logger::info("WIFI disconnected!");
     wifi_state = 0;
   }
+  #endif
 
   #if HAS_MQTT_CLIENT
   if (WiFi.isConnected()) {

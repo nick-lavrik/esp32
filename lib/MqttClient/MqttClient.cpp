@@ -20,8 +20,8 @@ MqttClient::MqttClient(const MqttConfig& config)
     : _config(config), _defaultKeyGenerator(config.prefix)
 #if __has_include(<PicoMQTT.h>)
       // Передаємо таймаут 1500мс (1.5 сек) замість 10 сек
-      /* , _mqttClient(config.host, config.port, config.clientId, 
-                  config.username, config.password, 5000, 30000, 1500)  */
+      , _mqttClient(config.host, config.port, config.clientId, 
+                  config.username, config.password, 60000, 30000, 1500)
 #endif
      {}
 
