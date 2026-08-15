@@ -1,5 +1,7 @@
 #include "JpegImage.hpp"
 
+#include <new>
+
 #include <LittleFS.h>
 
 // RISC-V (ESP32-C6) не толерантний до unaligned memory access, на відміну від
@@ -104,14 +106,28 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   uint16_t jpegHeight = 0;
 
 #if defined(BOARD_ESP32_C6)
-  JPEGDEC jpegDecoder;
-  if (!jpegDecoder.openRAM(jpegData, (int)fileSize, JpegImage::jpegDrawCallback)) {
-    _logger.error("Can't parse jpeg header (JPEGDEC error %d)", jpegDecoder.getLastError());
+  // JPEGDEC::_jpeg (JPEGIMAGE) - це ~17.5 KB вбудованої структури (буфери
+  // Huffman-таблиць, MCU, пікселів), НЕ вказівник. Локальна змінна на стеку
+  // переповнює loopTask stack (типово 8 KB) -> "Stack protection fault".
+  // Тому виділяємо JPEGDEC на heap (за можливості - в PSRAM).
+  bool jpegDecoderPsram = false;
+  JPEGDEC *jpegDecoder = (JPEGDEC *)allocPreferPsram(sizeof(JPEGDEC), &jpegDecoderPsram);
+  if (jpegDecoder == nullptr) {
+    _logger.error("Not enough memory for JPEGDEC instance (%u bytes)", (unsigned)sizeof(JPEGDEC));
     heap_caps_free(jpegData);
     return false;
   }
-  jpegWidth = (uint16_t)jpegDecoder.getWidth();
-  jpegHeight = (uint16_t)jpegDecoder.getHeight();
+  new (jpegDecoder) JPEGDEC();
+
+  if (!jpegDecoder->openRAM(jpegData, (int)fileSize, JpegImage::jpegDrawCallback)) {
+    _logger.error("Can't parse jpeg header (JPEGDEC error %d)", jpegDecoder->getLastError());
+    jpegDecoder->~JPEGDEC();
+    heap_caps_free(jpegDecoder);
+    heap_caps_free(jpegData);
+    return false;
+  }
+  jpegWidth = (uint16_t)jpegDecoder->getWidth();
+  jpegHeight = (uint16_t)jpegDecoder->getHeight();
 #else
   if (TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, fileSize) != JDR_OK) {
     _logger.error("Can't perse jpeg header");
@@ -140,6 +156,10 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   if (_buffer == nullptr) {
     _logger.error("Недостатньо пам'яті для декодованого зображення (%d / %d)", bufferBytes,
                   heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+#if defined(BOARD_ESP32_C6)
+    jpegDecoder->~JPEGDEC();
+    heap_caps_free(jpegDecoder);
+#endif
     heap_caps_free(jpegData);
     return false;
   }
@@ -150,15 +170,18 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   _activeInstance = this;
 
 #if defined(BOARD_ESP32_C6)
-  jpegDecoder.setPixelType(RGB565_LITTLE_ENDIAN);
-  int decodeResult = jpegDecoder.decode(0, 0, 0);
-  jpegDecoder.close();
+  jpegDecoder->setPixelType(RGB565_LITTLE_ENDIAN);
+  int decodeResult = jpegDecoder->decode(0, 0, 0);
+  int jpegDecError = jpegDecoder->getLastError();
+  jpegDecoder->close();
+  jpegDecoder->~JPEGDEC();
+  heap_caps_free(jpegDecoder);
   _activeInstance = nullptr;
 
   heap_caps_free(jpegData);
 
   if (decodeResult != 1) {
-    _logger.error("Jpeg decode error \"%s\" (JPEGDEC error %d)", path, jpegDecoder.getLastError());
+    _logger.error("Jpeg decode error \"%s\" (JPEGDEC error %d)", path, jpegDecError);
     freeBuffer();
     return false;
   }
