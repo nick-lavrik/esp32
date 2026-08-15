@@ -12,6 +12,12 @@
 #include <PicoMQTT.h>
 #endif
 
+#if defined(ESP32)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
+#endif
+
 #include <cstring>
 #include <string>
 #include <type_traits>
@@ -21,13 +27,27 @@
 #include "MqttKeyGenerator.hpp"
 #include "MqttListenerEntry.hpp"
 
+// Вхідне повідомлення з мережевого таска в чергу для розбору в MqttClient::loop()
+// (тобто в контексті головного sketch loop(), а не мережевого таска).
+struct MqttIncomingMessage {
+  std::string topic;
+  std::vector<uint8_t> payload;
+};
+
 class MqttClient {
 public:
   explicit MqttClient(const MqttConfig& config);
+  ~MqttClient();
 
   void setKeyGenerator(MqttKeyGenerator* keyGenerator);
   const MqttKeyGenerator& keyGenerator() const;
 
+  // На ESP32: begin() піднімає окремий FreeRTOS-таск для connect()/loop()
+  // мережевого рівня (щоб retransmission-затримки не блокували sketch loop()).
+  // loop() потрібно й надалі викликати з sketch loop() - він лише розбирає
+  // чергу вхідних повідомлень і виконує колбеки addListener() в головному
+  // потоці (безпечно для дисплея/SD/touch логіки всередині колбеків).
+  // На ESP8266: поведінка без змін (кооперативний loop(), без окремого таска).
   void begin();
   void loop();
   void disconnect(const char* customOfflineMessage = nullptr);
@@ -95,6 +115,7 @@ private:
   void resubscribeAll();
   void dispatchMessage(const char* topic, const uint8_t* payload, unsigned int length);
   void cleanupRemovedListeners();
+  void enqueueIncoming(const char* topic, const uint8_t* payload, unsigned int length);
 
   std::string resolveTopic(const char* topic) const;
 
@@ -102,11 +123,20 @@ private:
   MqttKeyGenerator _defaultKeyGenerator;
   MqttKeyGenerator* _keyGenerator = nullptr;
 
+#if __has_include(<PicoMQTT.h>)
+  // Сховище для will.topic: PicoMQTT::Client зберігає лише const char*
+  // (не копіює рядок), а will.topic читається при КОЖНІЙ спробі конекту,
+  // не тільки в begin(). Тому резолвлений (з префіксом) topic має жити
+  // весь час роботи клієнта - не можна віддавати вказівник на локальний
+  // std::string, який знищується одразу після begin().
+  std::string _lwtTopicStorage;
+#endif
+
 #if __has_include(<PubSubClient.h>)
   WiFiClient _plainClient;
   WiFiClientSecure _secureClient;
   PubSubClient _mqttClient;
-  
+
   void handleMessage(char* topic, uint8_t* payload, unsigned int length);
   static void staticCallback(char* topic, uint8_t* payload, unsigned int length);
 #elif __has_include(<PicoMQTT.h>)
@@ -119,6 +149,42 @@ private:
 
 #if __has_include(<PubSubClient.h>)
   static MqttClient* _instance;
+#endif
+
+#if defined(ESP32)
+  // --- Потокобезпека для мережевого таска (тільки ESP32) ---
+  // _networkMutex захищає _mqttClient (весь мережевий I/O: connect/loop/publish/
+  // subscribe) - до нього звертаються і мережевий таск, і головний потік
+  // (publish()/subscribe() викликані з main.cpp).
+  // _queueMutex захищає лише _incomingQueue.
+  // _listeners захищений окремим _listenersMutex (див. нижче) - до нього
+  // звертаються і головний потік (addListener/removeListener/dispatchMessage),
+  // і мережевий таск (resubscribeAll() з connected_callback).
+  SemaphoreHandle_t _networkMutex = nullptr;
+  SemaphoreHandle_t _queueMutex = nullptr;
+  // _listenersMutex захищає _listeners: addListener()/removeListener()
+  // (головний потік) можуть виконуватись одночасно з resubscribeAll()
+  // (мережевий таск, спрацьовує з connected_callback) або dispatchMessage()
+  // (головний потік, з loop()) - без цього мьютекса це data race на
+  // std::vector.
+  SemaphoreHandle_t _listenersMutex = nullptr;
+  TaskHandle_t _networkTaskHandle = nullptr;
+  std::vector<MqttIncomingMessage> _incomingQueue;
+  volatile bool _taskShouldRun = false;
+
+  static void networkTaskTrampoline(void* param);
+  void networkTaskLoop();
+
+  // RAII-хелпер для лока/анлока SemaphoreHandle_t.
+  struct MutexGuard {
+    explicit MutexGuard(SemaphoreHandle_t mutex) : _mutex(mutex) {
+      if (_mutex != nullptr) { xSemaphoreTake(_mutex, portMAX_DELAY); }
+    }
+    ~MutexGuard() {
+      if (_mutex != nullptr) { xSemaphoreGive(_mutex); }
+    }
+    SemaphoreHandle_t _mutex;
+  };
 #endif
 };
 

@@ -19,11 +19,37 @@ MqttClient* MqttClient::_instance = nullptr;
 MqttClient::MqttClient(const MqttConfig& config)
     : _config(config), _defaultKeyGenerator(config.prefix)
 #if __has_include(<PicoMQTT.h>)
-      // Передаємо таймаут 1500мс (1.5 сек) замість 10 сек
+      // Таймаут сокета: 5000мс (замість дефолтних 10с бібліотеки, і замість
+      // початкових 1500мс - той бюджет був занадто вузьким для TCP
+      // retransmission-затримок на цій мережі, конект гарантовано валився
+      // по таймауту ще до CONNACK). Тепер, коли loop() у власному
+      // FreeRTOS-таску, довший timeout вже не блокує головний loop()/дисплей.
       , _mqttClient(config.host, config.port, config.clientId, 
-                  config.username, config.password, 60000, 30000, 1500)
+                  config.username, config.password, 60000, 30000, 5000)
 #endif
-     {}
+     {
+#if defined(ESP32)
+  _networkMutex = xSemaphoreCreateMutex();
+  _queueMutex = xSemaphoreCreateMutex();
+  _listenersMutex = xSemaphoreCreateMutex();
+#endif
+}
+
+MqttClient::~MqttClient() {
+#if defined(ESP32)
+  _taskShouldRun = false;
+  // Даємо таску шанс самому вийти з циклу (див. networkTaskLoop) перш ніж
+  // видаляти мьютекси, якими він міг ще користуватись.
+  if (_networkTaskHandle != nullptr) {
+    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelete(_networkTaskHandle);
+    _networkTaskHandle = nullptr;
+  }
+  if (_networkMutex != nullptr) { vSemaphoreDelete(_networkMutex); }
+  if (_queueMutex != nullptr) { vSemaphoreDelete(_queueMutex); }
+  if (_listenersMutex != nullptr) { vSemaphoreDelete(_listenersMutex); }
+#endif
+}
 
 void MqttClient::setKeyGenerator(MqttKeyGenerator* keyGenerator) { _keyGenerator = keyGenerator; }
 
@@ -67,9 +93,35 @@ void MqttClient::begin() {
   _mqttClient.setServer(_config.host, _config.port);
   _mqttClient.setBufferSize(_config.bufferSize);
   _mqttClient.setCallback(MqttClient::staticCallback);
+
+#if defined(ESP32)
+  // xTaskCreate (без пінінгу) - навмисно, не xTaskCreatePinnedToCore(core=1):
+  // ESP32-C6/H2 (RISC-V) - single-core, core=1 там не існує і валить
+  // assert() в xTaskCreatePinnedToCore. xTaskCreate сумісний з усіма
+  // варіантами (single-core і dual-core), планувальник сам обирає ядро.
+  _taskShouldRun = true;
+  xTaskCreate(&MqttClient::networkTaskTrampoline, "mqtt-net",
+              /*stackSize=*/8192, this, /*priority=*/1, &_networkTaskHandle);
+#endif
 }
 
 void MqttClient::loop() {
+#if defined(ESP32)
+  // Мережевий I/O (connect/loop) виконується в networkTaskLoop().
+  // Тут лише розбираємо чергу вхідних повідомлень і викликаємо колбеки
+  // addListener() - В ГОЛОВНОМУ ПОТОЦІ, безпечно для дисплея/SD/touch
+  // логіки всередині колбеків.
+  std::vector<MqttIncomingMessage> pending;
+  {
+    MutexGuard guard(_queueMutex);
+    pending.swap(_incomingQueue);
+  }
+  for (auto& msg : pending) {
+    dispatchMessage(msg.topic.c_str(), msg.payload.data(),
+                    static_cast<unsigned int>(msg.payload.size()));
+  }
+#else
+  // ESP8266: без змін, кооперативний однопотоковий loop().
   if (!_mqttClient.connected()) {
     uint32_t now = millis();
     if (now - _lastReconnectAttempt >= _config.reconnectIntervalMs) {
@@ -79,9 +131,39 @@ void MqttClient::loop() {
     return;
   }
   _mqttClient.loop();
+#endif
 }
 
+#if defined(ESP32)
+void MqttClient::networkTaskTrampoline(void* param) {
+  static_cast<MqttClient*>(param)->networkTaskLoop();
+}
+
+void MqttClient::networkTaskLoop() {
+  while (_taskShouldRun) {
+    {
+      MutexGuard guard(_networkMutex);
+
+      if (!_mqttClient.connected()) {
+        uint32_t now = millis();
+        if (now - _lastReconnectAttempt >= _config.reconnectIntervalMs) {
+          _lastReconnectAttempt = now;
+          connect();
+        }
+      } else {
+        _mqttClient.loop();  // блокуючий виклик - ізольований у власному таску
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  vTaskDelete(nullptr);
+}
+#endif
+
 void MqttClient::disconnect(const char* customOfflineMessage) {
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   const char* message = customOfflineMessage != nullptr ? customOfflineMessage : _config.lwtOfflineMessage;
   bool hasLwtTopic = _config.lwtTopic != nullptr && _config.lwtTopic[0] != '\0';
   bool hasMessage = message != nullptr && message[0] != '\0';
@@ -93,6 +175,10 @@ void MqttClient::disconnect(const char* customOfflineMessage) {
   _mqttClient.disconnect();
 }
 
+// УВАГА: викликається і з головного потоку (перша спроба конекту синхронно
+// в begin()-стилі старого коду більше немає), і з networkTaskLoop() на ESP32.
+// На виклик ззовні (не з networkTaskLoop()) MutexGuard тут НЕ ставимо - лок
+// вже тримає викликач (networkTaskLoop бере _networkMutex до виклику connect()).
 bool MqttClient::connect() {
   bool hasLwtTopic = _config.lwtTopic != nullptr && _config.lwtTopic[0] != '\0';
   bool hasOfflineMessage = _config.lwtOfflineMessage != nullptr && _config.lwtOfflineMessage[0] != '\0';
@@ -141,46 +227,20 @@ void MqttClient::begin() {
     _mqttClient.password = _config.password;
   }
 
-  // 2. Жорстко обмежуємо таймаут сокета. За замовчуванням там 10 секунд,
-  // ми ставимо 1.5 секунди, щоб loop() за будь-яких умов працював плавно.
-  // _mqttClient.socket_timeout_millis = 1500;
-  // _mqttClient.keep_alive_millis = 30000;
-
-  // ВИПРАВЛЕНО LWT: Заповнюємо вбудовану структуру `will` поелементно
   if (_config.lwtTopic != nullptr && _config.lwtTopic[0] != '\0') {
-    std::string lwtTopic = resolveTopic(_config.lwtTopic);
+    // _lwtTopicStorage - член класу, живе весь час роботи клієнта.
+    // PicoMQTT читає will.topic при кожній спробі конекту, не лише тут,
+    // тому НЕ можна вказувати will.topic на локальний std::string (dangling
+    // pointer одразу після виходу з begin()).
+    _lwtTopicStorage = resolveTopic(_config.lwtTopic);
     const char* message = _config.lwtOfflineMessage != nullptr ? _config.lwtOfflineMessage : "";
-    
-    // Пряме копіювання значень у поля вбудованого об'єкта `will`
-    _mqttClient.will.topic = lwtTopic.c_str();
+
+    _mqttClient.will.topic = _lwtTopicStorage.c_str();
     _mqttClient.will.payload = message;
     _mqttClient.will.qos = _config.lwtQos;
     _mqttClient.will.retain = _config.lwtRetain;
   }
 
-  // ГЛОБАЛЬНИЙ КОЛБЕК (Залишається без змін, вичитує Stream пакет)
-  /* std::string root = _keyGenerator->key("#");
-  _mqttClient.subscribe(root.c_str(), [this](const char* topic, PicoMQTT::IncomingPacket& packet) {
-    size_t length = packet.get_remaining_size();
-    std::vector<uint8_t> buffer(length);
-    packet.read(buffer.data(), length);
-
-    // Перенаправляємо в основну систему лістенерів проєкту
-    this->dispatchMessage(topic, buffer.data(), length);
-  }); */
-
-  // ВИДЛЕНО СУБСКРАЙБ НА "#". Замість цього використовуємо рідний default_callback бібліотеки.
-  // Він асинхронно ловитиме пакети ТІЛЬКИ з тих топіків, на які ви реально підписалися через addListener().
-  /* _mqttClient.default_callback = [this](const char* topic, PicoMQTT::IncomingPacket& packet) {
-    size_t length = packet.get_remaining_size();
-    std::vector<uint8_t> buffer(length);
-    packet.read(buffer.data(), length);
-
-    this->dispatchMessage(topic, buffer.data(), length);
-  }; */
-
-  // 4. КОЛБЕК З’ЄДНАННЯ: Щойно PicoMQTT успішно авторизується на брокері, 
-  // ми перепідписуємо всі ваші додані лістенери
   _mqttClient.connected_callback = [this]() {
     Serial.println("[MQTT] Connected to broker successfully!");
     this->resubscribeAll();
@@ -194,14 +254,63 @@ void MqttClient::begin() {
     Serial.println("[MQTT] Connect fail.");
   };
 
+  // TODO: коли буде підключено per-topic message dispatch для PicoMQTT
+  // (наразі не реалізовано - root subscribe на "#" закоментований вище в
+  // історії файлу) - НЕ викликати dispatchMessage() напряму з мережевого
+  // колбека. Використовувати enqueueIncoming(), як зроблено для PubSubClient
+  // в handleMessage() нижче, щоб колбеки addListener() лишались у головному
+  // потоці.
+
   _mqttClient.begin();
+
+#if defined(ESP32)
+  // xTaskCreate (без пінінгу) - навмисно, не xTaskCreatePinnedToCore(core=1):
+  // ESP32-C6/H2 (RISC-V) - single-core, core=1 там не існує і валить
+  // assert() в xTaskCreatePinnedToCore. xTaskCreate сумісний з усіма
+  // варіантами (single-core і dual-core), планувальник сам обирає ядро.
+  _taskShouldRun = true;
+  xTaskCreate(&MqttClient::networkTaskTrampoline, "mqtt-net",
+              /*stackSize=*/8192, this, /*priority=*/1, &_networkTaskHandle);
+#endif
 }
 
 void MqttClient::loop() {
-  _mqttClient.loop(); // Виконується миттєво, не блокує процесор
+#if defined(ESP32)
+  std::vector<MqttIncomingMessage> pending;
+  {
+    MutexGuard guard(_queueMutex);
+    pending.swap(_incomingQueue);
+  }
+  for (auto& msg : pending) {
+    dispatchMessage(msg.topic.c_str(), msg.payload.data(),
+                    static_cast<unsigned int>(msg.payload.size()));
+  }
+#else
+  _mqttClient.loop();
+#endif
 }
 
+#if defined(ESP32)
+void MqttClient::networkTaskTrampoline(void* param) {
+  static_cast<MqttClient*>(param)->networkTaskLoop();
+}
+
+void MqttClient::networkTaskLoop() {
+  while (_taskShouldRun) {
+    {
+      MutexGuard guard(_networkMutex);
+      _mqttClient.loop();  // блокуючий виклик (сокет-таймаут) - ізольований тут
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  vTaskDelete(nullptr);
+}
+#endif
+
 void MqttClient::disconnect(const char* customOfflineMessage) {
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   const char* message = customOfflineMessage != nullptr ? customOfflineMessage : _config.lwtOfflineMessage;
   bool hasLwtTopic = _config.lwtTopic != nullptr && _config.lwtTopic[0] != '\0';
   bool hasMessage = message != nullptr && message[0] != '\0';
@@ -222,6 +331,9 @@ bool MqttClient::connect() {
 // ==========================================
 
 bool MqttClient::publish(const char* topic, const char* payload, bool retained) {
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
   return _mqttClient.publish(fullTopic.c_str(), payload, retained);
@@ -232,6 +344,9 @@ bool MqttClient::publish(const char* topic, const char* payload, bool retained) 
 }
 
 bool MqttClient::publish(const char* topic, const uint8_t* payload, unsigned int length, bool retained) {
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
   return _mqttClient.publish(fullTopic.c_str(), payload, length, retained);
@@ -243,6 +358,9 @@ bool MqttClient::publish(const char* topic, const uint8_t* payload, unsigned int
 }
 
 bool MqttClient::subscribe(const char* topic) {
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
   return _mqttClient.subscribe(fullTopic.c_str());
@@ -253,6 +371,9 @@ bool MqttClient::subscribe(const char* topic) {
 }
 
 bool MqttClient::unsubscribe(const char* topic) {
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
   return _mqttClient.unsubscribe(fullTopic.c_str());
@@ -262,14 +383,25 @@ bool MqttClient::unsubscribe(const char* topic) {
 #endif
 }
 
+// addListener()/removeListener() навмисно БЕЗ MutexGuard(_networkMutex):
+// _listeners мутується і читається (через dispatchMessage() з loop()) лише
+// в головному потоці, мережевий таск до _listeners не звертається.
 MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback callback) {
   MqttListenerEntry entry;
   entry.id = _nextListenerId++;
   entry.topic = resolveTopic(topic).c_str();
   entry.callback = callback;
-  _listeners.push_back(entry);
+  {
+#if defined(ESP32)
+    MutexGuard guard(_listenersMutex);
+#endif
+    _listeners.push_back(entry);
+  }
 
   if (_mqttClient.connected()) {
+#if defined(ESP32)
+    MutexGuard guard(_networkMutex);
+#endif
     _mqttClient.subscribe(entry.topic.c_str());
   }
   return entry.id;
@@ -301,6 +433,9 @@ MqttListenerId MqttClient::addStringListener(const char* topic, MqttStringListen
 }
 
 void MqttClient::removeListener(MqttListenerId id) {
+#if defined(ESP32)
+  MutexGuard guard(_listenersMutex);
+#endif
   for (auto& entry : _listeners) {
     if (entry.id == id) {
       entry.markedForRemoval = true;
@@ -310,18 +445,38 @@ void MqttClient::removeListener(MqttListenerId id) {
 }
 
 void MqttClient::cleanupRemovedListeners() {
+#if defined(ESP32)
+  MutexGuard guard(_listenersMutex);
+#endif
   _listeners.erase(std::remove_if(_listeners.begin(), _listeners.end(),
                      [](const MqttListenerEntry& entry) { return entry.markedForRemoval; }), _listeners.end());
 }
 
+// resubscribeAll() викликається або з connect() (тримає _networkMutex), або
+// напряму з PicoMQTT connected_callback (мережевий таск, теж під
+// _networkMutex - див. networkTaskLoop()). _listenersMutex - окремий м'ютекс,
+// тому лок тут безпечний і не конфліктує з _networkMutex.
 void MqttClient::resubscribeAll() {
+#if defined(ESP32)
+  MutexGuard guard(_listenersMutex);
+#endif
   for (const auto& entry : _listeners) {
     if (!entry.markedForRemoval) { _mqttClient.subscribe(entry.topic.c_str()); }
   }
 }
 
 void MqttClient::dispatchMessage(const char* topic, const uint8_t* payload, unsigned int length) {
-  for (auto& entry : _listeners) {
+  // Копіюємо снепшот під локом, самі callback-и викликаємо без утримання
+  // _listenersMutex - callback може викликати addListener()/removeListener()
+  // (реентрантність), що призвело б до deadlock на non-recursive mutex.
+  std::vector<MqttListenerEntry> snapshot;
+  {
+#if defined(ESP32)
+    MutexGuard guard(_listenersMutex);
+#endif
+    snapshot = _listeners;
+  }
+  for (auto& entry : snapshot) {
     if (entry.markedForRemoval || !entry.callback) { continue; }
     if (!MqttTopicMatcher::match(entry.topic.c_str(), topic)) { continue; }
     entry.callback(topic, payload, length);
@@ -337,9 +492,26 @@ bool MqttClient::isConnected() const {
 #endif
 }
 
+void MqttClient::enqueueIncoming(const char* topic, const uint8_t* payload, unsigned int length) {
+#if defined(ESP32)
+  MqttIncomingMessage msg;
+  msg.topic.assign(topic);
+  msg.payload.assign(payload, payload + length);
+  MutexGuard guard(_queueMutex);
+  _incomingQueue.push_back(std::move(msg));
+#endif
+}
+
 #if __has_include(<PubSubClient.h>)
 void MqttClient::handleMessage(char* topic, uint8_t* payload, unsigned int length) {
+#if defined(ESP32)
+  // Викликається мережевим таском (з _mqttClient.loop() всередині
+  // networkTaskLoop()) - не можна напряму викликати dispatchMessage(),
+  // бо колбеки addListener() мають виконуватись у головному потоці.
+  enqueueIncoming(topic, payload, length);
+#else
   dispatchMessage(topic, payload, length);
+#endif
 }
 
 void MqttClient::staticCallback(char* topic, uint8_t* payload, unsigned int length) {
