@@ -10,10 +10,13 @@
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
+#include <esp_wifi.h> // Обов'язково додайте цей системний заголовок
+
 void setupWiFi() {
 #if defined(BOARD_ESP8266)
   WiFi.mode(WIFI_STA);
 #endif
+  esp_wifi_set_ps(WIFI_PS_NONE); 
   WiFi.setSleep(false);
   WiFi.begin(ssid, password);
   // Modem sleep (power-save) вимкнено для ВСІХ плат: раніше рятувало від
