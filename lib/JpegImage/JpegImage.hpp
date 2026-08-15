@@ -2,6 +2,10 @@
 
 #include <Arduino.h>
 
+#if defined(BOARD_ESP32_C6)
+#include <JPEGDEC.h>
+#endif
+
 #include <TLogger.hpp>
 
 // Глибина кольору, з якою зберігається декодоване зображення в пам'яті
@@ -48,7 +52,18 @@ public:
   const uint8_t  *bufferMono1()  const;  // формат, сумісний з Adafruit_GFX::drawBitmap
 
 private:
+#if defined(BOARD_ESP32_C6)
+  // RISC-V (C6) не толерантний до unaligned access - tjpgd на цій платформі
+  // повертав биті значення (height=0 з коректним width). Декодуємо через JPEGDEC.
+  static int jpegDrawCallback(JPEGDRAW *pDraw);
+#else
   static bool jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
+#endif
+
+  // Спільна логіка запису одного прямокутного блоку RGB565-пікселів у буфер
+  // потрібної глибини кольору (викликається з обох варіантів колбека вище).
+  void blitBlock(int x, int y, int w, int h, int stride, const uint16_t *bitmap);
+
   void freeBuffer();
 
   // Конвертація одного пікселя RGB565 -> RGB888 (розширення 5/6 біт до 8 біт кожного каналу).

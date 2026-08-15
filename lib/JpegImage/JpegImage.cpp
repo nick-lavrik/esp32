@@ -1,7 +1,17 @@
 #include "JpegImage.hpp"
 
 #include <LittleFS.h>
+
+// RISC-V (ESP32-C6) не толерантний до unaligned memory access, на відміну від
+// Xtensa (ESP32/ESP32-S3). tjpgd (движок під TJpg_Decoder) в парсингу заголовка
+// читає multi-byte поля без гарантії вирівнювання - на C6 це давало биті/нульові
+// значення (спостерігалось: getJpgSize() повертав width>0, height=0). Тому на C6
+// декодуємо через JPEGDEC (bitbank2), яка коректно працює на RISC-V.
+#if defined(BOARD_ESP32_C6)
+#include <JPEGDEC.h>
+#else
 #include <TJpg_Decoder.h>
+#endif
 
 #if defined(ESP32)
 #include <esp_heap_caps.h>
@@ -92,15 +102,23 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
 
   uint16_t jpegWidth = 0;
   uint16_t jpegHeight = 0;
+
+#if defined(BOARD_ESP32_C6)
+  JPEGDEC jpegDecoder;
+  if (!jpegDecoder.openRAM(jpegData, (int)fileSize, JpegImage::jpegDrawCallback)) {
+    _logger.error("Can't parse jpeg header (JPEGDEC error %d)", jpegDecoder.getLastError());
+    heap_caps_free(jpegData);
+    return false;
+  }
+  jpegWidth = (uint16_t)jpegDecoder.getWidth();
+  jpegHeight = (uint16_t)jpegDecoder.getHeight();
+#else
   if (TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, fileSize) != JDR_OK) {
     _logger.error("Can't perse jpeg header");
     heap_caps_free(jpegData);
     return false;
   }
-
-  /* if (jpegWidth == 320 && jpegHeight == 0) {
-    jpegHeight = 172;
-  } */
+#endif
 
   size_t bufferBytes;
   if (depth == JpegColorDepth::MONO1) {
@@ -129,13 +147,28 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   _width = jpegWidth;
   _height = jpegHeight;
 
+  _activeInstance = this;
+
+#if defined(BOARD_ESP32_C6)
+  jpegDecoder.setPixelType(RGB565_LITTLE_ENDIAN);
+  int decodeResult = jpegDecoder.decode(0, 0, 0);
+  jpegDecoder.close();
+  _activeInstance = nullptr;
+
+  heap_caps_free(jpegData);
+
+  if (decodeResult != 1) {
+    _logger.error("Jpeg decode error \"%s\" (JPEGDEC error %d)", path, jpegDecoder.getLastError());
+    freeBuffer();
+    return false;
+  }
+#else
   TJpgDec.setJpgScale(1);
   // RGB565 -> потрібен swap байтів для коректного порядку на ST7789
   // RGB332 -> конвертуємо самі з "чистого" RGB565, swap не потрібен
   // TJpgDec.setSwapBytes(depth == JpegColorDepth::RGB565); // ми вже робимо swap в Display.cpp
   TJpgDec.setCallback(JpegImage::jpegOutputCallback);
 
-  _activeInstance = this;
   JRESULT decodeResult = TJpgDec.drawJpg(0, 0, jpegData, fileSize);
   _activeInstance = nullptr;
 
@@ -146,6 +179,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     freeBuffer();
     return false;
   }
+#endif
 
   _loaded = true;
   _logger.info("Loaded %dx%d, depth: %d біт, buffer: %u B, memory: %s", _width,
@@ -153,56 +187,76 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   return true;
 }
 
+// Спільна логіка запису одного прямокутного блоку RGB565-пікселів (MCU-блок від
+// JPEGDEC або рядковий блок від TJpg_Decoder) у вихідний буфер потрібної глибини.
+// stride - крок між рядками вхідного bitmap у пікселях (для TJpg_Decoder == w,
+// для JPEGDEC MCU-блоку теж == iWidth, тому параметр спільний для обох).
+void JpegImage::blitBlock(int x, int y, int w, int h, int stride, const uint16_t *bitmap) {
+  if (_buffer == nullptr || y >= _height) {
+    return;
+  }
+
+  for (int row = 0; row < h; row++) {
+    int destY = y + row;
+    if (destY >= _height) {
+      break;
+    }
+
+    int copyWidth = w;
+    if (x + copyWidth > _width) {
+      copyWidth = _width - x;
+    }
+    if (copyWidth <= 0) {
+      continue;
+    }
+
+    const uint16_t *srcRow = bitmap + (size_t)row * stride;
+
+    if (_depth == JpegColorDepth::RGB888) {
+      uint8_t *destRow = (uint8_t *)_buffer + (size_t)(destY * _width + x) * 3;
+      for (int col = 0; col < copyWidth; col++) {
+        rgb565to888(srcRow[col], destRow + (size_t)col * 3);
+      }
+    } else if (_depth == JpegColorDepth::RGB565) {
+      uint16_t *destRow = (uint16_t *)_buffer + (destY * _width) + x;
+      memcpy(destRow, srcRow, copyWidth * sizeof(uint16_t));
+    } else if (_depth == JpegColorDepth::RGB332) {
+      // RGB332 - конвертуємо піксель за пікселем
+      uint8_t *destRow = (uint8_t *)_buffer + (destY * _width) + x;
+      for (int col = 0; col < copyWidth; col++) {
+        destRow[col] = rgb565to332(srcRow[col]);
+      }
+    } else {
+      // MONO1 - поріг яскравості, пакування в біти (формат Adafruit_GFX::drawBitmap)
+      uint8_t *destRow = (uint8_t *)_buffer + (destY * rowStrideBytes());
+      for (int col = 0; col < copyWidth; col++) {
+        int destX = x + col;
+        bool white = rgb565toGray(srcRow[col]) >= _monoThreshold;
+        setMonoBit(destRow, destX, white);
+      }
+    }
+  }
+}
+
+#if defined(BOARD_ESP32_C6)
+int JpegImage::jpegDrawCallback(JPEGDRAW *pDraw) {
+  JpegImage *self = _activeInstance;
+  if (self == nullptr) {
+    return 0;
+  }
+  self->blitBlock(pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight, pDraw->iWidth, pDraw->pPixels);
+  return 1;
+}
+#else
 bool JpegImage::jpegOutputCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
   JpegImage *self = _activeInstance;
   if (self == nullptr || self->_buffer == nullptr) {
     return false;
   }
-
-  if (y >= self->_height) {
-    return true;
-  }
-
-  for (uint16_t row = 0; row < h; row++) {
-    uint16_t destY = y + row;
-    if (destY >= self->_height) {
-      break;
-    }
-
-    uint16_t copyWidth = w;
-    if (x + copyWidth > self->_width) {
-      copyWidth = self->_width - x;
-    }
-
-    uint16_t *srcRow = bitmap + (row * w);
-
-    if (self->_depth == JpegColorDepth::RGB888) {
-      uint8_t *destRow = (uint8_t *)self->_buffer + (size_t)(destY * self->_width + x) * 3;
-      for (uint16_t col = 0; col < copyWidth; col++) {
-        rgb565to888(srcRow[col], destRow + (size_t)col * 3);
-      }
-    } else if (self->_depth == JpegColorDepth::RGB565) {
-      uint16_t *destRow = (uint16_t *)self->_buffer + (destY * self->_width) + x;
-      memcpy(destRow, srcRow, copyWidth * sizeof(uint16_t));
-    } else if (self->_depth == JpegColorDepth::RGB332) {
-      // RGB332 - конвертуємо піксель за пікселем
-      uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->_width) + x;
-      for (uint16_t col = 0; col < copyWidth; col++) {
-        destRow[col] = rgb565to332(srcRow[col]);
-      }
-    } else {
-      // MONO1 - поріг яскравості, пакування в біти (формат Adafruit_GFX::drawBitmap)
-      uint8_t *destRow = (uint8_t *)self->_buffer + (destY * self->rowStrideBytes());
-      for (uint16_t col = 0; col < copyWidth; col++) {
-        uint16_t destX = x + col;
-        bool white = rgb565toGray(srcRow[col]) >= self->_monoThreshold;
-        setMonoBit(destRow, destX, white);
-      }
-    }
-  }
-
+  self->blitBlock(x, y, w, h, w, bitmap);
   return true;
 }
+#endif
 
 bool JpegImage::isLoaded() const { return _loaded; }
 uint16_t JpegImage::width() const { return _width; }
