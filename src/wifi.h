@@ -10,7 +10,7 @@
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
-#if ESP32
+#if ESP32 || defined(BOARD_ESP32_C6)
 #include <esp_wifi.h> // Обов'язково додайте цей системний заголовок
 #endif
 
@@ -18,10 +18,20 @@ void setupWiFi() {
 #if defined(BOARD_ESP8266)
   WiFi.mode(WIFI_STA);
 #endif
-  #if ESP32
-  esp_wifi_set_ps(WIFI_PS_NONE); 
+  // WiFi.setBufferSize(2048, 2048);
+  // WiFi.setNoDelay(true);
+  WiFi.mode(WIFI_STA);
+  #if ESP32 || defined(BOARD_ESP32_C6)
+// ВАЖНО: Выключаем Wi-Fi 6 ДО старта подключения, чтобы избежать краша
+    esp_err_t err = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    if (err == ESP_OK) {
+        Serial.println("Успешно принудительно включен Wi-Fi 4 (802.11n)");
+    } else {
+        Serial.printf("Ошибка смены протокола: %d\n", err);
+    }
+  // esp_wifi_set_ps(WIFI_PS_NONE); 
   #endif
-  WiFi.setSleep(false);
+ //  WiFi.setSleep(false);
   WiFi.begin(ssid, password);
   // Modem sleep (power-save) вимкнено для ВСІХ плат: раніше рятувало від
   // "сміття в моніторі" на ttgo-t1, і, ймовірно, причина затримок 2-3с у

@@ -270,7 +270,7 @@ void MqttClient::begin() {
   // варіантами (single-core і dual-core), планувальник сам обирає ядро.
   _taskShouldRun = true;
   xTaskCreate(&MqttClient::networkTaskTrampoline, "mqtt-net",
-              /*stackSize=*/8192, this, /*priority=*/1, &_networkTaskHandle);
+              /*stackSize=*/8192, this, /*priority=*/5, &_networkTaskHandle);
 #endif
 }
 
