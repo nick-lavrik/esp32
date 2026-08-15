@@ -58,7 +58,7 @@
 #endif
 #endif
 #include <LittleFS.h>
-#include <PubSubClient.h>
+// #include <PubSubClient.h>
 #include <TouchScreenConfig.h>
 
 #include <AnalogSensor.hpp>
@@ -92,6 +92,7 @@
 #include "ping.h"
 #include "setup.h"
 #include "wifi.h"
+#include "strip.h"
 
 #if BOARD_HAS_TOUCHSCREEN
 #include <TouchController.h>
@@ -180,7 +181,7 @@ ConfigStorage configStorage;
 JpegImage spaceImage;
 SerialCommander commandHandler;
 WiFiClient wifiClient;
-PubSubClient client(wifiClient);
+// PubSubClient client(wifiClient);
 
 #if HAS_MQTT_CLIENT
 MqttClient mqtt(makeMqttConfig());
@@ -1725,6 +1726,8 @@ void setupWiFiIcon() {
     const int p[2] = {display.width() - 16, display.height() - 16};
   #elif defined(BOARD_ESP32_S3_LCD147)
     const int p[2] = {display.width() - 16, display.height() - 16};
+  #elif defined(BOARD_ESP32_C6)
+    const int p[2] = {display.width() - 16, display.height() - 16};
   #elif defined(BOARD_4848S040)
     const int p[2] = {display.width() - 16, display.height() - 16};
   #elif defined(BOARD_ST7789)
@@ -1788,6 +1791,17 @@ void testAsusWRT() {
   Logger::info("------ AsusWRT test script -------");
   Logger::info("");
 }
+void testRawTcpConnect() {
+  static uint32_t lastTest = 0;
+  if (millis() - lastTest < 5000) return;
+  lastTest = millis();
+  WiFiClient testClient;
+  uint32_t t0 = millis();
+  bool ok = testClient.connect("18.156.19.212", 1883, 5000); // 5с - щоб побачити реальний час, не зрізаний коротшим таймаутом
+  uint32_t dt = millis() - t0;
+  Logger::warn("raw TCP connect: %s, took %ums", ok ? "OK" : "FAIL", dt);
+  if (ok) testClient.stop();
+}
 
 void setup() {
   uint32_t freeHeap = ESP.getFreeHeap();
@@ -1825,6 +1839,8 @@ void setup() {
   Logger::info("> Ready. Enter 'list' for comand list.");
 }
 
+#include <esp_wifi.h> // Обов'язково додайте цей системний заголовок
+int wifi_state = 0;
 void loop() {
   display.startWrite();
   PrintQueue::flush();
@@ -1836,12 +1852,29 @@ void loop() {
     return;
   } */
 
+  // if (WiFi.status() == WL_CONNECTED) {
+  if (wifi_state == 0 && WiFi.isConnected()) {
+    Logger::info("WIFI connected");
+    wifi_state = 1;
+
+    // Вимикаємо Modem Sleep (WiFi.setSleep(WIFI_PS_NONE) для Arduino)
+    esp_wifi_set_ps(WIFI_PS_NONE); 
+    // Обмежуємо протокол до B/G/N (іноді AX/WiFi 6 викликає лаги на C6)
+    esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+
+  } else if (wifi_state == 1 && !WiFi.isConnected()) {
+    Logger::info("WIFI disconnected!");
+    wifi_state = 0;
+  }
+
   #if HAS_MQTT_CLIENT
   if (WiFi.isConnected()) {
     uint32_t t0 = millis();
     mqtt.loop();
+    // testRawTcpConnect();   // <-- тимчасово замість mqtt.loop();
     uint32_t dt = millis() - t0;
     if (dt > 200) Logger::warn("mqtt.loop() took %ums", dt);
+    // --- В loop(), замість (або поруч з) mqtt.loop() на час тесту: ---
   }
   #endif
 
@@ -1858,6 +1891,7 @@ void loop() {
 #endif
 
   display.flush();
+  // loopRgbLed();
 
   delay(1);
 }
