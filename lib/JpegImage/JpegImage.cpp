@@ -58,13 +58,21 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     return false;
   }
 
-  File file = LittleFS.open(path, "r");
+  File file = LittleFS.open(path, "rb");
   if (!file) {
     _logger.error("Can't open file: %s", path);
     return false;
   }
 
+  file.seek(0);
+
   size_t fileSize = file.size();
+
+  if (fileSize <= 0) {
+    _logger.error("Empty jpeg file \"%s\" = size=%d", path, fileSize);
+    return false;
+  }
+
   bool jpegBufPsram = false;
   uint8_t *jpegData = (uint8_t *)allocPreferPsram(fileSize, &jpegBufPsram);
   if (jpegData == nullptr) {
@@ -77,7 +85,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   file.close();
 
   if (bytesRead != fileSize) {
-    _logger.error("The size of the read data does not match the file size");
+    _logger.error("The size of the read data does not match the file size (%d <=> %d)", bytesRead, fileSize);
     heap_caps_free(jpegData);
     return false;
   }
@@ -89,6 +97,10 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     heap_caps_free(jpegData);
     return false;
   }
+
+  /* if (jpegWidth == 320 && jpegHeight == 0) {
+    jpegHeight = 172;
+  } */
 
   size_t bufferBytes;
   if (depth == JpegColorDepth::MONO1) {
@@ -103,7 +115,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
     bufferBytes = (size_t)jpegWidth * jpegHeight * bytesPerPixel;
   }
 
-  _logger.info("\"%s\" %dx%d (%d bytes) - free (%d)", path, jpegWidth, jpegHeight, bufferBytes,
+  _logger.info("\"%s\" %dx%d (%d:%d bytes) - free (%d)", path, jpegWidth, jpegHeight, bufferBytes, fileSize,
                heap_caps_get_free_size(MALLOC_CAP_8BIT));
 
   _buffer = allocPreferPsram(bufferBytes, &_usedPsram);

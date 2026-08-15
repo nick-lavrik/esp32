@@ -1783,13 +1783,16 @@ void setup() {
   uint32_t freeHeap = ESP.getFreeHeap();
   setupSerial();
   Logger::info("free heap memory from scratch: %u", freeHeap);
+
   setupSD();
+
   setupLittleFS();
   setupEventDispatcher();
   setupConfigStorage();
   setupSerialCommander();
   setupBlinkLED();
   setupDisplay();
+  // setupSD(); // [sd_diskio.cpp:176] sdCommand(): no token received
   setupTouchScreen();
   setupWiFi();
   setupNtpService();
@@ -1825,7 +1828,10 @@ void loop() {
 
   #if HAS_MQTT_CLIENT
   if (WiFi.isConnected()) {
+    uint32_t t0 = millis();
     mqtt.loop();
+    uint32_t dt = millis() - t0;
+    if (dt > 200) Logger::warn("mqtt.loop() took %ums", dt);
   }
   #endif
 

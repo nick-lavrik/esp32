@@ -15,7 +15,11 @@ void setupWiFi() {
   WiFi.mode(WIFI_STA);
 #endif
   WiFi.begin(ssid, password);
-  // WiFi.setSleep(false); // вирішуємо проблему сміття в моніторі (ttgo-t1)
+  WiFi.setSleep(false);
+  // Modem sleep (power-save) вимкнено для ВСІХ плат: раніше рятувало від
+  // "сміття в моніторі" на ttgo-t1, і, ймовірно, причина затримок 2-3с у
+  // mqtt.loop()/hostByName() на esp32-c6 (WiFi6-чипи агресивніше
+  // присипляють радіо між beacon-інтервалами за замовчуванням).
 }
 
 #if defined(BOARD_ESP8266)
