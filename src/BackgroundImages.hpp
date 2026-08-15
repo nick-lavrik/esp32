@@ -29,7 +29,8 @@ extern const uint16_t backgroundSpace03[76800];
 // Масив вказівників на всі фонові зображення (індекси 0..2)
 extern const uint16_t* const backgroundImages[BACKGROUND_IMAGES_COUNT];
 
-// Повертає поточне зображення, циклічно
-const uint16_t* getBackgroundImage();
+// Повертає поточне зображення, циклічно. bufferIs8bpp виставляється в true,
+// якщо повернений буфер - RGB332 (uint8_t*, 1 байт/піксель), інакше RGB565.
+const void* getBackgroundImage(uint16_t* width, uint16_t* height, bool* bufferIs8bpp);
 void drawBackgroundImage();
 void setBackgroundImage(JpegImage& image);

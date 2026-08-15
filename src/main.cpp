@@ -1292,6 +1292,9 @@ void setupBackgroundImage() {
   spaceImage.loadFromLittleFS(LITTLEFS_BACKGROUND_IMAGE,
                               SPRITE_COLOR_DEPTH > 8 ? JpegColorDepth::RGB565 : JpegColorDepth::RGB332); // 16 | 8
   setBackgroundImage(spaceImage);
+  #if BOARD_ESP32_C6
+  ImageEffects::applyDarken(spaceImage, 0.15);
+  #endif
 #endif
 }
 

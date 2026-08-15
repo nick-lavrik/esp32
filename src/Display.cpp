@@ -89,6 +89,20 @@ void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16
   sprite().pushImage(x, y, w, h, data);
 }
 
+void Display::pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const uint8_t* data) {
+  dXY(&x, &y);
+#if !defined(BOARD_4848S040) && !defined(BOARD_ESP8266) && !defined(BOARD_ESP32_C6)
+  // Справжній bodmer/TFT_eSPI (esp32-st7789, ttgo-t1) має pushImage(...,uint8_t*,bool,uint16_t*).
+  // bpp8=true -> дані трактуються як "рідний" 8bpp формат сприту (RGB332), без палітри.
+  sprite().pushImage(x, y, w, h, const_cast<uint8_t*>(data), true);
+#else
+  // LGFX (4848s040), Arduino_GFX-шим (esp32-c6), SSD1306-шим (esp8266) не мають
+  // сумісного 8bpp pushImage - на цих платах SPRITE_COLOR_DEPTH=8 для фонових
+  // зображень не використовується (див. platformio.ini, JpegColorDepth у main.cpp).
+  _logger.error("pushImage8bpp() не підтримується на цій платі");
+#endif
+}
+
 void Display::flush() { 
 #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   int x = 0, y = 0;

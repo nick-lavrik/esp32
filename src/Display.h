@@ -51,6 +51,10 @@ public:
   void brightness(uint8_t percent);
 
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
+  // RGB332 (8bpp) буфер - НЕ приводити до pushImage(uint16_t*): TFT_eSPI прочитає
+  // його з подвоєним stride (2 байти/піксель замість 1), що дає ефект "картинка
+  // порізана на 4 квадрати" (половинний буфер читається з подвоєним кроком рядка).
+  void pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const uint8_t *data);
   void setCursor(int32_t x, int32_t y);
 
   // Ширина/висота активної області екрану (з урахуванням rotation)

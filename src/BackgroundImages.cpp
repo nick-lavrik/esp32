@@ -40,13 +40,16 @@ const uint16_t* const backgroundImages[BACKGROUND_IMAGES_COUNT] PROGMEM = {
 #endif
 };
 
-const uint16_t* getBackgroundImage(uint16_t* width, uint16_t* height) {
+const void* getBackgroundImage(uint16_t* width, uint16_t* height, bool* bufferIs8bpp) {
   static size_t currentIndex = 0;
+
+  *bufferIs8bpp = false;
 
   if (_activeInstance != nullptr && _activeInstance->isLoaded()) {
     *width = _activeInstance->width();
     *height = _activeInstance->height();
-    return static_cast<uint16_t*>(_activeInstance->buffer());
+    *bufferIs8bpp = (_activeInstance->colorDepth() == JpegColorDepth::RGB332);
+    return _activeInstance->buffer();
   }
 
   if (_activeInstance != nullptr) {
@@ -66,6 +69,7 @@ const uint16_t* getBackgroundImage(uint16_t* width, uint16_t* height) {
   }
 #endif
 
+  // Вбудовані background_XX-асети завжди зашиті як RGB565 (див. BackgroundImages.hpp)
   *width = 320;
   *height = 240;
   return backgroundImages[currentIndex];
@@ -74,11 +78,17 @@ const uint16_t* getBackgroundImage(uint16_t* width, uint16_t* height) {
 extern Display display;
 void drawBackgroundImage() {
   uint16_t width, height;
-  const uint16_t* ptr = getBackgroundImage(&width, &height);
+  bool is8bpp = false;
+  const void* ptr = getBackgroundImage(&width, &height, &is8bpp);
 
   if (ptr) {
-    display.pushImage((uint32_t)(display.width() - width) / 2,
-                      (uint32_t)(display.height() - height) / 2, width, height, ptr);
+    int32_t x = (int32_t)(display.width() - width) / 2;
+    int32_t y = (int32_t)(display.height() - height) / 2;
+    if (is8bpp) {
+      display.pushImage8bpp(x, y, width, height, static_cast<const uint8_t*>(ptr));
+    } else {
+      display.pushImage(x, y, width, height, static_cast<const uint16_t*>(ptr));
+    }
   } else {
     display.clear();
   }
