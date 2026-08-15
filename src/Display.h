@@ -54,6 +54,8 @@ public:
   // RGB332 (8bpp) буфер - НЕ приводити до pushImage(uint16_t*): TFT_eSPI прочитає
   // його з подвоєним stride (2 байти/піксель замість 1), що дає ефект "картинка
   // порізана на 4 квадрати" (половинний буфер читається з подвоєним кроком рядка).
+  // esp32-c6: канва Arduino_GFX не має 8bpp - тут дані конвертуються в RGB565
+  // рядок за рядком (див. Display.cpp).
   void pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const uint8_t *data);
   void setCursor(int32_t x, int32_t y);
 

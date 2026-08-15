@@ -2,6 +2,22 @@
 #include "Display.h"
 
 #include <stdarg.h>  // Обов'язково для роботи з трикрапкою (...)
+#include <stdlib.h>  // malloc/free для тимчасового рядкового буфера в pushImage8bpp (BOARD_ESP32_C6)
+
+#if defined(BOARD_ESP32_C6)
+// Arduino_Canvas (Arduino_GFX) не має 8bpp-режиму - канва завжди 16-біт
+// RGB565 (див. Setup_JD9853_C6.h::TFT_eSprite::setColorDepth() - no-op).
+// Конвертуємо RGB332 (3-3-2) назад у RGB565 (5-6-5) біт-реплікацією.
+static inline uint16_t rgb332to565(uint8_t c) {
+  uint8_t r3 = (c >> 5) & 0x07;
+  uint8_t g3 = (c >> 2) & 0x07;
+  uint8_t b2 = c & 0x03;
+  uint16_t r5 = (uint16_t)((r3 << 2) | (r3 >> 1));  // 0..7   -> 0..31
+  uint16_t g6 = (uint16_t)(g3 * 9);                 // 0..7   -> 0..63 (7*9=63)
+  uint16_t b5 = (uint16_t)(b2 * 10);                // 0..3   -> 0..30 (~5-біт, похибка ≤1)
+  return (uint16_t)((r5 << 11) | (g6 << 5) | b5);
+}
+#endif
 
 // Глобальний об'єкт "tft" створюється рівно в одному файлі на середовище:
 //   env:esp32-st7789      -> src/TftInstance_ST7789.cpp
@@ -91,14 +107,31 @@ void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16
 
 void Display::pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const uint8_t* data) {
   dXY(&x, &y);
-#if !defined(BOARD_4848S040) && !defined(BOARD_ESP8266) && !defined(BOARD_ESP32_C6)
+#if defined(BOARD_ESP32_C6)
+  // Canvas Arduino_GFX завжди 16-біт RGB565 - конвертуємо RGB332 -> RGB565
+  // РЯДОК ЗА РЯДКОМ у невеликий тимчасовий буфер (w * 2 байти), а не в один
+  // повний w*h*2 буфер: плата без PSRAM, зайві ~100+ KB на кадр тут дорогі.
+  uint16_t* rowBuffer = static_cast<uint16_t*>(malloc((size_t)w * sizeof(uint16_t)));
+  if (rowBuffer == nullptr) {
+    _logger.error("pushImage8bpp: не вдалось виділити рядковий буфер (%d px)", (int)w);
+    return;
+  }
+  for (int32_t row = 0; row < h; row++) {
+    const uint8_t* srcRow = data + (size_t)row * w;
+    for (int32_t col = 0; col < w; col++) {
+      rowBuffer[col] = rgb332to565(srcRow[col]);
+    }
+    sprite().pushImage(x, y + row, w, 1, rowBuffer);
+  }
+  free(rowBuffer);
+#elif !defined(BOARD_4848S040) && !defined(BOARD_ESP8266)
   // Справжній bodmer/TFT_eSPI (esp32-st7789, ttgo-t1) має pushImage(...,uint8_t*,bool,uint16_t*).
   // bpp8=true -> дані трактуються як "рідний" 8bpp формат сприту (RGB332), без палітри.
   sprite().pushImage(x, y, w, h, const_cast<uint8_t*>(data), true);
 #else
-  // LGFX (4848s040), Arduino_GFX-шим (esp32-c6), SSD1306-шим (esp8266) не мають
-  // сумісного 8bpp pushImage - на цих платах SPRITE_COLOR_DEPTH=8 для фонових
-  // зображень не використовується (див. platformio.ini, JpegColorDepth у main.cpp).
+  // LGFX (4848s040), SSD1306-шим (esp8266) не мають сумісного 8bpp pushImage -
+  // на цих платах SPRITE_COLOR_DEPTH=8 для фонових зображень не використовується
+  // (див. platformio.ini, JpegColorDepth у main.cpp).
   _logger.error("pushImage8bpp() не підтримується на цій платі");
 #endif
 }
