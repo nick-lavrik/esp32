@@ -34,6 +34,19 @@ struct MqttIncomingMessage {
   std::vector<uint8_t> payload;
 };
 
+// Вихідна команда з головного потоку в чергу для виконання мережевим таском
+// (тільки PicoMQTT-гілка - мережевий таск лишається ЄДИНИМ власником
+// _mqttClient; без цього publish()/subscribe() з головного потоку писали б
+// в сокет конкурентно з мережевим таском, що на практиці ламало MQTT-протокол
+// на ESP32-C6 - empirично підтверджено).
+struct MqttOutgoingCommand {
+  enum class Type { kSubscribe, kUnsubscribe, kPublish };
+  Type type;
+  std::string topic;
+  std::vector<uint8_t> payload;  // лише для kPublish
+  bool retained = false;
+};
+
 class MqttClient {
 public:
   explicit MqttClient(const MqttConfig& config);
@@ -165,9 +178,14 @@ private:
 
 #if defined(ESP32)
   // --- Потокобезпека для мережевого таска (тільки ESP32) ---
-  // _networkMutex захищає _mqttClient (весь мережевий I/O: connect/loop/publish/
-  // subscribe) - до нього звертаються і мережевий таск, і головний потік
-  // (publish()/subscribe() викликані з main.cpp).
+  // _networkMutex захищає _mqttClient - АЛЕ ТІЛЬКИ для PubSubClient-гілки
+  // (див. коментарі біля кожного MutexGuard(_networkMutex) нижче). Для
+  // PicoMQTT мережевий таск - ЄДИНИЙ власник _mqttClient: жодних прямих
+  // звернень з головного потоку. Замість цього publish()/subscribe()/
+  // unsubscribe() з головного потоку кладуть команду в _outgoingQueue
+  // (захищена _outgoingQueueMutex), яку розбирає сам мережевий таск у
+  // своєму циклі. Без цього конкурентні записи в сокет з двох потоків
+  // ламали MQTT-протокол на ESP32-C6 (empірично підтверджено).
   // _queueMutex захищає лише _incomingQueue.
   // _listeners захищений окремим _listenersMutex (див. нижче) - до нього
   // звертаються і головний потік (addListener/removeListener/dispatchMessage),
@@ -182,6 +200,18 @@ private:
   SemaphoreHandle_t _listenersMutex = nullptr;
   TaskHandle_t _networkTaskHandle = nullptr;
   std::vector<MqttIncomingMessage> _incomingQueue;
+
+#if __has_include(<PicoMQTT.h>)
+  // Черга вихідних команд (тільки PicoMQTT) - див. коментар вище біля
+  // _networkMutex. Розбирається виключно в networkTaskLoop().
+  SemaphoreHandle_t _outgoingQueueMutex = nullptr;
+  std::vector<MqttOutgoingCommand> _outgoingQueue;
+  void enqueueOutgoing(MqttOutgoingCommand::Type type, const std::string& topic,
+                       const uint8_t* payload = nullptr, unsigned int length = 0,
+                       bool retained = false);
+  void drainOutgoingQueue();
+#endif
+
   volatile bool _taskShouldRun = false;
 
   static void networkTaskTrampoline(void* param);

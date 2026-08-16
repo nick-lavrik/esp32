@@ -31,6 +31,9 @@ MqttClient::MqttClient(const MqttConfig& config)
   _networkMutex = xSemaphoreCreateMutex();
   _queueMutex = xSemaphoreCreateMutex();
   _listenersMutex = xSemaphoreCreateMutex();
+#if __has_include(<PicoMQTT.h>)
+  _outgoingQueueMutex = xSemaphoreCreateMutex();
+#endif
 #endif
 }
 
@@ -47,6 +50,9 @@ MqttClient::~MqttClient() {
   if (_networkMutex != nullptr) { vSemaphoreDelete(_networkMutex); }
   if (_queueMutex != nullptr) { vSemaphoreDelete(_queueMutex); }
   if (_listenersMutex != nullptr) { vSemaphoreDelete(_listenersMutex); }
+#if __has_include(<PicoMQTT.h>)
+  if (_outgoingQueueMutex != nullptr) { vSemaphoreDelete(_outgoingQueueMutex); }
+#endif
 #endif
 }
 
@@ -312,16 +318,19 @@ void MqttClient::networkTaskLoop() {
   // високому пріоритеті якимось чином втручається у своєчасну доставку
   // TCP-даних у сокет-буфер на single-core C6.
   //
-  // НАСЛІДОК: publish()/subscribe() з головного потоку (setupMqttClient(),
-  // тощо), що звертаються до _mqttClient конкурентно з цим таском, БЕЗ
-  // мьютекса - теоретичний data race при одночасному publish() під час
-  // active read у мережевому таску. Ризик прийнятний: publish() викликається
-  // нечасто відносно 10мс-циклу таска, а PicoMQTT internally буферизує
-  // записи (OutgoingPacket) окремо від читання вхідних пакетів. Якщо в
-  // майбутньому з'являться рідкісні аномалії при publish() під час активного
-  // читання - варто розглянути чергу вихідних повідомлень (аналогічно
-  // _incomingQueue) замість прямого мьютекса.
+  // Мережевий таск - ЄДИНИЙ власник _mqttClient для будь-яких операцій
+  // (connect/loop/subscribe/unsubscribe/publish). Головний потік НІКОЛИ не
+  // звертається до _mqttClient напряму для PicoMQTT - лише кладе команди в
+  // _outgoingQueue (drainOutgoingQueue() нижче їх виконує тут). Раніше
+  // прямі виклики publish()/subscribe() з головного потоку (без мьютекса,
+  // після його видалення через проблему вище) призводили до конкурентного
+  // запису в сокет з двох потоків одночасно - це ламало MQTT byte stream
+  // на льоту (empірично: SUBSCRIBE на кілька топіків коректно доходив до
+  // брокера, потім спотворений запис читався брокером як UNSUBSCRIBE
+  // невідповідного топіка, врешті протокол розсинхронізовувався і
+  // з'єднання рвалось по socket_timeout).
   while (_taskShouldRun) {
+    drainOutgoingQueue();
     _mqttClient.loop();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
@@ -330,20 +339,21 @@ void MqttClient::networkTaskLoop() {
 #endif
 
 void MqttClient::disconnect(const char* customOfflineMessage) {
-#if defined(ESP32) && __has_include(<PubSubClient.h>)
-  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
-  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
-  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
-  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
-  MutexGuard guard(_networkMutex);
-#endif
   const char* message = customOfflineMessage != nullptr ? customOfflineMessage : _config.lwtOfflineMessage;
   bool hasLwtTopic = _config.lwtTopic != nullptr && _config.lwtTopic[0] != '\0';
   bool hasMessage = message != nullptr && message[0] != '\0';
 
   if (_mqttClient.connected() && hasLwtTopic && hasMessage) {
     std::string lwtTopic = resolveTopic(_config.lwtTopic);
+#if defined(ESP32)
+    // Через чергу - як і publish()/subscribe() - щоб не писати в сокет
+    // конкурентно з мережевим таском (той самий клас проблем, що й
+    // publish()/subscribe(), див. коментар у networkTaskLoop()).
+    enqueueOutgoing(MqttOutgoingCommand::Type::kPublish, lwtTopic,
+                    reinterpret_cast<const uint8_t*>(message), strlen(message), _config.lwtRetain);
+#else
     _mqttClient.publish(lwtTopic.c_str(), message, _config.lwtQos, _config.lwtRetain);
+#endif
   }
 }
 
@@ -357,77 +367,119 @@ bool MqttClient::connect() {
 // ==========================================
 
 bool MqttClient::publish(const char* topic, const char* payload, bool retained) {
-#if defined(ESP32) && __has_include(<PubSubClient.h>)
-  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
-  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
-  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
-  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
-  MutexGuard guard(_networkMutex);
-#endif
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   return _mqttClient.publish(fullTopic.c_str(), payload, retained);
 #elif __has_include(<PicoMQTT.h>)
+#if defined(ESP32)
+  enqueueOutgoing(MqttOutgoingCommand::Type::kPublish, fullTopic,
+                  reinterpret_cast<const uint8_t*>(payload), strlen(payload), retained);
+#else
   _mqttClient.publish(fullTopic.c_str(), payload, 0, retained);
+#endif
   return true;
 #endif
 }
 
 bool MqttClient::publish(const char* topic, const uint8_t* payload, unsigned int length, bool retained) {
-#if defined(ESP32) && __has_include(<PubSubClient.h>)
-  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
-  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
-  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
-  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
-  MutexGuard guard(_networkMutex);
-#endif
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   return _mqttClient.publish(fullTopic.c_str(), payload, length, retained);
 #elif __has_include(<PicoMQTT.h>)
+#if defined(ESP32)
+  enqueueOutgoing(MqttOutgoingCommand::Type::kPublish, fullTopic, payload, length, retained);
+#else
   std::string strPayload(reinterpret_cast<const char*>(payload), length);
   _mqttClient.publish(fullTopic.c_str(), strPayload.c_str(), 0, retained);
+#endif
   return true;
 #endif
 }
 
 bool MqttClient::subscribe(const char* topic) {
-#if defined(ESP32) && __has_include(<PubSubClient.h>)
-  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
-  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
-  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
-  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
-  MutexGuard guard(_networkMutex);
-#endif
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   return _mqttClient.subscribe(fullTopic.c_str());
 #elif __has_include(<PicoMQTT.h>)
+#if defined(ESP32)
+  enqueueOutgoing(MqttOutgoingCommand::Type::kSubscribe, fullTopic);
+#else
   _mqttClient.subscribe(fullTopic.c_str());
+#endif
   return true;
 #endif
 }
 
 bool MqttClient::unsubscribe(const char* topic) {
-#if defined(ESP32) && __has_include(<PubSubClient.h>)
-  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
-  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
-  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
-  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
-  MutexGuard guard(_networkMutex);
-#endif
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
+#if defined(ESP32)
+  MutexGuard guard(_networkMutex);
+#endif
   return _mqttClient.unsubscribe(fullTopic.c_str());
 #elif __has_include(<PicoMQTT.h>)
+#if defined(ESP32)
+  enqueueOutgoing(MqttOutgoingCommand::Type::kUnsubscribe, fullTopic);
+#else
   _mqttClient.unsubscribe(fullTopic.c_str());
+#endif
   return true;
 #endif
 }
 
-// addListener()/removeListener() навмисно БЕЗ MutexGuard(_networkMutex):
-// _listeners мутується і читається (через dispatchMessage() з loop()) лише
-// в головному потоці, мережевий таск до _listeners не звертається.
+#if defined(ESP32) && __has_include(<PicoMQTT.h>)
+void MqttClient::enqueueOutgoing(MqttOutgoingCommand::Type type, const std::string& topic,
+                                 const uint8_t* payload, unsigned int length, bool retained) {
+  MqttOutgoingCommand cmd;
+  cmd.type = type;
+  cmd.topic = topic;
+  cmd.retained = retained;
+  if (payload != nullptr && length > 0) {
+    cmd.payload.assign(payload, payload + length);
+  }
+  MutexGuard guard(_outgoingQueueMutex);
+  _outgoingQueue.push_back(std::move(cmd));
+}
+
+// Викликається виключно з networkTaskLoop() (мережевий таск) - єдине місце,
+// де _mqttClient.subscribe()/unsubscribe()/publish() реально виконуються
+// для PicoMQTT.
+void MqttClient::drainOutgoingQueue() {
+  std::vector<MqttOutgoingCommand> pending;
+  {
+    MutexGuard guard(_outgoingQueueMutex);
+    pending.swap(_outgoingQueue);
+  }
+  for (auto& cmd : pending) {
+    switch (cmd.type) {
+      case MqttOutgoingCommand::Type::kSubscribe:
+        _mqttClient.subscribe(cmd.topic.c_str());
+        break;
+      case MqttOutgoingCommand::Type::kUnsubscribe:
+        _mqttClient.unsubscribe(cmd.topic.c_str());
+        break;
+      case MqttOutgoingCommand::Type::kPublish: {
+        std::string strPayload(reinterpret_cast<const char*>(cmd.payload.data()), cmd.payload.size());
+        _mqttClient.publish(cmd.topic.c_str(), strPayload.c_str(), 0, cmd.retained);
+        break;
+      }
+    }
+  }
+}
+#endif
+
+// addListener()/removeListener(): _listeners захищений _listenersMutex.
+// Фактичний subscribe (для PicoMQTT) - через чергу, виконується мережевим
+// таском, а не напряму з головного потоку (див. коментар у networkTaskLoop()).
 MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback callback) {
   MqttListenerEntry entry;
   entry.id = _nextListenerId++;
@@ -441,12 +493,18 @@ MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback c
   }
 
   if (_mqttClient.connected()) {
-#if defined(ESP32) && __has_include(<PubSubClient.h>)
-    // Мьютекс лише для PubSubClient - для PicoMQTT навмисно відсутній,
-    // див. коментар у networkTaskLoop().
+#if __has_include(<PubSubClient.h>)
+#if defined(ESP32)
     MutexGuard guard(_networkMutex);
 #endif
     _mqttClient.subscribe(entry.topic.c_str());
+#elif __has_include(<PicoMQTT.h>)
+#if defined(ESP32)
+    enqueueOutgoing(MqttOutgoingCommand::Type::kSubscribe, entry.topic.c_str());
+#else
+    _mqttClient.subscribe(entry.topic.c_str());
+#endif
+#endif
   }
   return entry.id;
 }

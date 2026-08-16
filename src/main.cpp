@@ -355,25 +355,31 @@ void setupMqttClient() {
   mqtt.begin();
   _logger.info("topic prefix = '%s'", mqtt.keyGenerator().prefix().c_str());
 
-  mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
+  // mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
 
+  #if !BOARD_ESP32_C6
   mqtt.addStringListener("#", [](const char* topic, const char* payload) {
     // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.info(">>> %s::%s", topic, payload);
   });
+  #endif
 
+  #if !BOARD_ESP32_C6 || false
   mqtt.addStringListener("command/" MQTT_CLIENT_ID, [](const char* topic, const char* payload) {
     // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.warn("command %s", payload);
     commandHandler.execute(payload);
   });
+  #endif
 
+  #if !BOARD_ESP32_C6
   // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
   mqtt.addStringListener("devices/+/status", [](const char* topic, const char* payload) {
     char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.info("%s %-45.45s LWT:%s", t, topic, payload);
   });
+  #endif
 
   dispatcher.addListener(EVT_REBOOT, [](IEvent& e) { mqtt.disconnect("reboot"); });
 
@@ -386,6 +392,7 @@ void setupMqttClient() {
   _logger.info("devices/" PIO_PIOENV "/light-sensor MQTT done.");
 #else
   // subscribe on mqtt
+  #if !BOARD_ESP32_C6
   mqtt.addNumberListener<int>(
     "devices/+/light-sensor",
     [](const char* topic, int value) {
@@ -393,6 +400,7 @@ void setupMqttClient() {
       _logger.info("%s %-45s val:%d%%", t, topic, value); 
     });
   _logger.info("devices/+/light-sensor listen");
+  #endif
 #endif
 
   commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
