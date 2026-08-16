@@ -157,19 +157,17 @@ void WiFi_scan() {
       snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X", bssid[0], bssid[1],
                bssid[2], bssid[3], bssid[4], bssid[5]);
 
-      String signalStr = String(rssi) + String(" dBm");
 #if defined(BOARD_ESP8266)
       String securityStr = WiFi_getAuthTypeName(encryptionType);
 #else
       String securityStr = WiFi_getAuthTypeName(static_cast<wifi_auth_mode_t>(encryptionType));
 #endif
-      String channelStr = String(channel);
 
       // Виведення зібраних String-даних
       Logger::info("SSID:       %s", ssid.c_str());
       Logger::info("BSSID (MAC):%s", bssidStr);
-      Logger::info("Signal:     %s", signalStr.c_str());
-      Logger::info("Channel:    %s", channelStr);
+      Logger::info("Signal:     %d dBm", rssi);
+      Logger::info("Channel:    %d", channel);
       Logger::info("Security:   %s", securityStr);
       Logger::info("==================================================");
     }
