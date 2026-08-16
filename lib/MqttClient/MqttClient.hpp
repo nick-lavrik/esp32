@@ -140,6 +140,18 @@ private:
   void handleMessage(char* topic, uint8_t* payload, unsigned int length);
   static void staticCallback(char* topic, uint8_t* payload, unsigned int length);
 #elif __has_include(<PicoMQTT.h>)
+  // ВАЖЛИВО: явно володіємо WiFiClient і передаємо його PicoMQTT::Client
+  // через templated-конструктор (Client(ClientType&, host, ...)), а НЕ
+  // через дефолтний Client(host, ...) конструктор. Дефолтний варіант сам
+  // створює WiFiClient через `new ClientSocket<::WiFiClient>()` (купа,
+  // прихована за unique_ptr<ClientSocketInterface>) - саме з ЦИМ шляхом
+  // на ESP32-C6 CONNACK ніколи не долітав до available()/read(), хоча
+  // сирий WiFiClient (стековий об'єкт, прямий connect()) читав CONNACK
+  // миттєво. Причина різниці не з'ясована до кінця (ймовірно щось у
+  // внутрішньому proxy/буферизації PicoMQTT для heap-варіанту на C6),
+  // але явний WiFiClient-член - робочий обхідний шлях, підтверджений
+  // ізольованим тестом.
+  WiFiClient _picoWifiClient;
   PicoMQTT::Client _mqttClient;
 #endif
 

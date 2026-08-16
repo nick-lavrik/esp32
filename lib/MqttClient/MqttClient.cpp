@@ -19,13 +19,12 @@ MqttClient* MqttClient::_instance = nullptr;
 MqttClient::MqttClient(const MqttConfig& config)
     : _config(config), _defaultKeyGenerator(config.prefix)
 #if __has_include(<PicoMQTT.h>)
-      // Таймаут сокета: 5000мс (замість дефолтних 10с бібліотеки, і замість
-      // початкових 1500мс - той бюджет був занадто вузьким для TCP
-      // retransmission-затримок на цій мережі, конект гарантовано валився
-      // по таймауту ще до CONNACK). Тепер, коли loop() у власному
-      // FreeRTOS-таску, довший timeout вже не блокує головний loop()/дисплей.
-      , _mqttClient(config.host, config.port, config.clientId, 
-                  config.username, config.password, 60000, 30000, 5000)
+      // Явний WiFiClient (_picoWifiClient) замість дефолтного heap-варіанту
+      // PicoMQTT - див. коментар біля _picoWifiClient в .hpp. Templated
+      // конструктор: Client(ClientType&, host, port, id, user, password,
+      // reconnect_interval_millis, keep_alive_millis, socket_timeout_millis).
+      , _mqttClient(_picoWifiClient, config.host, config.port, config.clientId,
+                  config.username, config.password, 5000, 60000, 5000)
 #endif
      {
 #if defined(ESP32)
@@ -161,7 +160,11 @@ void MqttClient::networkTaskLoop() {
 #endif
 
 void MqttClient::disconnect(const char* customOfflineMessage) {
-#if defined(ESP32)
+#if defined(ESP32) && __has_include(<PubSubClient.h>)
+  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
+  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
+  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
+  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
   MutexGuard guard(_networkMutex);
 #endif
   const char* message = customOfflineMessage != nullptr ? customOfflineMessage : _config.lwtOfflineMessage;
@@ -296,11 +299,30 @@ void MqttClient::networkTaskTrampoline(void* param) {
 }
 
 void MqttClient::networkTaskLoop() {
+  // ВАЖЛИВО: тут НЕМАЄ MutexGuard(_networkMutex) навколо _mqttClient.loop() -
+  // навмисно, підтверджено емпірично. _mqttClient.loop() для PicoMQTT може
+  // внутрішньо блокуватись на весь socket_timeout_millis (5с) під час спроби
+  // конекту (wait_for_reply). Утримання мьютекса весь цей час, на пріоритеті
+  // 5 (вище за головний loop(), пріоритет 1), на single-core ESP32-C6
+  // призводило до 100% стабільного провалу CONNACK-хендшейку (available()
+  // ніколи не бачив дані від брокера, хоча TCP-сесія встановлювалась) -
+  // підтверджено ізольованими тестами: без мьютекса PicoMQTT::Client
+  // конектиться миттєво навіть з окремого FreeRTOS-таска; з мьютексом -
+  // 100% Connect fail. Ймовірний механізм: тривале утримання мьютекса на
+  // високому пріоритеті якимось чином втручається у своєчасну доставку
+  // TCP-даних у сокет-буфер на single-core C6.
+  //
+  // НАСЛІДОК: publish()/subscribe() з головного потоку (setupMqttClient(),
+  // тощо), що звертаються до _mqttClient конкурентно з цим таском, БЕЗ
+  // мьютекса - теоретичний data race при одночасному publish() під час
+  // active read у мережевому таску. Ризик прийнятний: publish() викликається
+  // нечасто відносно 10мс-циклу таска, а PicoMQTT internally буферизує
+  // записи (OutgoingPacket) окремо від читання вхідних пакетів. Якщо в
+  // майбутньому з'являться рідкісні аномалії при publish() під час активного
+  // читання - варто розглянути чергу вихідних повідомлень (аналогічно
+  // _incomingQueue) замість прямого мьютекса.
   while (_taskShouldRun) {
-    {
-      MutexGuard guard(_networkMutex);
-      _mqttClient.loop();  // блокуючий виклик (сокет-таймаут) - ізольований тут
-    }
+    _mqttClient.loop();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
   vTaskDelete(nullptr);
@@ -308,7 +330,11 @@ void MqttClient::networkTaskLoop() {
 #endif
 
 void MqttClient::disconnect(const char* customOfflineMessage) {
-#if defined(ESP32)
+#if defined(ESP32) && __has_include(<PubSubClient.h>)
+  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
+  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
+  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
+  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
   MutexGuard guard(_networkMutex);
 #endif
   const char* message = customOfflineMessage != nullptr ? customOfflineMessage : _config.lwtOfflineMessage;
@@ -331,7 +357,11 @@ bool MqttClient::connect() {
 // ==========================================
 
 bool MqttClient::publish(const char* topic, const char* payload, bool retained) {
-#if defined(ESP32)
+#if defined(ESP32) && __has_include(<PubSubClient.h>)
+  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
+  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
+  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
+  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
   MutexGuard guard(_networkMutex);
 #endif
   std::string fullTopic = resolveTopic(topic);
@@ -344,7 +374,11 @@ bool MqttClient::publish(const char* topic, const char* payload, bool retained) 
 }
 
 bool MqttClient::publish(const char* topic, const uint8_t* payload, unsigned int length, bool retained) {
-#if defined(ESP32)
+#if defined(ESP32) && __has_include(<PubSubClient.h>)
+  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
+  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
+  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
+  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
   MutexGuard guard(_networkMutex);
 #endif
   std::string fullTopic = resolveTopic(topic);
@@ -358,7 +392,11 @@ bool MqttClient::publish(const char* topic, const uint8_t* payload, unsigned int
 }
 
 bool MqttClient::subscribe(const char* topic) {
-#if defined(ESP32)
+#if defined(ESP32) && __has_include(<PubSubClient.h>)
+  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
+  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
+  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
+  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
   MutexGuard guard(_networkMutex);
 #endif
   std::string fullTopic = resolveTopic(topic);
@@ -371,7 +409,11 @@ bool MqttClient::subscribe(const char* topic) {
 }
 
 bool MqttClient::unsubscribe(const char* topic) {
-#if defined(ESP32)
+#if defined(ESP32) && __has_include(<PubSubClient.h>)
+  // ВАЖЛИВО: мьютекс тут лише для PubSubClient-гілки. Для PicoMQTT він
+  // навмисно відсутній - емпірично підтверджено, що утримання _networkMutex
+  // під час _mqttClient.loop() (яке може тривати до socket_timeout_millis)
+  // ламає CONNACK-хендшейк на ESP32-C6 (див. коментар у networkTaskLoop()).
   MutexGuard guard(_networkMutex);
 #endif
   std::string fullTopic = resolveTopic(topic);
@@ -399,7 +441,9 @@ MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback c
   }
 
   if (_mqttClient.connected()) {
-#if defined(ESP32)
+#if defined(ESP32) && __has_include(<PubSubClient.h>)
+    // Мьютекс лише для PubSubClient - для PicoMQTT навмисно відсутній,
+    // див. коментар у networkTaskLoop().
     MutexGuard guard(_networkMutex);
 #endif
     _mqttClient.subscribe(entry.topic.c_str());

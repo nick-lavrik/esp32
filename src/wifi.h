@@ -31,12 +31,19 @@ void setupWiFi() {
     }
   // esp_wifi_set_ps(WIFI_PS_NONE); 
   #endif
- //  WiFi.setSleep(false);
+  //  WiFi.setSleep(false);
   WiFi.begin(ssid, password);
   // Modem sleep (power-save) вимкнено для ВСІХ плат: раніше рятувало від
   // "сміття в моніторі" на ttgo-t1, і, ймовірно, причина затримок 2-3с у
   // mqtt.loop()/hostByName() на esp32-c6 (WiFi6-чипи агресивніше
   // присипляють радіо між beacon-інтервалами за замовчуванням).
+
+  /* Serial.print("[WiFi] Connecting");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(200);
+    Serial.print(".");
+  }
+  Serial.printf("\n[WiFi] Connected, IP: %s\n", WiFi.localIP().toString().c_str()); */
 }
 
 #if defined(BOARD_ESP8266)
