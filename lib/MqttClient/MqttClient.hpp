@@ -18,6 +18,7 @@
 #include <freertos/semphr.h>
 #endif
 
+#include <atomic>
 #include <cstring>
 #include <string>
 #include <type_traits>
@@ -121,9 +122,11 @@ public:
   bool publishJson(const char* topic, JsonDocument& doc, bool retained = false);
   MqttListenerId addJsonListener(const char* topic, std::function<void(const char*, JsonDocument&)> callback);
 
-  bool isConnected() const;
+  bool isConnected() const { return _connected; };
 
 private:
+  std::atomic<bool> _connected{false};
+
   bool connect();
   void resubscribeAll();
   void dispatchMessage(const char* topic, const uint8_t* payload, unsigned int length);

@@ -181,6 +181,7 @@ void MqttClient::disconnect(const char* customOfflineMessage) {
     std::string lwtTopic = resolveTopic(_config.lwtTopic);
     _mqttClient.publish(lwtTopic.c_str(), message, _config.lwtRetain);
   }
+  _connected.store(false, std::memory_order_relaxed);
   _mqttClient.disconnect();
 }
 
@@ -209,6 +210,7 @@ bool MqttClient::connect() {
   }
 
   if (ok) {
+    _connected.store(true, std::memory_order_relaxed);
     resubscribeAll();
     if (hasLwtTopic && hasOnlineMessage) {
       _mqttClient.publish(lwtTopic.c_str(), _config.lwtOnlineMessage, _config.lwtRetain);
@@ -253,15 +255,18 @@ void MqttClient::begin() {
   }
 
   _mqttClient.connected_callback = [this]() {
+    _connected.store(true, std::memory_order_relaxed);
     Serial.println("[MQTT] Connected to broker successfully!");
     this->resubscribeAll();
   };
 
-  _mqttClient.disconnected_callback = []() {
+  _mqttClient.disconnected_callback = [this]() {
+    _connected.store(false, std::memory_order_relaxed);
     Serial.println("[MQTT] Disconnected from broker.");
   };
 
-  _mqttClient.connection_failure_callback = []() {
+  _mqttClient.connection_failure_callback = [this]() {
+    _connected.store(false, std::memory_order_relaxed);
     Serial.println("[MQTT] Connect fail.");
   };
 
@@ -271,10 +276,10 @@ void MqttClient::begin() {
   // колбека. Використовувати enqueueIncoming(), як зроблено для PubSubClient
   // в handleMessage() нижче, щоб колбеки addListener() лишались у головному
   // потоці.
-  _mqttClient.SubscribedMessageListener::subscribe(_keyGenerator->key("#").c_str(), [this](const char *t, const char* m) {
-    this->enqueueIncoming(t, (const uint8_t*)m, strlen(m) + 1);
-    // this->dispatchMessage(t, (const uint8_t*)m, strlen(m) + 1);
-  }, 16 * 1024);
+  _mqttClient.SubscribedMessageListener::subscribe(_keyGenerator->key("#").c_str(), [this](const char *t, const void* m, const size_t s) {
+    this->enqueueIncoming(t, (const uint8_t*)m, s);
+    // this->dispatchMessage(t, (const uint8_t*)m, s);
+  }, 2 * 1024);
 
 
   _mqttClient.begin();
@@ -484,6 +489,12 @@ void MqttClient::drainOutgoingQueue() {
         // з null-колбеком замість реального мережевого SUBSCRIBE - саме
         // це спричиняло фантомний UNSUBSCRIBE, підтверджено емпірично.
         _mqttClient.PicoMQTT::BasicClient::subscribe(cmd.topic.c_str());
+        /* _mqttClient.SubscribedMessageListener::subscribe(
+          cmd.topic.c_str(),
+          [this](const char* t, const void* payload, size_t len) {
+            this->enqueueIncoming(t, (const uint8_t*)payload, len);
+          },
+          2 * 1024); */
         break;
       case MqttOutgoingCommand::Type::kUnsubscribe:
         _mqttClient.PicoMQTT::BasicClient::unsubscribe(cmd.topic.c_str());
@@ -626,13 +637,13 @@ void MqttClient::dispatchMessage(const char* topic, const uint8_t* payload, unsi
   cleanupRemovedListeners();
 }
 
-bool MqttClient::isConnected() const {
+/* bool MqttClient::isConnected() const {
 #if __has_include(<PubSubClient.h>)
   return const_cast<PubSubClient&>(_mqttClient).connected();
 #elif __has_include(<PicoMQTT.h>)
   return const_cast<PicoMQTT::Client&>(_mqttClient).connected();
 #endif
-}
+} */
 
 void MqttClient::enqueueIncoming(const char* topic, const uint8_t* payload, unsigned int length) {
 #if defined(ESP32)
