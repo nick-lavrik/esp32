@@ -2,6 +2,9 @@
 //
 // esptool --port /dev/ttyUSB0 --after hard-reset chip-id
 // python3 -m serial.tools.miniterm --echo --non-exclusive /dev/ttyUSB0 115200
+// docker run --rm -it -p 1883:1883 -p 9883:9883 eclipse-mosquitto mosquitto -v -c /mosquitto/config/mosquitto.conf
+// mosquitto_pub -h 192.168.1.71 -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock off"
+//
 //
 // Працює однаково для обох середовищ, різниться лише build_flags (-include)
 // у platformio.ini:
@@ -358,10 +361,10 @@ void setupMqttClient() {
   // mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
 
-  #if !BOARD_ESP32_C6
+  #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("#", [](const char* topic, const char* payload) {
     // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
-    _logger.info(">>> %s::%s", topic, payload);
+    _logger.debug(">>> %-50s %s", topic, payload);
   });
   #endif
 
@@ -373,13 +376,11 @@ void setupMqttClient() {
   });
   #endif
 
-  #if !BOARD_ESP32_C6
   // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
   mqtt.addStringListener("devices/+/status", [](const char* topic, const char* payload) {
     char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.info("%s %-45.45s LWT:%s", t, topic, payload);
   });
-  #endif
 
   dispatcher.addListener(EVT_REBOOT, [](IEvent& e) { mqtt.disconnect("reboot"); });
 
@@ -392,7 +393,6 @@ void setupMqttClient() {
   _logger.info("devices/" PIO_PIOENV "/light-sensor MQTT done.");
 #else
   // subscribe on mqtt
-  #if !BOARD_ESP32_C6
   mqtt.addNumberListener<int>(
     "devices/+/light-sensor",
     [](const char* topic, int value) {
@@ -400,7 +400,6 @@ void setupMqttClient() {
       _logger.info("%s %-45s val:%d%%", t, topic, value); 
     });
   _logger.info("devices/+/light-sensor listen");
-  #endif
 #endif
 
   commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
@@ -1822,30 +1821,29 @@ void setup() {
   setupSerial();
   Logger::info("free heap memory from scratch: %u", freeHeap);
 
-  // setupSD();
-
-  // setupLittleFS();
-  // setupEventDispatcher();
-  // setupConfigStorage();
+  setupSD();
+  setupLittleFS();
+  setupEventDispatcher();
+  setupConfigStorage();
   setupSerialCommander();
-  // setupBlinkLED();
-  //setupDisplay();
-  // setupTouchScreen();
+  setupBlinkLED();
+  setupDisplay();
+  setupTouchScreen();
   setupWiFi();
-  // setupNtpService();
-  // setupBackgroundImage();
+  setupNtpService();
+  setupBackgroundImage();
   setupTaskCommander();
-  // setupLightSensor();
+  setupLightSensor();
   setupMqttClient();
-  //setupFlipButton();
-  //setupWiFiIcon();
-  //loadConfig();
+  setupFlipButton();
+  setupWiFiIcon();
+  loadConfig();
 
   // httpServer.setStaticSource(&littleFsSource);
   // // httpServer.setEventDispatcher(&dispatcher);
   // httpServer.begin();
 
-  // display.flush();
+  display.flush();
   // testAsusWRT();
   Logger::debug("free heap memory: %u", ESP.getFreeHeap());
   Logger::info("");
@@ -1857,17 +1855,17 @@ void setup() {
 #endif
 int wifi_state = 0;
 void loop() {
-  // display.startWrite();
-  // PrintQueue::flush();
-  // doPing();
-  // drawBackgroundImage();
-  // drawSystemInfo();
+  display.startWrite();
+  PrintQueue::flush();
+  doPing();
+  drawBackgroundImage();
+  drawSystemInfo();
 
   /* if (WiFi.status() != WL_CONNECTED) {
     return;
   } */
 
-  #if ESP32
+  /* #if ESP32
   // if (WiFi.status() == WL_CONNECTED) {
   if (wifi_state == 0 && WiFi.isConnected()) {
     Logger::info("WIFI connected");
@@ -1882,7 +1880,7 @@ void loop() {
     Logger::info("WIFI disconnected!");
     wifi_state = 0;
   }
-  #endif
+  #endif */
 
   #if HAS_MQTT_CLIENT
   if (WiFi.isConnected()) {
@@ -1896,18 +1894,18 @@ void loop() {
   #endif
 
   commandHandler.update();
-  // if (showClock) drawTime();
+  if (showClock) drawTime();
 
   // sendEmail();
   scheduler.loop();
 
-  // display.endWrite();
+  display.endWrite();
 
 #if BOARD_HAS_TOUCHSCREEN
  touchController.update();
 #endif
 
-  // display.flush();
+  display.flush();
   // loopRgbLed();
 
   delay(1);

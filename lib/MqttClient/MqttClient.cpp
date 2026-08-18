@@ -12,7 +12,7 @@
 
 #if HAS_MQTT_CLIENT
 
-#if __has_include(<PubSubClient.h>)
+#if __has_include(<PubSubClient.h>) // || true
 MqttClient* MqttClient::_instance = nullptr;
 #endif
 
@@ -224,6 +224,8 @@ bool MqttClient::connect() {
 #if __has_include(<PicoMQTT.h>)
 
 void MqttClient::begin() {
+  // _instance = this;
+
   if (_keyGenerator == nullptr) { _keyGenerator = &_defaultKeyGenerator; }
 
   // Базова конфігурація клієнта
@@ -269,6 +271,11 @@ void MqttClient::begin() {
   // колбека. Використовувати enqueueIncoming(), як зроблено для PubSubClient
   // в handleMessage() нижче, щоб колбеки addListener() лишались у головному
   // потоці.
+  _mqttClient.SubscribedMessageListener::subscribe(_keyGenerator->key("#").c_str(), [this](const char *t, const char* m) {
+    this->enqueueIncoming(t, (const uint8_t*)m, strlen(m) + 1);
+    // this->dispatchMessage(t, (const uint8_t*)m, strlen(m) + 1);
+  }, 16 * 1024);
+
 
   _mqttClient.begin();
 
@@ -569,21 +576,33 @@ void MqttClient::cleanupRemovedListeners() {
                      [](const MqttListenerEntry& entry) { return entry.markedForRemoval; }), _listeners.end());
 }
 
-// resubscribeAll() викликається або з connect() (тримає _networkMutex), або
-// напряму з PicoMQTT connected_callback (мережевий таск, теж під
-// _networkMutex - див. networkTaskLoop()). _listenersMutex - окремий м'ютекс,
-// тому лок тут безпечний і не конфліктує з _networkMutex.
+// resubscribeAll() - ВАЖЛИВО: НЕ тримає MutexGuard(_listenersMutex) під час
+// самих subscribe()-викликів. Спочатку знімаємо снепшот топіків під локом
+// (швидко), відпускаємо мьютекс, і вже потім виконуємо блокуючі subscribe()
+// БЕЗ жодного мьютекса. Той самий клас проблем, що й з _networkMutex
+// (див. networkTaskLoop()): тримання БУДЬ-ЯКОГО FreeRTOS-мьютекса (навіть
+// повністю без конкуренції за нього) під час блокуючого PicoMQTT
+// wait_for_reply() ламає читання відповіді на ESP32-C6 - empірично
+// підтверджено ізольованим тестом (з MutexGuard - SUBACK ніколи не
+// приходить, розрив через socket_timeout; без нього - стабільно).
 void MqttClient::resubscribeAll() {
+  std::vector<std::string> topicsSnapshot;
+  {
 #if defined(ESP32)
-  MutexGuard guard(_listenersMutex);
+    MutexGuard guard(_listenersMutex);
 #endif
-  for (const auto& entry : _listeners) {
-    if (entry.markedForRemoval) { continue; }
+    topicsSnapshot.reserve(_listeners.size());
+    for (const auto& entry : _listeners) {
+      if (entry.markedForRemoval) { continue; }
+      topicsSnapshot.emplace_back(entry.topic.c_str());
+    }
+  }
+  for (const auto& topic : topicsSnapshot) {
 #if __has_include(<PubSubClient.h>)
-    _mqttClient.subscribe(entry.topic.c_str());
+    _mqttClient.subscribe(topic.c_str());
 #elif __has_include(<PicoMQTT.h>)
     // Явно кваліфіковано BasicClient:: - див. коментар у drainOutgoingQueue().
-    _mqttClient.PicoMQTT::BasicClient::subscribe(entry.topic.c_str());
+    _mqttClient.PicoMQTT::BasicClient::subscribe(topic.c_str());
 #endif
   }
 }

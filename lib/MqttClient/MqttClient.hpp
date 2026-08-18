@@ -145,6 +145,10 @@ private:
   std::string _lwtTopicStorage;
 #endif
 
+#if __has_include(<PubSubClient.h>) // || true
+  static MqttClient* _instance;
+#endif
+
 #if __has_include(<PubSubClient.h>)
   WiFiClient _plainClient;
   WiFiClientSecure _secureClient;
@@ -171,10 +175,6 @@ private:
   std::vector<MqttListenerEntry> _listeners;
   MqttListenerId _nextListenerId = 1;
   uint32_t _lastReconnectAttempt = 0;
-
-#if __has_include(<PubSubClient.h>)
-  static MqttClient* _instance;
-#endif
 
 #if defined(ESP32)
   // --- Потокобезпека для мережевого таска (тільки ESP32) ---
