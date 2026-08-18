@@ -106,7 +106,7 @@ void MqttClient::begin() {
   // варіантами (single-core і dual-core), планувальник сам обирає ядро.
   _taskShouldRun = true;
   xTaskCreate(&MqttClient::networkTaskTrampoline, "mqtt-net",
-              /*stackSize=*/8192, this, /*priority=*/1, &_networkTaskHandle);
+              /*stackSize=*/8192, this, /*priority=*/5, &_networkTaskHandle);
 #endif
 }
 
@@ -278,8 +278,16 @@ void MqttClient::begin() {
   // assert() в xTaskCreatePinnedToCore. xTaskCreate сумісний з усіма
   // варіантами (single-core і dual-core), планувальник сам обирає ядро.
   _taskShouldRun = true;
+  // priority=1 (не 5!) - навмисно, ЕМПІРИЧНО виявлено: PicoMQTT-таск на
+  // priority вищому за головний loop() занадто щільно спінить available_wait()
+  // (внутрішній цикл на yield(), без реальних затримок) під час послідовних
+  // блокуючих wait_for_reply() викликів (CONNACK, одразу за ним SUBACK у
+  // тому самому on_connect()) - це заважає lwIP вчасно доставити вхідні дані
+  // на ДРУГОМУ такому виклику поспіль (перший, CONNACK, встигає; SUBACK -
+  // ні). Пріоритет 1 (як головний loop()) залишає більше "повітря" для
+  // WiFi/lwIP стеку. Якщо це не допоможе - наступний крок: tskIDLE_PRIORITY+1.
   xTaskCreate(&MqttClient::networkTaskTrampoline, "mqtt-net",
-              /*stackSize=*/8192, this, /*priority=*/5, &_networkTaskHandle);
+              /*stackSize=*/8192, this, /*priority=*/tskIDLE_PRIORITY + 1, &_networkTaskHandle);
 #endif
 }
 
@@ -332,7 +340,7 @@ void MqttClient::networkTaskLoop() {
   while (_taskShouldRun) {
     drainOutgoingQueue();
     _mqttClient.loop();
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
   vTaskDelete(nullptr);
 }
@@ -413,7 +421,7 @@ bool MqttClient::subscribe(const char* topic) {
 #if defined(ESP32)
   enqueueOutgoing(MqttOutgoingCommand::Type::kSubscribe, fullTopic);
 #else
-  _mqttClient.subscribe(fullTopic.c_str());
+  _mqttClient.PicoMQTT::BasicClient::subscribe(fullTopic.c_str());
 #endif
   return true;
 #endif
@@ -430,7 +438,7 @@ bool MqttClient::unsubscribe(const char* topic) {
 #if defined(ESP32)
   enqueueOutgoing(MqttOutgoingCommand::Type::kUnsubscribe, fullTopic);
 #else
-  _mqttClient.unsubscribe(fullTopic.c_str());
+  _mqttClient.PicoMQTT::BasicClient::unsubscribe(fullTopic.c_str());
 #endif
   return true;
 #endif
@@ -462,10 +470,16 @@ void MqttClient::drainOutgoingQueue() {
   for (auto& cmd : pending) {
     switch (cmd.type) {
       case MqttOutgoingCommand::Type::kSubscribe:
-        _mqttClient.subscribe(cmd.topic.c_str());
+        // Явно кваліфіковано BasicClient:: - без цього виклик резолвиться
+        // в PicoMQTT::Client/SubscribedMessageListener::subscribe(topic,
+        // callback=nullptr) (high-level API, name hiding ховає
+        // BasicClient::subscribe), що лише кладе запис у внутрішню мапу
+        // з null-колбеком замість реального мережевого SUBSCRIBE - саме
+        // це спричиняло фантомний UNSUBSCRIBE, підтверджено емпірично.
+        _mqttClient.PicoMQTT::BasicClient::subscribe(cmd.topic.c_str());
         break;
       case MqttOutgoingCommand::Type::kUnsubscribe:
-        _mqttClient.unsubscribe(cmd.topic.c_str());
+        _mqttClient.PicoMQTT::BasicClient::unsubscribe(cmd.topic.c_str());
         break;
       case MqttOutgoingCommand::Type::kPublish: {
         std::string strPayload(reinterpret_cast<const char*>(cmd.payload.data()), cmd.payload.size());
@@ -502,7 +516,8 @@ MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback c
 #if defined(ESP32)
     enqueueOutgoing(MqttOutgoingCommand::Type::kSubscribe, entry.topic.c_str());
 #else
-    _mqttClient.subscribe(entry.topic.c_str());
+    // Явно кваліфіковано BasicClient:: - див. коментар у drainOutgoingQueue().
+    _mqttClient.PicoMQTT::BasicClient::subscribe(entry.topic.c_str());
 #endif
 #endif
   }
@@ -563,7 +578,13 @@ void MqttClient::resubscribeAll() {
   MutexGuard guard(_listenersMutex);
 #endif
   for (const auto& entry : _listeners) {
-    if (!entry.markedForRemoval) { _mqttClient.subscribe(entry.topic.c_str()); }
+    if (entry.markedForRemoval) { continue; }
+#if __has_include(<PubSubClient.h>)
+    _mqttClient.subscribe(entry.topic.c_str());
+#elif __has_include(<PicoMQTT.h>)
+    // Явно кваліфіковано BasicClient:: - див. коментар у drainOutgoingQueue().
+    _mqttClient.PicoMQTT::BasicClient::subscribe(entry.topic.c_str());
+#endif
   }
 }
 

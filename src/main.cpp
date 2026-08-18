@@ -365,7 +365,7 @@ void setupMqttClient() {
   });
   #endif
 
-  #if !BOARD_ESP32_C6 || false
+  #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("command/" MQTT_CLIENT_ID, [](const char* topic, const char* payload) {
     // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.warn("command %s", payload);
@@ -1822,25 +1822,24 @@ void setup() {
   setupSerial();
   Logger::info("free heap memory from scratch: %u", freeHeap);
 
-  setupSD();
+  // setupSD();
 
-  setupLittleFS();
-  setupEventDispatcher();
-  setupConfigStorage();
+  // setupLittleFS();
+  // setupEventDispatcher();
+  // setupConfigStorage();
   setupSerialCommander();
-  setupBlinkLED();
-  setupDisplay();
-  // setupSD(); // [sd_diskio.cpp:176] sdCommand(): no token received
-  setupTouchScreen();
+  // setupBlinkLED();
+  //setupDisplay();
+  // setupTouchScreen();
   setupWiFi();
-  setupNtpService();
-  setupBackgroundImage();
+  // setupNtpService();
+  // setupBackgroundImage();
   setupTaskCommander();
-  setupLightSensor();
+  // setupLightSensor();
   setupMqttClient();
-  setupFlipButton();
-  setupWiFiIcon();
-  loadConfig();
+  //setupFlipButton();
+  //setupWiFiIcon();
+  //loadConfig();
 
   // httpServer.setStaticSource(&littleFsSource);
   // // httpServer.setEventDispatcher(&dispatcher);
@@ -1858,11 +1857,11 @@ void setup() {
 #endif
 int wifi_state = 0;
 void loop() {
-  display.startWrite();
-  PrintQueue::flush();
-  doPing();
-  drawBackgroundImage();
-  drawSystemInfo();
+  // display.startWrite();
+  // PrintQueue::flush();
+  // doPing();
+  // drawBackgroundImage();
+  // drawSystemInfo();
 
   /* if (WiFi.status() != WL_CONNECTED) {
     return;
@@ -1897,18 +1896,18 @@ void loop() {
   #endif
 
   commandHandler.update();
-  if (showClock) drawTime();
+  // if (showClock) drawTime();
 
   // sendEmail();
   scheduler.loop();
 
-  display.endWrite();
+  // display.endWrite();
 
 #if BOARD_HAS_TOUCHSCREEN
  touchController.update();
 #endif
 
-  display.flush();
+  // display.flush();
   // loopRgbLed();
 
   delay(1);
