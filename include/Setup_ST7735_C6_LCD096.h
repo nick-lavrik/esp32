@@ -56,8 +56,8 @@
 // ---------- Піни SPI дисплея (ST7735S) ----------
 // Джерело: схема плати + тестовий код (Display_ST7789.h від Миколи,
 // EXAMPLE_PIN_NUM_*) — піни збігаються з обох джерел.
-#define TFT_WIDTH 160
-#define TFT_HEIGHT 80
+// #define TFT_WIDTH 160
+// #define TFT_HEIGHT 80
 #define TFT_SCLK 7
 #define TFT_MOSI 6
 #define TFT_MISO -1  // дисплей не має read-back лінії (write-only); SD MISO=5 — окремо
