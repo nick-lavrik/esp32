@@ -258,6 +258,12 @@ void MqttClient::begin() {
     _connected.store(true, std::memory_order_relaxed);
     Serial.println("[MQTT] Connected to broker successfully!");
     this->resubscribeAll();
+
+    bool hasOnlineMessage = _config.lwtOnlineMessage != nullptr && _config.lwtOnlineMessage[0] != '\0';
+    if (!_lwtTopicStorage.empty() && hasOnlineMessage) {
+      _mqttClient.publish(_lwtTopicStorage.c_str(), _config.lwtOnlineMessage,
+                         _config.lwtQos, _config.lwtRetain);
+    }
   };
 
   _mqttClient.disconnected_callback = [this]() {
