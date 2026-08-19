@@ -1427,6 +1427,11 @@ void sendEmail() {
 void drawSystemInfo() {
   char buf[120] = "";
   uint8_t row = 0;
+  #if BOARD_ESP32_C6_LCD096
+  uint8_t space = 2;
+  #else
+  uint8_t space = 5;
+  #endif
   // img.fillRect(0, 30, 320, 65, BG_COLOR);
 
   uint32_t freeHeap = ESP.getFreeHeap();
@@ -1438,7 +1443,7 @@ void drawSystemInfo() {
   display.setTextColor(TFT_DARKGREY);
 
 #if defined(ESP32)
-  display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
   display.printf(F("Uptime: %02d:%02d:%02d"), uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
 #endif
 
@@ -1476,8 +1481,16 @@ void drawSystemInfo() {
     currentScreenTs = millis();
   }
 
+#elif BOARD_ESP32_C6_LCD096
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  snprintf(buf, 120, "CPU: %d MHz", cpuFreq);
+  display.print(buf);
+
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  snprintf(buf, 120, "Loop rate: %d/s", display.loopFrameRate());
+  display.print(buf);
 #else
-  display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
   snprintf(buf, 120, "CPU: %d MHz   Loop rate: %d/s", cpuFreq, display.loopFrameRate());
   display.print(buf);
 #endif
@@ -1489,31 +1502,40 @@ void drawSystemInfo() {
   // display.printf("Heap free: %d KB", freeHeap / 1024);
 #else
   uint32_t totalHeap = ESP.getHeapSize();
-  display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
-  display.printf("Heap free: %d KB / %d KB (%d%%)", freeHeap / 1024, totalHeap / 1024, (freeHeap * 100) / totalHeap);
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.printf("Heap free: %d / %d (%d%%)", freeHeap / 1024, totalHeap / 1024, (freeHeap * 100) / totalHeap);
 #endif
 
 #if defined(ESP32)
   char* dumpPingStr = dumpPingStatsStr();
   if (dumpPingStr) {
-    display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+    display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
     display.print(dumpPingStatsStr());
   }
 
+  snprintf(buf, sizeof(buf), "WiFi: %s (%d dBm)", WiFi.SSID().c_str(), WiFi.RSSI(), getWiFiQuality(WiFi.RSSI()));
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.print(buf);
+
+
+  snprintf(buf, sizeof(buf), "IP: %s", WiFi.localIP().toString().c_str());
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.print(buf);
+
   snprintf(buf, sizeof(buf), "Brightness: %d%% %s", display.brightness(), isAutoBrightness ? "(auto)" : "");
-  display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
   display.print(buf);
 
   #if LIGHT_SENSOR_PIN > 0
     // display.setTextSize(1);
     // display.setTextColor(TFT_DARKGREY);
     // display.setCursor(10, display.height() - 1 * (5 + display.fontHeight()));
-    display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+    display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
     display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
   #endif
 
   #if SCREEN_LOG_TAIL_LINES > 0
-  display.setCursor(10, 10 + row++ * (5 + display.fontHeight()));
+  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
   display.println("------------------------------------");
   #if BOARD_TTGO_T1 || BOARD_ST7789
   int skip = 11; // hide logvele and tag
@@ -1573,10 +1595,14 @@ void drawTime() {
   ntp.ftime("%H:%M:%S", timeStr, sizeof(timeStr));
   // ntp.ftime("%H:%M:%S.%Q", timeStr, sizeof(timeStr));
 
-#if BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147
+#if BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147 || BOARD_ESP32_C6_LCD096
   // time
+  #if BOARD_ESP32_C6_LCD096
+  display.setTextSize(2);  // x2
+  #else
   display.setTextFont(7);  // великий "цифровий" шрифт (тільки цифри та ":")
   // display.setTextSize(1);
+  #endif
 
   int textW = display.textWidth(timeStr);
   int textH = display.fontHeight();
@@ -1595,12 +1621,13 @@ void drawTime() {
   char dateStr[16];
   ntp.ftime("%d.%m.%Y", dateStr, sizeof(dateStr));
 
+  y += display.fontHeight() + 5;
+
   display.setTextFont(4);
   display.setTextSize(1);
 
   textW = display.textWidth(dateStr);
   x = (display.width() - textW) / 2;
-  y = 93;
 
   // display.fillRect(0, y, display.width(), display.fontHeight(), TFT_BLACK);
 

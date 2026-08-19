@@ -32,8 +32,18 @@
 #                                суттєво легші, ніж на 480x480/320x172)
 #
 # Name,      Type,  SubType,   Offset,    Size,      Flags
-phy_init,    data,  phy,       0x009000,  0x001000,
-app,         app,   factory,   0x010000,  0x180000,
-coredump,    data,  coredump,  0x190000,  0x010000,
-nvs,         data,  nvs,       0x1A0000,  0x060000,
-spiffs,      data,  spiffs,    0x200000,  0x200000,
+#phy_init,    data,  phy,       0x009000,  0x001000,
+#app,         app,   factory,   0x010000,  0x180000,
+#coredump,    data,  coredump,  0x190000,  0x010000,
+#nvs,         data,  nvs,       0x1A0000,  0x060000,
+#spiffs,      data,  spiffs,    0x200000,  0x200000,
+
+# app      - 0x200000 (2.0 МБ), 
+# littlefs - 0x180000 (1.5 МБ). 
+# Сума 0x280000 + 0x180000 = 0x400000 — рівно 4 МБ, збігається.
+# Name, Type, SubType, Offset, Size, Flags
+phy_init, data, phy,     0x009000, 0x001000,
+app,      app,  factory, 0x010000, 0x200000,
+coredump, data, coredump,0x210000, 0x010000,
+nvs,      data, nvs,     0x220000, 0x060000,
+spiffs,   data, spiffs,  0x280000, 0x180000,

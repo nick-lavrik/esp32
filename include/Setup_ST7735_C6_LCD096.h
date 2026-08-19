@@ -85,6 +85,14 @@
 #define TL_DATUM 0
 #define MC_DATUM 4
 
+// ---------- Шрифти ----------
+// #define LOAD_GLCD
+// #define LOAD_FONT2
+// #define LOAD_FONT4
+// #define LOAD_FONT6
+// #define LOAD_FONT7
+// #define LOAD_FONT8
+
 // Дослівний перенос перевіреної на реальному пристрої init-послідовності
 // ST7735S (наданий Миколою тестовий приклад, LCD_Init()). Викликається з
 // init() ПІСЛЯ begin() (яке лишень відкриває SPI-шину і шле generic
@@ -272,7 +280,7 @@ class TFT_eSprite {
     _textSize = s;
     if (_canvas) _canvas->setTextSize(s);
   }
-  void setTextFont(uint8_t) {}  // альтернативних (u8g2) шрифтів тут не підключено - no-op
+  void setTextFont(uint8_t s) {}  // альтернативних (u8g2) шрифтів тут не підключено - no-op
   void setTextDatum(uint8_t datum) { _datum = datum; }
 
   size_t fontHeight() { return 8 * _textSize; }  // вбудований шрифт: комірка 8px по висоті
