@@ -276,7 +276,7 @@ void MqttClient::begin() {
   // колбека. Використовувати enqueueIncoming(), як зроблено для PubSubClient
   // в handleMessage() нижче, щоб колбеки addListener() лишались у головному
   // потоці.
-  _mqttClient.SubscribedMessageListener::subscribe(_keyGenerator->key("#").c_str(), [this](const char *t, const void* m, const size_t s) {
+  _mqttClient.SubscribedMessageListener::subscribe(resolveTopic("#").c_str(), [this](const char *t, const void* m, const size_t s) {
     this->enqueueIncoming(t, (const uint8_t*)m, s);
     // this->dispatchMessage(t, (const uint8_t*)m, s);
   }, 2 * 1024);
@@ -488,16 +488,17 @@ void MqttClient::drainOutgoingQueue() {
         // BasicClient::subscribe), що лише кладе запис у внутрішню мапу
         // з null-колбеком замість реального мережевого SUBSCRIBE - саме
         // це спричиняло фантомний UNSUBSCRIBE, підтверджено емпірично.
-        _mqttClient.PicoMQTT::BasicClient::subscribe(cmd.topic.c_str());
-        /* _mqttClient.SubscribedMessageListener::subscribe(
+        // _mqttClient.PicoMQTT::BasicClient::subscribe(cmd.topic.c_str());
+        _mqttClient.SubscribedMessageListener::subscribe(
           cmd.topic.c_str(),
           [this](const char* t, const void* payload, size_t len) {
             this->enqueueIncoming(t, (const uint8_t*)payload, len);
           },
-          2 * 1024); */
+          2 * 1024);
         break;
       case MqttOutgoingCommand::Type::kUnsubscribe:
-        _mqttClient.PicoMQTT::BasicClient::unsubscribe(cmd.topic.c_str());
+        // _mqttClient.PicoMQTT::BasicClient::unsubscribe(cmd.topic.c_str());
+        _mqttClient.SubscribedMessageListener::unsubscribe(cmd.topic.c_str());
         break;
       case MqttOutgoingCommand::Type::kPublish: {
         std::string strPayload(reinterpret_cast<const char*>(cmd.payload.data()), cmd.payload.size());

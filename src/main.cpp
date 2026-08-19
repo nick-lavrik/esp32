@@ -361,12 +361,12 @@ void setupMqttClient() {
   // mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
 
-  #if !BOARD_ESP32_C6 || true
+  /* #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("#", [](const char* topic, const char* payload) {
     // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.debug(">>> %-50s %s", topic, payload);
   });
-  #endif
+  #endif */
 
   #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("command/" MQTT_CLIENT_ID, [](const char* topic, const char* payload) {
