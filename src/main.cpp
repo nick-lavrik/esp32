@@ -3,7 +3,9 @@
 // esptool --port /dev/ttyUSB0 --after hard-reset chip-id
 // python3 -m serial.tools.miniterm --echo --non-exclusive /dev/ttyUSB0 115200
 // docker run --rm -it -p 1883:1883 -p 9883:9883 eclipse-mosquitto mosquitto -v -c /mosquitto/config/mosquitto.conf
+// mosquitto_sub -h broker.hivemq.com -p 1883 -t "mykola-lavryk/#" -F "@Y-@m-@d @H:@M:@S [%q/%r] %-50t %p" # qos/retain
 // mosquitto_pub -h 192.168.1.71 -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock off"
+// mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6-lcd096 -m "clock on"
 //
 //
 // Працює однаково для обох середовищ, різниться лише build_flags (-include)
@@ -264,6 +266,39 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
   Logger::info(" ------ !!! ONHOLD FRAME !!! ------ ");
 }
 #endif
+
+
+void testAsusWRT() {
+  Logger::info("====== AsusWRT test script =======");
+  Logger::info("free heap: %u", ESP.getFreeHeap());
+
+  const char* path = "/asus-get_clientlist.json";
+  File file = LittleFS.open(path, "r");
+  if (!file || file.isDirectory()) {
+    Logger::error("Can't open file (%s)", path);
+    return;
+  }
+
+  // Logger::info("free heap before read: %u", ESP.getFreeHeap());
+  String json = file.readString();
+  file.close();
+  // Logger::info("free heap after read (json size=%u): %u", json.length(), ESP.getFreeHeap());
+
+  std::vector<RouterClientInfo> clients;
+  if (!RouterClientListParser::parse(json, clients)) {
+    Logger::error("can't parse client list json. [%d]", clients.capacity());
+  }
+
+  // Logger::info("free heap after parse: %u", ESP.getFreeHeap());
+
+  RouterClientListIterator it(std::move(clients));
+  while (it.hasNext()) {
+    const RouterClientInfo& c = it.next();
+    Logger::info("client.name=%s", c.name.c_str());
+  }
+  Logger::info("------ AsusWRT test script -------");
+  Logger::info("");
+}
 
 void display_brightness(uint8_t percent, bool _auto) {
   display.brightness(percent);
@@ -1292,6 +1327,8 @@ void setupSerialCommander() {
       });
 #endif
 
+  commandHandler.registerCommand("dump-asuswrt", "test AsusWRT", [](const String& args) { testAsusWRT(); });
+
   Logger::info("SerialCommander setup done");
 }
 
@@ -1765,38 +1802,6 @@ void setupWiFiIcon() {
         16, 16, TFT_DARKGREY);
     }
   });
-}
-
-void testAsusWRT() {
-  Logger::info("====== AsusWRT test script =======");
-  Logger::info("free heap: %u", ESP.getFreeHeap());
-
-  const char* path = "/asus-get_clientlist.json";
-  File file = LittleFS.open(path, "r");
-  if (!file || file.isDirectory()) {
-    Logger::error("Can't open file (%s)", path);
-    return;
-  }
-
-  // Logger::info("free heap before read: %u", ESP.getFreeHeap());
-  String json = file.readString();
-  file.close();
-  // Logger::info("free heap after read (json size=%u): %u", json.length(), ESP.getFreeHeap());
-
-  std::vector<RouterClientInfo> clients;
-  if (!RouterClientListParser::parse(json, clients)) {
-    Logger::error("can't parse client list json. [%d]", clients.capacity());
-  }
-
-  // Logger::info("free heap after parse: %u", ESP.getFreeHeap());
-
-  RouterClientListIterator it(std::move(clients));
-  while (it.hasNext()) {
-    const RouterClientInfo& c = it.next();
-    Logger::info("client.name=%s", c.name.c_str());
-  }
-  Logger::info("------ AsusWRT test script -------");
-  Logger::info("");
 }
 
 #if ESP32

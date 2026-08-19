@@ -42,6 +42,28 @@ void Display::init() {
   // gfx->writeData(0x80); // Дзеркало по вертикалі (MY=1)
   // gfx->writeData(0xC0); // Обидва (MX=1, MY=1)
 
+#if defined(BOARD_ESP32_C6_LCD096) && defined(C6_LCD096_DEBUG_RAW_FILL)
+  // ТИМЧАСОВИЙ діагностичний блок (esp32-c6-lcd096) - малювання напряму
+  // через tft_ (Arduino_ST7735), В ОБХІД sprite_/TFT_eSprite повністю.
+  // Мета - зʼясувати, чи білі смуги зліва/справа (залишки заводської
+  // прошивки, які наш код не перезаписує) - це:
+  //  а) проблема в самому драйвері/офсетах Arduino_ST7735 (тоді ці смуги
+  //     будуть видні і ТУТ, при прямому fillScreen(), без жодного спрайту)
+  //  б) проблема нашої TFT_eSprite/DISPLAY_SPLIT_COUNT-обгортки (тоді тут
+  //     екран буде залитий кольором ПОВНІСТЮ, без білих смуг, а баг -
+  //     нижче, в initSprite()/pushSprite()).
+  // Прибрати після діагностики (і сам блок, і build_flag
+  // C6_LCD096_DEBUG_RAW_FILL з platformio.ini).
+  Logger::info("[C6_LCD096_DEBUG_RAW_FILL] tft_.width()=%d tft_.height()=%d rotation=%d",
+               tft_.width(), tft_.height(), tft_.getRotation());
+  tft_.fillScreen(TFT_RED);
+  delay(1500);
+  tft_.fillScreen(TFT_GREEN);
+  delay(1500);
+  tft_.fillScreen(TFT_BLUE);
+  delay(1500);
+#endif
+
   width_ = tft_.width();
   height_ = tft_.height();
 

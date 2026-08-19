@@ -72,6 +72,7 @@
 #define TFT_WHITE 0xFFFF
 #define TFT_RED 0xF800
 #define TFT_GREEN 0x07E0
+#define TFT_BLUE 0x001F
 #define TFT_DARKGREEN 0x03E0
 #define TFT_YELLOW 0xFFE0
 #define TFT_CYAN 0x07FF
@@ -158,8 +159,10 @@ class TFT_eSPI : public Arduino_ST7735 {
       : Arduino_ST7735(_bus = new Arduino_HWSPI(TFT_DC, TFT_CS, TFT_SCLK, TFT_MOSI), TFT_RST,
                         0 /* rotation - виставляється окремо через setRotation() */,
                         true /* IPS - панель IPS, init-послідовність вище явно шле 0x21 (INVON) */,
-                        TFT_WIDTH, TFT_HEIGHT, 1 /* col offset1 */, 26 /* row offset1 */,
-                        1 /* col offset2 */, 26 /* row offset2 */) {}
+                        TFT_WIDTH, TFT_HEIGHT
+                        , 26 /* col offset1 */, 1 /* row offset1 */, // portrait 1, 26, 1, 26
+                          26 /* col offset2 */, 1 /* row offset2 */  // landscape
+                      ) {}
 
   void init() {
     if (!begin()) {
