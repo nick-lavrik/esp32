@@ -10,7 +10,7 @@
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
-#if ESP32 || defined(BOARD_ESP32_C6)
+#if ESP32 || defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
 #include <esp_wifi.h> // Обов'язково додайте цей системний заголовок
 #endif
 
@@ -21,7 +21,7 @@ void setupWiFi() {
   // WiFi.setBufferSize(2048, 2048);
   // WiFi.setNoDelay(true);
   WiFi.mode(WIFI_STA);
-  #if ESP32 || defined(BOARD_ESP32_C6)
+  #if ESP32 || defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
 // ВАЖНО: Выключаем Wi-Fi 6 ДО старта подключения, чтобы избежать краша
     esp_err_t err = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     if (err == ESP_OK) {

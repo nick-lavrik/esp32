@@ -1,0 +1,39 @@
+# Кастомна partition-таблиця для esp32-c6-lcd096 (без OTA)
+#
+# Flash: 4 MB (0x400000) — board_upload.flash_size вже виставлено в platformio.ini.
+# Найменша з C6-плат проєкту (esp32-c6 має 8MB, тут — 4MB).
+#
+# OTA не використовується — один app-розділ замість двох (ota_0/ota_1).
+#
+# ВАЖЛИВО: app-розділ навмисно розташований на стандартній адресі 0x10000,
+# бо PlatformIO (platform-espressif32) у поточній версії ігнорує
+# board_upload.offset_address і завжди пише firmware.bin саме на 0x10000.
+#
+# app-розділ свідомо стиснутий до 1.5Mb на користь littlefs (2Mb, за
+# запитом). Той самий набір бібліотек (Arduino_GFX/JPEGDEC/PicoMQTT/
+# ESPAsyncWebServer/ESP Mail Client), що й на esp32-c6, там має app=2Mb
+# на 8MB flash — тут може НЕ ВМІСТИТИСЯ в 1.5Mb. Розмір firmware.bin
+# обов'язково звірити після першого білда (pio run -e esp32-c6-lcd096,
+# дивитись RAM/Flash summary) ДО прошивки; якщо не влазить — прибрати
+# зайві lib_deps (напр. ESP Mail Client) через build_src_filter/lib_ignore
+# для цього env, а не збільшувати app за рахунок littlefs.
+#
+# Розділ під LittleFS названо (і типізовано) як 'spiffs' — стандартна
+# назва за замовчуванням для LittleFS.begin() без додаткових параметрів.
+#
+# Розділ 'coredump' потрібен esp_core_dump (Arduino-ESP32), щоб зберігати
+# дамп пам'яті після краху для подальшого аналізу через espcoredump.py.
+# Без нього застосунок працює нормально, лише пише попередження при бут.
+#
+# app      - 0x180000 - 1.5Mb
+# coredump - 0x010000 - 64Kb
+# nvs      - 0x060000 - 384Kb  (з запасом під ConfigStorage)
+# littlefs - 0x200000 - 2Mb    (за запитом; дисплей 160x80 — фонові JPEG
+#                                суттєво легші, ніж на 480x480/320x172)
+#
+# Name,      Type,  SubType,   Offset,    Size,      Flags
+phy_init,    data,  phy,       0x009000,  0x001000,
+app,         app,   factory,   0x010000,  0x180000,
+coredump,    data,  coredump,  0x190000,  0x010000,
+nvs,         data,  nvs,       0x1A0000,  0x060000,
+spiffs,      data,  spiffs,    0x200000,  0x200000,

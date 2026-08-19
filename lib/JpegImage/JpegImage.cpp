@@ -9,7 +9,7 @@
 // читає multi-byte поля без гарантії вирівнювання - на C6 це давало биті/нульові
 // значення (спостерігалось: getJpgSize() повертав width>0, height=0). Тому на C6
 // декодуємо через JPEGDEC (bitbank2), яка коректно працює на RISC-V.
-#if defined(BOARD_ESP32_C6)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
 #include <JPEGDEC.h>
 #else
 #include <TJpg_Decoder.h>
@@ -105,7 +105,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   uint16_t jpegWidth = 0;
   uint16_t jpegHeight = 0;
 
-#if defined(BOARD_ESP32_C6)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
   // JPEGDEC::_jpeg (JPEGIMAGE) - це ~17.5 KB вбудованої структури (буфери
   // Huffman-таблиць, MCU, пікселів), НЕ вказівник. Локальна змінна на стеку
   // переповнює loopTask stack (типово 8 KB) -> "Stack protection fault".
@@ -156,7 +156,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   if (_buffer == nullptr) {
     _logger.error("Недостатньо пам'яті для декодованого зображення (%d / %d)", bufferBytes,
                   heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#if defined(BOARD_ESP32_C6)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
     jpegDecoder->~JPEGDEC();
     heap_caps_free(jpegDecoder);
 #endif
@@ -169,7 +169,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
 
   _activeInstance = this;
 
-#if defined(BOARD_ESP32_C6)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
   jpegDecoder->setPixelType(RGB565_LITTLE_ENDIAN);
   int decodeResult = jpegDecoder->decode(0, 0, 0);
   int jpegDecError = jpegDecoder->getLastError();
@@ -261,7 +261,7 @@ void JpegImage::blitBlock(int x, int y, int w, int h, int stride, const uint16_t
   }
 }
 
-#if defined(BOARD_ESP32_C6)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
 int JpegImage::jpegDrawCallback(JPEGDRAW *pDraw) {
   JpegImage *self = _activeInstance;
   if (self == nullptr) {

@@ -1300,7 +1300,7 @@ void setupBackgroundImage() {
   spaceImage.loadFromLittleFS(LITTLEFS_BACKGROUND_IMAGE,
                               SPRITE_COLOR_DEPTH > 8 ? JpegColorDepth::RGB565 : JpegColorDepth::RGB332); // 16 | 8
   setBackgroundImage(spaceImage);
-  #if BOARD_ESP32_C6
+  #if BOARD_ESP32_C6 || defined(BOARD_ESP32_C6_LCD096)
   ImageEffects::applyDarken(spaceImage, 0.15);
   #endif
   
@@ -1733,7 +1733,7 @@ void setupWiFiIcon() {
     const int p[2] = {display.width() - 16, display.height() - 16};
   #elif defined(BOARD_ESP32_S3_LCD147)
     const int p[2] = {display.width() - 16, display.height() - 16};
-  #elif defined(BOARD_ESP32_C6)
+  #elif defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
     const int p[2] = {display.width() - 16, display.height() - 16};
   #elif defined(BOARD_4848S040)
     const int p[2] = {display.width() - 16, display.height() - 16};

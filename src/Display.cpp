@@ -4,7 +4,7 @@
 #include <stdarg.h>  // Обов'язково для роботи з трикрапкою (...)
 #include <stdlib.h>  // malloc/free для тимчасового рядкового буфера в pushImage8bpp (BOARD_ESP32_C6)
 
-#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_S3_LCD147) || defined(BOARD_TTGO_T1) || defined(BOARD_ST7789)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_S3_LCD147) || defined(BOARD_TTGO_T1) || defined(BOARD_ST7789)
 // Arduino_Canvas (Arduino_GFX) не має 8bpp-режиму - канва завжди 16-біт
 // RGB565 (див. Setup_JD9853_C6.h::TFT_eSprite::setColorDepth() - no-op).
 // Конвертуємо RGB332 (3-3-2) назад у RGB565 (5-6-5) біт-реплікацією.
@@ -107,7 +107,7 @@ void Display::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16
 
 void Display::pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const uint8_t* data) {
   dXY(&x, &y);
-#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_S3_LCD147) || defined(BOARD_TTGO_T1) || defined(BOARD_ST7789)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_S3_LCD147) || defined(BOARD_TTGO_T1) || defined(BOARD_ST7789)
   // Canvas Arduino_GFX завжди 16-біт RGB565 - конвертуємо RGB332 -> RGB565
   // РЯДОК ЗА РЯДКОМ у невеликий тимчасовий буфер (w * 2 байти), а не в один
   // повний w*h*2 буфер: плата без PSRAM, зайві ~100+ KB на кадр тут дорогі.

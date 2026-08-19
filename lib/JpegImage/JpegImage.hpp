@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-#if defined(BOARD_ESP32_C6)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
 #include <JPEGDEC.h>
 #endif
 
@@ -52,7 +52,7 @@ public:
   const uint8_t  *bufferMono1()  const;  // формат, сумісний з Adafruit_GFX::drawBitmap
 
 private:
-#if defined(BOARD_ESP32_C6)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
   // RISC-V (C6) не толерантний до unaligned access - tjpgd на цій платформі
   // повертав биті значення (height=0 з коректним width). Декодуємо через JPEGDEC.
   static int jpegDrawCallback(JPEGDRAW *pDraw);
