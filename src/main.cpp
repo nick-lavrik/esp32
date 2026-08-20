@@ -66,6 +66,9 @@
 #include <LittleFS.h>
 // #include <PubSubClient.h>
 #include <TouchScreenConfig.h>
+#if BOARD_HAS_IMU
+#include <ImuController.h>
+#endif
 
 #include <AnalogSensor.hpp>
 #include <ConfigStorage.hpp>
@@ -135,6 +138,33 @@ TouchScreenConfig makeTouchScreenConfig() {
 
   c.edgeZoneX = 25;
   c.edgeZoneY = 25;
+#endif
+
+#ifdef BOARD_ESP32_C6
+  // AXS5106L віддає координати в НАТИВНИХ осях панелі (172 x 320), а екран
+  // працює в landscape (TFT_ROTATION=3), тобто 320 x 172 - звідси swapXY.
+  //
+  // Калібрування знято на живій платі по двох кутах:
+  //   лівий верхній  -> сирі (164, 312)   (максимуми обох осей)
+  //   правий нижній  -> сирі (6, 11)      (мінімуми обох осей)
+  // Обидві осі йдуть у зворотному напрямку, тому invertX і invertY.
+  // Невеликий недобір до країв (6..164 замість 0..171) - це фізичні поля
+  // панелі, спеціально розтягувати діапазон не варто: краї все одно
+  // дотискаються обрізанням у TouchPointMapper.
+  c.rawMinX = 0;
+  c.rawMaxX = TFT_WIDTH;   // 172, нативна ширина панелі
+  c.rawMinY = 0;
+  c.rawMaxY = TFT_HEIGHT;  // 320, нативна висота панелі
+
+  c.screenWidth = TFT_HEIGHT;   // 320 - екран у landscape
+  c.screenHeight = TFT_WIDTH;   // 172
+
+  c.swapXY = true;
+  c.invertX = true;
+  c.invertY = true;
+
+  c.edgeZoneX = 30;
+  c.edgeZoneY = 20;  // менше за X: по висоті всього 172 px
 #endif
 
 #ifdef BOARD_4848S040
@@ -225,7 +255,19 @@ AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 #endif
 
 #if BOARD_HAS_TOUCHSCREEN
-void onTouchLog(TouchPoint p) { Logger::debug("Touch: %d, %d", p.x, p.y); }
+// За замовчуванням дотики йдуть у debug, а DEFAULT_LOG_LEVEL=3 (info) їх не
+// пропускає - тобто в консолі порожньо навіть коли тач справний. Прапорець
+// нижче (команда "touchlog on") піднімає їх до info на час налагодження, не
+// засмічуючи звичайний вивід.
+bool touchLogVerbose = false;
+
+void onTouchLog(TouchPoint p) {
+  if (touchLogVerbose) {
+    Logger::info("Touch: %d, %d", p.x, p.y);
+  } else {
+    Logger::debug("Touch: %d, %d", p.x, p.y);
+  }
+}
 void onHoldHandler(TouchPoint p, unsigned long ms) { Logger::debug("Hold at %d,%d for %lu ms", p.x, p.y, ms); }
 void onDblClickHandler(TouchPoint p) { Logger::debug("Double click: %d, %d\n", p.x, p.y); }
 
@@ -335,6 +377,76 @@ void show_clock(bool show) {
   configStorage.setBool(CFG_SHOW_CLOCK, showClock = show);
   Logger::debug("showClock = %s", showClock ? "YES" : "NO");
 }
+
+#if defined(I2C_SDA) && defined(I2C_SCL)
+// I2C-шина СПІЛЬНА для тача й IMU, тому Wire.begin() робиться рівно один раз
+// тут, а не в кожному драйвері: повторний Wire.begin() з тими самими пінами
+// нешкідливий, але з РІЗНИМИ - мовчки переприв'язує шину і ламає той
+// пристрій, що ініціалізувався першим.
+void setupI2C() {
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(400000);
+  Logger::info("I2C: SDA=%d SCL=%d @400kHz", I2C_SDA, I2C_SCL);
+}
+
+// Скан шини. Потрібен, бо документація і сторонні драйвери розходяться в
+// адресах (AXS5106L: 0x51 у Waveshare FAQ проти 0x63 у toto04/axs5106l),
+// а єдиний спосіб дізнатися правду - спитати саму плату.
+void i2cScan() {
+  Logger::info("========= I2C scan (SDA=%d SCL=%d) =========================", I2C_SDA, I2C_SCL);
+
+  int found = 0;
+  for (uint8_t addr = 0x08; addr < 0x78; ++addr) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      ++found;
+      const char* known = "";
+      if (addr == 0x6B || addr == 0x6A) known = " <- QMI8658A (IMU)";
+      else if (addr == 0x63 || addr == 0x51) known = " <- AXS5106L (touch)";
+      Logger::info("  0x%02X%s", addr, known);
+    }
+  }
+
+  Logger::info("------------------------------------------------------------");
+  Logger::info(found ? "Знайдено пристроїв: %d" : "Нічого не знайдено - перевір піни/живлення", found);
+  Logger::info("============================================================");
+}
+#endif
+
+#if BOARD_HAS_IMU
+void setupImu() {
+  if (ImuController::setup()) {
+    Logger::info("IMU setup done");
+  }
+}
+
+// Переворот плати догори дриґом перевертає й зображення, і навпаки.
+//
+// Стан порівнюється з ПОПЕРЕДНІМ, а не з абсолютною орієнтацією: flip()
+// перемикає поточний поворот на 180 градусів, тому реагувати треба саме на
+// ЗМІНУ, інакше кожен виклик у FaceDown крутив би екран нескінченно.
+// Стартова орієнтація фіксується як базова і сама по собі flip не викликає -
+// плата, увімкнена вже перевернутою, показує звичайний екран.
+void updateImuFlip() {
+  static ImuController::Orientation last = ImuController::Orientation::Unknown;
+
+  ImuController::update();
+  const ImuController::Orientation now = ImuController::orientation();
+
+  if (now == ImuController::Orientation::Unknown) return;
+  if (last == ImuController::Orientation::Unknown) {
+    last = now;  // базова орієнтація зі старту, без flip
+    return;
+  }
+  if (now == last) return;
+
+  last = now;
+  Logger::info("[IMU] орієнтація змінилась: %s (%s=%.2fg) -> flip",
+               ImuController::orientationName(now), ImuController::upAxisName(),
+               ImuController::upAxisValue());
+  display_flip();
+}
+#endif
 
 void setupTouchScreen() {
 #if BOARD_HAS_TOUCHSCREEN
@@ -1400,6 +1512,37 @@ void setupSerialCommander() {
 
   commandHandler.registerCommand("flip", "flip display (180)", [](const String& args) { display_flip(); });
 
+#if BOARD_HAS_TOUCHSCREEN
+  commandHandler.registerCommand("touchlog", "log touch coordinates at info level: touchlog on|off",
+                                 [](const String& args) {
+                                   if (args.equalsIgnoreCase("on")) {
+                                     touchLogVerbose = true;
+                                   } else if (args.equalsIgnoreCase("off")) {
+                                     touchLogVerbose = false;
+                                   } else {
+                                     Logger::info("use: touchlog on|off");
+                                     return;
+                                   }
+                                   Logger::info("touchlog = %s", touchLogVerbose ? "on" : "off");
+                                 });
+#endif
+
+#if defined(I2C_SDA) && defined(I2C_SCL)
+  commandHandler.registerCommand("i2cscan", "scan I2C bus and list device addresses",
+                                 [](const String& args) { i2cScan(); });
+#endif
+
+#if BOARD_HAS_IMU
+  commandHandler.registerCommand("imu", "show IMU orientation and raw Z acceleration",
+                                 [](const String& args) {
+                                   Logger::info("IMU: %s | X=%.2f Y=%.2f Z=%.2f g | вісь %s=%.2fg",
+                                                ImuController::orientationName(ImuController::orientation()),
+                                                ImuController::accelX(), ImuController::accelY(),
+                                                ImuController::accelZ(), ImuController::upAxisName(),
+                                                ImuController::upAxisValue());
+                                 });
+#endif
+
   commandHandler.registerCommand("led", "control led: led on|off", [](const String& args) {
     if (args.equalsIgnoreCase("on")) {
       Logger::info("LED ON");
@@ -2450,7 +2593,13 @@ void setup() {
   setupSerialCommander();
   setupBlinkLED();
   setupDisplay();
+#if defined(I2C_SDA) && defined(I2C_SCL)
+  setupI2C();  // обов'язково ДО setupTouchScreen()/setupImu() - шина спільна
+#endif
   setupTouchScreen();
+#if BOARD_HAS_IMU
+  setupImu();
+#endif
   setupWiFi();
   setupNtpService();
   setupBackgroundImage();
@@ -2525,6 +2674,9 @@ void loop() {
 
 #if BOARD_HAS_TOUCHSCREEN
  touchController.update();
+#endif
+#if BOARD_HAS_IMU
+  updateImuFlip();
 #endif
 
   display.flush();
