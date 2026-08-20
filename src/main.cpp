@@ -2343,20 +2343,58 @@ void drawTime() {
   ntp.ftime("%H:%M:%S", timeStr, sizeof(timeStr));
   // ntp.ftime("%H:%M:%S.%Q", timeStr, sizeof(timeStr));
 
-#if BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147 || BOARD_ESP32_C6 || BOARD_ESP32_C6_LCD096
+#if CLOCK_TEXT_FONT && CLOCK_TEXT_SIZE && CLOCK_POS_Y
+  display.setTextFont(CLOCK_TEXT_FONT);
+  display.setTextSize(CLOCK_TEXT_SIZE);
+  #if !defined(CLOCK_POS_X)
+  int x = (display.width() - display.textWidth(timeStr)) / 2;
+  #else
+  int x = CLOCK_POS_X;
+  #endif
+
+  display.setTextColor(TFT_CYAN);
+  display.setCursor(x, CLOCK_POS_Y);
+  display.print(timeStr);
+
+  #if DATE_TEXT_FONT && DATE_TEXT_SIZE && DATE_POS_Y
+  display.setTextFont(DATE_TEXT_FONT);
+  display.setTextSize(DATE_TEXT_SIZE);
+
+  char dateStr[16];
+  ntp.ftime("%d.%m.%Y", dateStr, sizeof(dateStr));
+
+  #if !defined(DATE_POS_X)
+  int dateX = (display.width() - display.textWidth(dateStr)) / 2;
+  #else
+  int dateX = DATE_POS_X;
+  #endif
+  display.setTextColor(TFT_ORANGE);
+  display.setCursor(dateX, DATE_POS_Y);
+  display.print(dateStr);
+
+  #endif
+
+#elif BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147 || BOARD_ESP32_C6 || BOARD_ESP32_C6_LCD096
   // time
-  #if BOARD_ESP32_C6_LCD096
-  display.setTextSize(2);  // x2
+  #if BOARD_ESP32_C6
+  display.setTextSize(5);
+  #elif BOARD_ESP32_C6_LCD096
+  display.setTextSize(2);
   #else
   display.setTextFont(7);  // великий "цифровий" шрифт (тільки цифри та ":")
-  // display.setTextSize(1);
+  display.setTextSize(1);
   #endif
 
   int textW = display.textWidth(timeStr);
   int textH = display.fontHeight();
   int x = (display.width() - textW) / 2;
+  #if BOARD_ESP32_C6
+  int y = textH;
+  #else
   int y = 30;
+  #endif
 
+  // display.getTextBound();
   // Затираємо попередній текст перед виводом нового
   // display.fillRect(0, y, display.width(), textH, TFT_BLACK);
 
@@ -2369,6 +2407,7 @@ void drawTime() {
   char dateStr[16];
   ntp.ftime("%d.%m.%Y", dateStr, sizeof(dateStr));
 
+  // Logger::info("font_height (clock) = %d", display.fontHeight()); // 40 (!)
   y += display.fontHeight() + 5;
 
   display.setTextFont(4);
@@ -2376,6 +2415,7 @@ void drawTime() {
 
   textW = display.textWidth(dateStr);
   x = (display.width() - textW) / 2;
+  // Logger::info("font_height (date ) = %d", display.fontHeight()); // 28 (?)
 
   // display.fillRect(0, y, display.width(), display.fontHeight(), TFT_BLACK);
 

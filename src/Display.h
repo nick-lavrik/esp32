@@ -123,6 +123,7 @@ public:
     return sprite().printf(format, args...);
   }
 
+  // void getTextBound() { sprite().getTextBound(); };
 protected:
 #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   void initSprite();

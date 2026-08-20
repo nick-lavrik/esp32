@@ -46,6 +46,8 @@
 
 #include <Logger.hpp>
 
+#include "ArduinoGfxFonts.h"
+
 // ---------- Піни SPI дисплея (JD9853) ----------
 // Джерело: docs.waveshare.com/ESP32-C6-Touch-LCD-1.47
 #define TFT_WIDTH 172
@@ -183,10 +185,14 @@ class TFT_eSPI : public Arduino_ST7789 {
   // no-op, лишений лише для сумісності сигнатури з src/Display.h.
   void setSwapBytes(bool) {}
 
-  // Arduino_GFX не має власного поняття "висота рядка шрифту" в API
-  // src/Display.h - вбудований (не-u8g2) шрифт має комірку 8px по висоті,
-  // як і в Adafruit_GFX/TFT_eSPI за замовчуванням.
-  size_t fontHeight() { return 8; }
+  // Висота рядка ПОТОЧНОГО шрифту (див. ArduinoGfxFonts.h). Хардкод 8
+  // тут був справедливий лише поки єдиним шрифтом був вбудований 5x7:
+  // src/main.cpp рахує позиції рядків як row * (space + fontHeight()),
+  // тож зі шрифтом 29 px і відповіддю 8 весь текст злипався б у кашу.
+  size_t fontHeight() { return _fontHeight; }
+
+  // Вибір шрифту за номером TFT_eSPI (1/2/4/7 - залежно від LOAD_FONT*).
+  void setTextFont(uint8_t font) { _fontHeight = ArduinoGfxFonts::apply(this, font); }
 
   int16_t textWidth(const char *t) {
     int16_t x1, y1;
@@ -201,6 +207,8 @@ class TFT_eSPI : public Arduino_ST7789 {
   }
 
  private:
+  uint8_t _fontHeight = 8;  // вбудований 5x7; оновлюється в setTextFont()
+
   // Зберігаємо власний вказівник на bus (той самий об'єкт, що передається
   // в Arduino_ST7789), бо базовий _bus у бібліотеці protected/недоступний
   // напряму для batchOperation() поза родиною Arduino_TFT.
@@ -253,6 +261,8 @@ class TFT_eSprite {
       _canvas = nullptr;
       return nullptr;
     }
+    // Канва щойно з'явилась - застосовуємо шрифт, обраний до її створення.
+    _fontHeight = ArduinoGfxFonts::apply(_canvas, _textFont);
     return static_cast<void *>(_canvas);
   }
 
@@ -278,10 +288,16 @@ class TFT_eSprite {
     _textSize = s;
     if (_canvas) _canvas->setTextSize(s);
   }
-  void setTextFont(uint8_t) {}  // альтернативних (u8g2) шрифтів тут не підключено - no-op
+  // Вибір шрифту за номером TFT_eSPI. Номер запам'ятовується навіть якщо
+  // канви ще немає (createSprite() викликається пізніше) - інакше шрифт,
+  // виставлений до створення спрайта, мовчки губився б.
+  void setTextFont(uint8_t font) {
+    _textFont = font;
+    if (_canvas) _fontHeight = ArduinoGfxFonts::apply(_canvas, font);
+  }
   void setTextDatum(uint8_t datum) { _datum = datum; }
 
-  size_t fontHeight() { return 8 * _textSize; }  // вбудований шрифт: комірка 8px по висоті
+  size_t fontHeight() { return _fontHeight * _textSize; }
 
   int16_t textWidth(const char *t) {
     if (!_canvas) return 0;
@@ -335,5 +351,7 @@ class TFT_eSprite {
   TFT_eSPI *_tft;
   Arduino_Canvas *_canvas = nullptr;
   uint8_t _textSize = 1;
+  uint8_t _textFont = 1;    // номер шрифту TFT_eSPI, обраний setTextFont()
+  uint8_t _fontHeight = 8;  // висота рядка цього шрифту при _textSize == 1
   uint8_t _datum = TL_DATUM;
 };
