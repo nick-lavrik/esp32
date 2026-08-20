@@ -63,7 +63,9 @@ public:
   int width() const;
   int height() const;
 
-  const uint32_t loopFrameRate();
+  // Без const на типі повернення: для скаляра він не має сенсу й ігнорується
+  // компілятором (-Wignored-qualifiers).
+  uint32_t loopFrameRate();
   size_t fontHeight() { return sprite().fontHeight(); }
 
   void setTextFont(uint8_t f) { sprite().setTextFont(f); }
@@ -159,6 +161,13 @@ private:
   int width_ = 0;
   int height_ = 0;
   uint8_t brightness_ = 50;  // percent!
+
+  // Переюзний рядковий буфер для pushImage8bpp() (RGB332 -> RGB565).
+  // Раніше він malloc/free-ився на КОЖНОМУ виклику, тобто щокадру при
+  // малюванні фону. Виділяється лениво і росте лише за потреби; звільняється
+  // разом з Display (об'єкт глобальний, тобто фактично ніколи).
+  uint16_t* rowBuffer_ = nullptr;
+  int32_t rowBufferPx_ = 0;
 
   const TLogger _logger{"tft"};
 };

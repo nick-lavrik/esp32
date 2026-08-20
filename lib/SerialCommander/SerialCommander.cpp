@@ -62,7 +62,9 @@ void SerialCommander::processLine(const String& line) {
 }
 
 void SerialCommander::printUnknown(const String& name) {
-  _logger.warn("Unknown command: %s", name);
+  // .c_str() обов'язково: String - не-POD клас, передача його через "..." до
+  // %s - UB (працювало лише випадково, бо char* лежить першим полем String).
+  _logger.warn("Unknown command: %s", name.c_str());
   _logger.info("Enter 'list' to see available commands");
 }
 

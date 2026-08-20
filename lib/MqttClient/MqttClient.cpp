@@ -1,5 +1,6 @@
 #include "MqttClient.hpp"
 #include <Arduino.h>
+#include <Logger.hpp>
 
 #if defined(ESP8266)
 #include <ESP8266WiFi.h>
@@ -125,6 +126,7 @@ void MqttClient::loop() {
     dispatchMessage(msg.topic.c_str(), msg.payload.data(),
                     static_cast<unsigned int>(msg.payload.size()));
   }
+  reportDroppedMessages();
 #else
   // ESP8266: без змін, кооперативний однопотоковий loop().
   if (!_mqttClient.connected()) {
@@ -320,6 +322,7 @@ void MqttClient::loop() {
     dispatchMessage(msg.topic.c_str(), msg.payload.data(),
                     static_cast<unsigned int>(msg.payload.size()));
   }
+  reportDroppedMessages();
 #else
   _mqttClient.loop();
 #endif
@@ -391,6 +394,47 @@ bool MqttClient::connect() {
 // ==========================================
 // СПІЛЬНІ МЕТОДИ ДЛЯ ПУБЛІКАЦІЙ ТА ЛІСТЕНЕРІВ
 // ==========================================
+
+bool MqttClient::flushOutgoing(uint32_t timeoutMs) {
+#if defined(ESP32) && __has_include(<PicoMQTT.h>)
+  const uint32_t start = millis();
+  bool empty = false;
+
+  while (true) {
+    {
+      MutexGuard guard(_outgoingQueueMutex);
+      empty = _outgoingQueue.empty();
+    }
+    if (empty || millis() - start >= timeoutMs) {
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+
+  if (empty) {
+    // Черга порожня, але мережевий таск міг забрати її щойно і ще не добити
+    // publish у сокет - даємо йому один свій цикл (vTaskDelay(100) в
+    // networkTaskLoop()).
+    vTaskDelay(pdMS_TO_TICKS(120));
+  }
+  return empty;
+#else
+  // PubSubClient / ESP8266: publish виконується синхронно, чекати нічого.
+  (void)timeoutMs;
+  return true;
+#endif
+}
+
+void MqttClient::reportDroppedMessages() {
+#if defined(ESP32)
+  uint32_t incoming = _droppedIncoming.exchange(0, std::memory_order_relaxed);
+  uint32_t outgoing = _droppedOutgoing.exchange(0, std::memory_order_relaxed);
+  if (incoming > 0 || outgoing > 0) {
+    Logger::warn("[MQTT] черга переповнена, відкинуто: %u вхідних, %u вихідних",
+                 (unsigned)incoming, (unsigned)outgoing);
+  }
+#endif
+}
 
 bool MqttClient::publish(const char* topic, const char* payload, bool retained) {
   std::string fullTopic = resolveTopic(topic);
@@ -473,6 +517,13 @@ void MqttClient::enqueueOutgoing(MqttOutgoingCommand::Type type, const std::stri
     cmd.payload.assign(payload, payload + length);
   }
   MutexGuard guard(_outgoingQueueMutex);
+  // drop-oldest, як і для _incomingQueue: якщо мережевий таск не встигає
+  // (немає з'єднання, а головний потік продовжує publish-ити), черга не має
+  // з'їдати купу.
+  if (_outgoingQueue.size() >= kMaxOutgoingQueue) {
+    _outgoingQueue.erase(_outgoingQueue.begin());
+    _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+  }
   _outgoingQueue.push_back(std::move(cmd));
 }
 
@@ -626,21 +677,35 @@ void MqttClient::resubscribeAll() {
 }
 
 void MqttClient::dispatchMessage(const char* topic, const uint8_t* payload, unsigned int length) {
-  // Копіюємо снепшот під локом, самі callback-и викликаємо без утримання
-  // _listenersMutex - callback може викликати addListener()/removeListener()
-  // (реентрантність), що призвело б до deadlock на non-recursive mutex.
-  std::vector<MqttListenerEntry> snapshot;
+  // Матчинг топіка робимо ПІД локом (MqttTopicMatcher::match - чиста й дешева
+  // функція), а копіюємо лише колбеки тих слухачів, що реально підійшли -
+  // зазвичай нуль або один. Раніше тут копіювався ВЕСЬ _listeners (String +
+  // std::function на кожен запис) на КОЖНЕ повідомлення; при підписці на "#"
+  // це десятки алокацій на секунду.
+  //
+  // Копія колбека все одно потрібна: викликати його під локом не можна -
+  // колбек може сам звернутись до addListener()/removeListener(), а це
+  // deadlock на нерекурсивному мьютексі.
+  //
+  // _dispatchScratch - член класу, щоб переюзати вже виділену capacity між
+  // викликами. Викликається лише з loop() (головний потік) і не реентрантний.
+  _dispatchScratch.clear();
   {
 #if defined(ESP32)
     MutexGuard guard(_listenersMutex);
 #endif
-    snapshot = _listeners;
+    for (const auto& entry : _listeners) {
+      if (entry.markedForRemoval || !entry.callback) { continue; }
+      if (!MqttTopicMatcher::match(entry.topic.c_str(), topic)) { continue; }
+      _dispatchScratch.push_back(entry.callback);
+    }
   }
-  for (auto& entry : snapshot) {
-    if (entry.markedForRemoval || !entry.callback) { continue; }
-    if (!MqttTopicMatcher::match(entry.topic.c_str(), topic)) { continue; }
-    entry.callback(topic, payload, length);
+
+  for (auto& callback : _dispatchScratch) {
+    callback(topic, payload, length);
   }
+  _dispatchScratch.clear();  // не тримаємо копії колбеків між викликами
+
   cleanupRemovedListeners();
 }
 
@@ -657,7 +722,14 @@ void MqttClient::enqueueIncoming(const char* topic, const uint8_t* payload, unsi
   MqttIncomingMessage msg;
   msg.topic.assign(topic);
   msg.payload.assign(payload, payload + length);
+
   MutexGuard guard(_queueMutex);
+  // drop-oldest: краще втратити найстаріше повідомлення, ніж купу (див.
+  // kMaxIncomingQueue). Про факт втрати повідомить loop() головного потоку.
+  if (_incomingQueue.size() >= kMaxIncomingQueue) {
+    _incomingQueue.erase(_incomingQueue.begin());
+    _droppedIncoming.fetch_add(1, std::memory_order_relaxed);
+  }
   _incomingQueue.push_back(std::move(msg));
 #endif
 }

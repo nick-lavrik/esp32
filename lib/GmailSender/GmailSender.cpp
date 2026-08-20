@@ -24,7 +24,10 @@ void GmailSender::begin() {
   }); */
 }
 
-void GmailSender::smtpCallback(SMTP_Status status) { Logger::debug(status.info()); }
+// "%s" обов'язково: status.info() - текст ВІД SMTP-СЕРВЕРА. Як format-рядок
+// будь-який '%' у відповіді сервера змусив би vsnprintf() читати неіснуючі
+// varargs зі стека.
+void GmailSender::smtpCallback(SMTP_Status status) { Logger::debug("%s", status.info()); }
 
 bool GmailSender::sendEmail(const char* recipientEmail, const char* subject, const char* message) {
   begin();

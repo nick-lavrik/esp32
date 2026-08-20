@@ -66,6 +66,16 @@ public:
   void loop();
   void disconnect(const char* customOfflineMessage = nullptr);
 
+  // Чекає (з викликаючого потоку), доки мережевий таск не вижене чергу
+  // вихідних команд, але не довше timeoutMs. true - черга порожня.
+  //
+  // Потрібно перед ESP.restart(): у PicoMQTT-гілці publish()/disconnect() лише
+  // КЛАДУТЬ команду в _outgoingQueue, а виконує її мережевий таск раз на
+  // ~100 мс. Без цього очікування offline-LWT перед ребутом фізично не встигав
+  // піти до брокера. Для PubSubClient-гілки та ESP8266 - завжди true (там
+  // publish синхронний).
+  bool flushOutgoing(uint32_t timeoutMs = 500);
+
   bool publish(const char* topic, const char* payload, bool retained = false);
   bool publish(const char* topic, const uint8_t* payload, unsigned int length, bool retained = false);
   bool subscribe(const char* topic);
@@ -133,6 +143,10 @@ private:
   void cleanupRemovedListeners();
   void enqueueIncoming(const char* topic, const uint8_t* payload, unsigned int length);
 
+  // Логує (з головного потоку) факт відкидання повідомлень через переповнення
+  // черг і скидає лічильники. Викликається з loop().
+  void reportDroppedMessages();
+
   std::string resolveTopic(const char* topic) const;
 
   MqttConfig _config;
@@ -179,6 +193,20 @@ private:
   MqttListenerId _nextListenerId = 1;
   uint32_t _lastReconnectAttempt = 0;
 
+  // Переюзний буфер під колбеки, що підійшли під топік - див. dispatchMessage().
+  std::vector<MqttListenerCallback> _dispatchScratch;
+
+  // Ліміти черг (drop-oldest при переповненні) - та сама політика, що в
+  // PrintQueue/ScreenLogTail.
+  //
+  // Без ліміту _incomingQueue росла безмежно: PicoMQTT-гілка підписується на
+  // "#", тобто мережевий таск кладе в чергу КОЖНЕ повідомлення брокера, а
+  // розбирає її лише loop() головного потоку. Достатньо однієї затримки в
+  // loop() (ефект зображення, "status sd", блокуючий doPing()) під потоком
+  // повідомлень - і купа закінчувалась.
+  static constexpr size_t kMaxIncomingQueue = 32;
+  static constexpr size_t kMaxOutgoingQueue = 32;
+
 #if defined(ESP32)
   // --- Потокобезпека для мережевого таска (тільки ESP32) ---
   // _networkMutex захищає _mqttClient - АЛЕ ТІЛЬКИ для PubSubClient-гілки
@@ -203,6 +231,13 @@ private:
   SemaphoreHandle_t _listenersMutex = nullptr;
   TaskHandle_t _networkTaskHandle = nullptr;
   std::vector<MqttIncomingMessage> _incomingQueue;
+
+  // Скільки повідомлень/команд відкинуто через переповнення черг. Інкрементує
+  // мережевий таск, читає й скидає loop() головного потоку - логувати з
+  // мережевого таска не хочемо (там навмисно немає ні мьютексів логера, ні
+  // блокуючих викликів).
+  std::atomic<uint32_t> _droppedIncoming{0};
+  std::atomic<uint32_t> _droppedOutgoing{0};
 
 #if __has_include(<PicoMQTT.h>)
   // Черга вихідних команд (тільки PicoMQTT) - див. коментар вище біля

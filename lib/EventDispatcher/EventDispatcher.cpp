@@ -38,9 +38,11 @@ void EventDispatcher::addSubscriber(IEventSubscriber& subscriber) { subscriber.s
 void EventDispatcher::removeSubscriber(IEventSubscriber& subscriber) {
   subscriber.unsubscribe(*this);
 }
-IEvent& EventDispatcher::dispatch(const std::string& eventName) {
+void EventDispatcher::dispatch(const std::string& eventName) {
+  // `e` живе лише в межах цього виклику - саме тому метод void, а не IEvent&
+  // (раніше повертав посилання на цю локальну змінну).
   Event e;
-  return dispatch(e, eventName);
+  dispatch(e, eventName);
 }
 
 IEvent& EventDispatcher::dispatch(IEvent& event, const std::string& eventName) {

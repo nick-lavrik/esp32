@@ -42,28 +42,6 @@ void Display::init() {
   // gfx->writeData(0x80); // Дзеркало по вертикалі (MY=1)
   // gfx->writeData(0xC0); // Обидва (MX=1, MY=1)
 
-#if defined(BOARD_ESP32_C6_LCD096) && defined(C6_LCD096_DEBUG_RAW_FILL)
-  // ТИМЧАСОВИЙ діагностичний блок (esp32-c6-lcd096) - малювання напряму
-  // через tft_ (Arduino_ST7735), В ОБХІД sprite_/TFT_eSprite повністю.
-  // Мета - зʼясувати, чи білі смуги зліва/справа (залишки заводської
-  // прошивки, які наш код не перезаписує) - це:
-  //  а) проблема в самому драйвері/офсетах Arduino_ST7735 (тоді ці смуги
-  //     будуть видні і ТУТ, при прямому fillScreen(), без жодного спрайту)
-  //  б) проблема нашої TFT_eSprite/DISPLAY_SPLIT_COUNT-обгортки (тоді тут
-  //     екран буде залитий кольором ПОВНІСТЮ, без білих смуг, а баг -
-  //     нижче, в initSprite()/pushSprite()).
-  // Прибрати після діагностики (і сам блок, і build_flag
-  // C6_LCD096_DEBUG_RAW_FILL з platformio.ini).
-  Logger::info("[C6_LCD096_DEBUG_RAW_FILL] tft_.width()=%d tft_.height()=%d rotation=%d",
-               tft_.width(), tft_.height(), tft_.getRotation());
-  tft_.fillScreen(TFT_RED);
-  delay(1500);
-  tft_.fillScreen(TFT_GREEN);
-  delay(1500);
-  tft_.fillScreen(TFT_BLUE);
-  delay(1500);
-#endif
-
   width_ = tft_.width();
   height_ = tft_.height();
 
@@ -133,19 +111,26 @@ void Display::pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const ui
   // Canvas Arduino_GFX завжди 16-біт RGB565 - конвертуємо RGB332 -> RGB565
   // РЯДОК ЗА РЯДКОМ у невеликий тимчасовий буфер (w * 2 байти), а не в один
   // повний w*h*2 буфер: плата без PSRAM, зайві ~100+ KB на кадр тут дорогі.
-  uint16_t* rowBuffer = static_cast<uint16_t*>(malloc((size_t)w * sizeof(uint16_t)));
-  if (rowBuffer == nullptr) {
+  //
+  // Буфер переюзний (член класу), а не локальний malloc/free: цей метод
+  // викликається з drawBackgroundImage() ЩОКАДРУ, і пара malloc/free на кадр
+  // - зайвий тиск на купу й привід для її фрагментації на платі без PSRAM.
+  if (rowBufferPx_ < w) {
+    free(rowBuffer_);
+    rowBuffer_ = static_cast<uint16_t*>(malloc((size_t)w * sizeof(uint16_t)));
+    rowBufferPx_ = (rowBuffer_ != nullptr) ? w : 0;
+  }
+  if (rowBuffer_ == nullptr) {
     _logger.error("pushImage8bpp: не вдалось виділити рядковий буфер (%d px)", (int)w);
     return;
   }
   for (int32_t row = 0; row < h; row++) {
     const uint8_t* srcRow = data + (size_t)row * w;
     for (int32_t col = 0; col < w; col++) {
-      rowBuffer[col] = rgb332to565(srcRow[col]);
+      rowBuffer_[col] = rgb332to565(srcRow[col]);
     }
-    sprite().pushImage(x, y + row, w, 1, rowBuffer);
+    sprite().pushImage(x, y + row, w, 1, rowBuffer_);
   }
-  free(rowBuffer);
 #elif !defined(BOARD_4848S040) && !defined(BOARD_ESP8266)
   // Справжній bodmer/TFT_eSPI (esp32-st7789, ttgo-t1) має pushImage(...,uint8_t*,bool,uint16_t*).
   // bpp8=true -> дані трактуються як "рідний" 8bpp формат сприту (RGB332), без палітри.
@@ -176,7 +161,8 @@ int Display::width() const { return width_; }
 int Display::height() const { return height_; }
 
 void Display::brightness(uint8_t percent) {
-  percent = percent < 0 ? 0 : percent;
+  // Нижньої межі не перевіряємо: percent - uint8_t, тобто "percent < 0"
+  // (як було раніше) завжди false і clamp був мертвим кодом.
   percent = percent > 100 ? 100 : percent;
 
 #if defined(TFT_BL)
@@ -203,7 +189,7 @@ void Display::brightness(uint8_t percent) {
   brightness_ = percent;
 }
 
-const uint32_t Display::loopFrameRate() {
+uint32_t Display::loopFrameRate() {
   // --- Метрики "здоров'я" системи ---
   static uint32_t loopCounter = 0;
   static uint32_t loopsPerSecond = 0;

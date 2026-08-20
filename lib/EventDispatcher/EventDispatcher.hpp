@@ -31,7 +31,7 @@ public:
   void addSubscriber(IEventSubscriber& subscriber) override;
   void removeSubscriber(IEventSubscriber& subscriber) override;
 
-  IEvent& dispatch(const std::string& eventName) override;
+  void dispatch(const std::string& eventName) override;
   IEvent& dispatch(IEvent& event, const std::string& eventName) override;
 
   bool hasListeners(const std::string& eventName = "") const override;

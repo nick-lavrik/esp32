@@ -1,8 +1,11 @@
 #include <Arduino.h> // Видаліть або замініть на <cstdio>, <cstring>, <cmath> для чистого C++
 #include "DataType.h"
 
-// Буфер, який ви зарезервували
-char buf[128];
+// Буфер, який ви зарезервували.
+// static - навмисно: глобальний символ із зовнішнім зв'язуванням і настільки
+// загальним іменем як "buf" рано чи пізно зіткнеться з таким самим у якійсь
+// бібліотеці з lib_deps.
+static char buf[128];
 
 
 // === ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ АНАЛІЗУ ===
@@ -110,6 +113,12 @@ void format_payload_data(DataType type, const uint8_t* payload, unsigned int len
   }
 
   switch (type) {
+    // TYPE_EMPTY відсіяно раннім return вище; перелічуємо явно, щоб -Wswitch
+    // і далі ловив НОВІ значення DataType, які забули тут обробити.
+    case TYPE_EMPTY:
+      snprintf(out_buf, buf_size, "[Empty]");
+      break;
+
     case TYPE_JSON:
     case TYPE_PRINTABLE_SHORT:
     case TYPE_STRING: {

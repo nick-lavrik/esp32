@@ -168,7 +168,9 @@ void WiFi_scan() {
       Logger::info("BSSID (MAC):%s", bssidStr);
       Logger::info("Signal:     %d dBm", rssi);
       Logger::info("Channel:    %d", channel);
-      Logger::info("Security:   %s", securityStr);
+      // .c_str() обов'язково - String через "..." до %s це UB, див.
+      // SerialCommander::printUnknown().
+      Logger::info("Security:   %s", securityStr.c_str());
       Logger::info("==================================================");
     }
   }

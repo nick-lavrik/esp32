@@ -17,30 +17,116 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 
 ## Плати (PlatformIO environments)
 
-| env | Плата | Дисплей | Особливості |
-| :--- | :--- | :--- | :--- |
-| `esp32-4848s040` | **ESP32-S3**, GUITION/Sunton ESP32-4848S040C | 480×480, RGB565, ST7701, LovyanGFX@^1.1.16 | touch (GT911), SD, PSRAM, 320KB RAM, 16MB Flash |
-| `esp32-s3-lcd147` | **ESP32-S3**, Waveshare ESP32-S3-LCD-1.47 | 172×320, RGB565, ST7789, TFT_eSPI@^2.5.43 | без touch, SD_MMC, PSRAM, 320KB RAM, 16MB Flash |
-| `esp32-st7789` | **ESP32**, ESP32 Dev Module + ST7789 SPI | 240×320, RGB565, ST7789, TFT_eSPI@^2.5.43 | touch (XPT2046), SD, light sensor, 320KB RAM, 4MB Flash |
-| `ttgo-t1` | **ESP32**, LilyGO T-Display | 135×240, RGB565, ST7789, TFT_eSPI@^2.5.43 | без SD, без touch, 320KB RAM, 16MB Flash |
-| `esp32-c6` | **ESP32-C6** (RISC-V), Waveshare ESP32-C6-LCD-1.47 | 172×320, RGB565, JD9853 (ST7789-сумісний), `moononournation/Arduino_GFX@^1.6.0` | SD (SPI, шина спільна з дисплеєм: SCK=1/MOSI=2, окремі MISO=3/CS=4), БЕЗ PSRAM, 320KB RAM, 8MB Flash, без touch/IMU (заплановано: AXS5106L touch, QMI8658A IMU) |
-| `esp8266` | **ESP8266**, NodeMCU ESP8266 + SSD1306 OLED | 128×64, монохром (1bit), SSD1306, Adafruit SSD1306@^2.5.13 | без SD/touch, 80KB RAM, 4MB Flash |
+Сім середовищ. Ідентичність плати в коді — build flag `BOARD_*` (третя колонка), саме за ним
+розгалужується `src/main.cpp` і `src/Display.*`.
 
-Усі environments — `framework = arduino`, `-std=gnu++17`. ESP-IDF v5.5.4 / Arduino Core 3.3.9
-під капотом Arduino-framework для ESP32-S3/ESP32 environments (не "чистий" ESP-IDF).
+| env | MCU / плата | `BOARD_*` flag | Дисплей (контролер, графічна бібліотека) | Flash / PSRAM |
+| :--- | :--- | :--- | :--- | :--- |
+| `esp32-4848s040` | **ESP32-S3**, GUITION/Sunton ESP32-4848S040C | `BOARD_4848S040` | 480×480 RGB565, ST7701 (RGB-панель), `lovyan03/LovyanGFX@^1.1.16` | 16 MB / OPI PSRAM |
+| `esp32-s3-lcd147` | **ESP32-S3**, Waveshare ESP32-S3-LCD-1.47 | `BOARD_ESP32_S3_LCD147` | 172×320 RGB565, ST7789, `bodmer/TFT_eSPI@^2.5.43` | 16 MB / OPI PSRAM |
+| `esp32-st7789` | **ESP32** (esp32dev) + ST7789 SPI | `BOARD_ST7789` | 240×320 RGB565, ST7789, `bodmer/TFT_eSPI@^2.5.43` | 4 MB / — |
+| `ttgo-t1` | **ESP32**, LilyGO T-Display | `BOARD_TTGO_T1` | 135×240 RGB565, ST7789, `bodmer/TFT_eSPI@^2.5.43` | 16 MB / — |
+| `esp32-c6` | **ESP32-C6** (RISC-V), Waveshare ESP32-C6-LCD-1.47 | `BOARD_ESP32_C6` | 172×320 RGB565, JD9853 (командно ST7789-сумісний), `moononournation/Arduino_GFX@^1.6.0` | 8 MB / — |
+| `esp32-c6-lcd096` | **ESP32-C6** (RISC-V), "ESP32-C6-LCD-0.96" | `BOARD_ESP32_C6_LCD096` | 160×80 RGB565, **ST7735S** (не ST7789, попри опис товару), `moononournation/Arduino_GFX@^1.6.0` | 4 MB / — |
+| `esp8266` | **ESP8266**, NodeMCU v2 + SSD1306 OLED (I2C) | `BOARD_ESP8266` | 128×64 монохром (1 bit), SSD1306, `adafruit/Adafruit SSD1306@^2.5.13` | 4 MB / — |
+
+Усі environments — `framework = arduino`. ESP-IDF v5.5.4 / Arduino Core 3.3.9 під капотом
+Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
+
+> **Про `-std`:** у `[common] build_flags` вказано `-std=gnu++17`, але фактично він **не діє** —
+> arduino-esp32 додає власний `-std=gnu++2a` ПІСЛЯ наших флагів у тій самій команді, а gcc бере
+> останній. Тобто проєкт реально збирається як C++20. Перевірити: `compile_commands.json`.
+
+### Матриця фіч по платах
+
+Джерело — `build_flags`/`lib_deps` кожного env; порожня клітинка == фіча вимкнена/відсутня.
+
+| Фіча (як вмикається) | 4848s040 | s3-lcd147 | st7789 | ttgo-t1 | c6 | c6-lcd096 | esp8266 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `TFT_ROTATION` | 2 | 3 | 3 | 3 | 3 | 1 | 2 |
+| `DISPLAY_SPLIT_COUNT` (смуг на кадр) | 1 | 2 | 6 | 1 | 4 | 4 | 1 |
+| `SPRITE_COLOR_DEPTH` | 16 | 16 | 16 | 16 | 16 | 16 | 1 |
+| SD (`BOARD_HAS_SD`) | SPI | SD_MMC 4-bit | SPI | — | — ¹ | SPI ² | — |
+| Touch (`BOARD_HAS_TOUCHSCREEN`) | GT911 | — | XPT2046 | — | — | — | — |
+| Light sensor (`LIGHT_SENSOR_PIN`) | — | — | GPIO34 | — | — | — | — |
+| Кнопка (`FLIP_BUTTON_PIN`) | — | GPIO0 | GPIO0 | GPIO0 | — | **GPIO9** | GPIO0 |
+| LED (`BLINK_LED_PIN`) | — | — | — | — | — | — | GPIO2 |
+| MQTT-бекенд | PubSubClient | PubSubClient | PubSubClient | PubSubClient | **PicoMQTT** | **PicoMQTT** | PubSubClient |
+| Ping (`ESPping` в `lib_deps`) | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| Gmail (`ESP Mail Client`) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ |
+| JPEG-декодер | TJpg_Decoder | TJpg_Decoder | TJpg_Decoder | TJpg_Decoder | **JPEGDEC** ³ | **JPEGDEC** ³ | TJpg_Decoder |
+| Фон із LittleFS (`LITTLEFS_BACKGROUND_IMAGE`) | `/background-02-480x480.jpg` | `/background-01-320x172.jpg` | — | — | `/background-02-320x172.jpg` | `/background-01-160x80.jpg` | — |
+| Вбудовані фони (`BACKGROUND_IMAGES_COUNT`) | 0 | 0 | **1** | 0 | 0 | 0 | 0 |
+| Хвіст логів на екран (`SCREEN_LOG_TAIL_LINES`) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+¹ Піни SD для `esp32-c6` у `build_flags` задані, але `BOARD_HAS_SD=0` — код SD не компілюється.
+² `esp32-c6-lcd096`: SPI-шина **спільна** з дисплеєм (SCK=7, MOSI=6, MISO=5), окремі CS: 4 (SD) /
+  14 (LCD). `SPI.begin()` робить `setupSD()` — обов'язково **до** `setupDisplay()`.
+³ RISC-V (C6) не толерантний до невирівняного доступу до пам'яті; tjpgd під TJpg_Decoder на ньому
+  повертав биті значення заголовка (`width>0`, `height=0`). Тому на обох C6 — `bitbank2/JPEGDEC`.
+
+### Розділи флеш-пам'яті
+
+Жодна плата **не має OTA** — один розділ `app`, тому оновлення лише через USB.
+
+| env | CSV | `app` | `nvs` | `spiffs` (LittleFS) |
+| :--- | :--- | ---: | ---: | ---: |
+| `esp32-4848s040` | `partitions_4848s040.csv` | 4 MB | 960 KB | 11 MB |
+| `esp32-s3-lcd147` | `partitions_esp32_s3_lcd147.csv` | 3 MB | 960 KB | 11.9 MB |
+| `esp32-st7789` | `partitions_st7789.csv` | 1.9 MB | 500 KB | 1.5 MB |
+| `ttgo-t1` | `partitions_ttgo_t1.csv` | 3 MB | 960 KB | 11.9 MB |
+| `esp32-c6` | `partitions_c6.csv` | 2 MB | 960 KB | 4.9 MB |
+| `esp32-c6-lcd096` | `partitions_c6_lcd096.csv` | 2 MB | 384 KB | 1.5 MB |
+| `esp8266` | — (`board_build.filesystem = littlefs`) | — | — | — |
+
+### Платформо-специфічні теки
+
+Кожен env підмішує рівно одну теку через `build_src_filter = +<*> +<../src-<board>/>`. Там живе
+лише те, що не можна тримати спільним — насамперед визначення глобального об'єкта `tft`
+(`TftInstance.cpp`) і реалізації touch-контролерів:
+
+`src-4848s040/` (+ GT911Touch, TouchController) · `src-esp32-s3-lcd147/` · `src-st7789/`
+(+ TouchController) · `src-ttgo-t1/` · `src-esp32-c6/` · `src-esp32-c6-lcd096/` · `src-esp8266/`
+(+ MonoImageExample)
+
+### Як обирається графічний бекенд
+
+Два різні механізми, не плутати:
+
+1. **Тип `TFT_eSPI`/`TFT_eSprite`** обирає `src/TftInstance.h` — ланцюжком `#if defined(BOARD_*)`,
+   **не** через `-include`. Зроблено саме так, щоб важкий `<LovyanGFX.hpp>` тягнувся лише туди,
+   де він реально потрібен, а не в кожен `.cpp` проєкту й бібліотек:
+
+   | `BOARD_*` | Заголовок | Що всередині |
+   | :--- | :--- | :--- |
+   | `BOARD_4848S040` | `include/Setup_ST7701_4848S040.h` | клас LGFX + alias `TFT_eSPI` |
+   | `BOARD_ESP8266` | `include/Setup_SSD1306_NodeMCU.h` | фасад над `Adafruit_SSD1306` |
+   | `BOARD_ESP32_C6` | `include/Setup_JD9853_C6.h` | фасад над `Arduino_GFX` (JD9853) |
+   | `BOARD_ESP32_C6_LCD096` | `include/Setup_ST7735_C6_LCD096.h` | фасад над `Arduino_GFX` (ST7735S) |
+   | *(інше: st7789, ttgo-t1, s3-lcd147)* | `<TFT_eSPI.h>` | справжній bodmer/TFT_eSPI |
+
+2. **Конфіг самого bodmer/TFT_eSPI** (піни, драйвер, шрифти) для двох плат подається через
+   `-include`: `esp32-st7789` → `include/Setup_ST7789.h`, `esp32-s3-lcd147` →
+   `include/Setup_ST7789_lcd147.h`. `ttgo-t1` користується конфігом самої бібліотеки.
+
+Прикладний код (`src/Display.h`/`.cpp`) однаковий для всіх плат — він знає лише про
+`TFT_eSPI`/`TFT_eSprite`-подібний інтерфейс.
 
 ## Ключові бібліотеки (спільні + платформо-специфічні)
 
 | Бібліотека | Призначення |
 | :--- | :--- |
 | `lovyan03/LovyanGFX` | рендеринг для `esp32-4848s040` (RGB-панель) |
-| `bodmer/TFT_eSPI` | рендеринг для `esp32-st7789` та `ttgo-t1` (SPI TFT) |
+| `bodmer/TFT_eSPI` | рендеринг для `esp32-st7789`, `ttgo-t1`, `esp32-s3-lcd147` (SPI TFT) |
+| `moononournation/GFX Library for Arduino` | рендеринг для обох C6-плат (JD9853, ST7735S) |
 | `adafruit/Adafruit SSD1306` + `Adafruit GFX` | рендеринг для `esp8266` (I2C OLED) |
-| `bodmer/TJpg_Decoder` | декодування JPEG (фонові зображення) |
+| `bodmer/TJpg_Decoder` | декодування JPEG (усі плати, крім C6) |
+| `bitbank2/JPEGDEC` | декодування JPEG на C6 (RISC-V, unaligned access — див. виноску ³ вище) |
 | `bblanchon/ArduinoJson` | серіалізація/конфіги |
 | `tamctec/TAMC_GT911` | touch-контролер для 4848S040 |
 | `PaulStoffregen/XPT2046_Touchscreen` | touch-контролер для ST7789-плати |
-| `knolleary/PubSubClient` | MQTT-клієнт |
+| `knolleary/PubSubClient` | MQTT-клієнт (5 плат) |
+| `mlesniew/PicoMQTT` | MQTT-клієнт для обох C6-плат |
 | `mathieucarbou/AsyncTCP` + `ESPAsyncWebServer` | вбудований HTTP-сервер (`lib/HttpServer`) |
 | `mobizt/ESP Mail Client` | відправка email (`lib/GmailSender`) |
 | `dvarrel/ESPping` | ping-діагностика мережі |
@@ -67,7 +153,7 @@ thermal/invert/threshold/dithering/box-blur — усе in-place, без копі
   автоматичного striping префікса назад.
 - Джерело prefix: build-time дефолт `MqttConfig::prefix` (з `MQTT_TOPIC_PREFIX` /
   `secrets.mqtt_topic_prefix`), опційно перекривається runtime-значенням з
-  `ConfigStorage` (ключ `CFG_MQTT_TOPIC_PREFIX = "mqtt-prefix"`) — override injected
+  `ConfigStorage` (ключ `CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix"`) — override injected
   через `setKeyGenerator()` **лише якщо** значення реально збережено в NVS
   (`src/main.cpp::setupMqttClient()`). Serial-команда `mqtt-prefix [prefix]` —
   переглянути/змінити й зберегти в NVS; **зміна вимагає reboot** (топіки вже
@@ -100,9 +186,21 @@ thermal/invert/threshold/dithering/box-blur — усе in-place, без копі
   (fallback-логіка обов'язкова для будь-якого функціоналу, що читає з SD).
 - **Платформо-специфічний код виноситься в `src-<board>/`**, спільна логіка лишається
   в `src/` і `lib/`, розгалуження — через build flags (`BOARD_4848S040`, `BOARD_ST7789`,
-  `BOARD_ESP8266`, `BOARD_TTGO_T1`), а не через дублювання файлів.
-- **Секрети** (WiFi, Gmail, MQTT) підвантажуються з `secrets.ini` (не в репозиторії) через
-  `extra_configs` — не хардкодити креденшли в `platformio.ini` чи в коді.
+  `BOARD_TTGO_T1`, `BOARD_ESP32_S3_LCD147`, `BOARD_ESP32_C6`, `BOARD_ESP32_C6_LCD096`,
+  `BOARD_ESP8266`), а не через дублювання файлів.
+- **Секрети** (WiFi, Gmail, MQTT, роутер) підвантажуються з `secrets.ini` (не в репозиторії)
+  через `extra_configs` — не хардкодити креденшли в `platformio.ini` чи в коді. Доступні
+  макроси: `WIFI_*`, `GMAIL_*`, `MQTT_*`, `ROUTER_HOST`, `ROUTER_LOGIN_AUTHORIZATION`.
+- **`DISPLAY_SPLIT_COUNT` — це компроміс RAM проти цілісності кадру.** Спрайт виділяється не
+  на весь екран, а на `height / DISPLAY_SPLIT_COUNT`, і кожна ітерація `loop()` малює лише одну
+  горизонтальну смугу (`Display::startWrite()` просуває `_activeSplitBlock`, `Display::dXY()`
+  зсуває координати). Плата за економію: повний кадр оновлюється за N ітерацій, тому вміст, що
+  змінюється між ітераціями (секунди годинника, вільна купа), може «розриватись» на межах смуг.
+  Тому там, де RAM вистачає, значення = 1.
+- **Діагностика компілятора увімкнена свідомо**: `-Wall -Wextra -Wformat -Wformat-security` у
+  `[common] build_flags`, без `-Werror` (сторонні бібліотеки шумлять — збірка не має від цього
+  падати). `-Wundef` НЕ вмикати глобально: arduino-esp32 core рясно робить
+  `#if CONFIG_IDF_TARGET_*` для незаданих макросів і повністю ховає наш власний шум.
 
 ## Форматування коду
 
@@ -129,8 +227,28 @@ ColumnLimit: 120
 
 Перед комітом бажано прогнати `clang-format -i` на змінених `.cpp`/`.h`/`.hpp` файлах.
 
+## Тестування
+
+Покроковий план перевірки кожної плати (що саме, якою командою, який очікуваний результат) —
+у `docs/test_plan.md`. Матриця фіч вище задає, які секції плану релевантні для якого env.
+
 ## Changelog
 
+- 2026-08-20 (2) — додано `docs/test_plan.md`: чек-лист приймальної перевірки для кожного з
+  7 environments (smoke + функціональні тести + регресії після код-рев'ю), з очікуваним
+  результатом на кожен крок.
+- 2026-08-20 — секцію "Плати" переписано під фактичний `platformio.ini`: додано сьомий env
+  `esp32-c6-lcd096` (ST7735S 160×80, ESP32-C6, 4 MB), додано матрицю фіч по платах
+  (rotation / split / SD / touch / сенсор / кнопка / MQTT-бекенд / ping / gmail / JPEG-декодер /
+  фони), таблицю розділів флеш-пам'яті та розділ "Як обирається графічний бекенд".
+  Виправлено фактичні розбіжності з кодом:
+  (а) вибір `TFT_eSPI`-типу йде через `#if defined(BOARD_*)` у `src/TftInstance.h`, а `-include`
+  використовують лише 2 з 7 env (і лише для конфігу самого bodmer/TFT_eSPI);
+  (б) ключ ConfigStorage — `mqtt.prefix`, а не `mqtt-prefix`;
+  (в) `-std=gnu++17` з `[common]` фактично перебивається пізнішим `-std=gnu++2a` від фреймворку;
+  (г) заголовок для `esp32-c6` називається `Setup_JD9853_C6.h` (у changelog 2026-08-13 він
+  згаданий під робочою назвою `Setup_ArduinoGFX_C6.h`).
+  Додано рішення про `DISPLAY_SPLIT_COUNT` і про набір warning-флагів.
 - 2026-08-12 (3) — усі спецефекти (існуючі й нові) підключено до `SerialCommander` під
   `#if defined(LITTLEFS_BACKGROUND_IMAGE)`: `lighten`, `invert`, `threshold`, `hue`,
   `thermal`, `gamma`, `posterize`, `solarize`, `duotone`, `balance`, `noise`, `vignette`,

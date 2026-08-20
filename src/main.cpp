@@ -6,8 +6,9 @@
 // mosquitto_sub -h broker.hivemq.com -p 1883 -t "mykola-lavryk/#" -F "@Y-@m-@d @H:@M:@S [%q/%r] %-50t %p" # qos/retain
 // mosquitto_pub -h 192.168.1.71 -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock off"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6-lcd096 -m "clock on"
+// mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-ttgo-t1 -m "clock on"
 //
-//
+// cls && export PORT=/dev/ttyACM1 && pio run --monitor-port $PORT --upload-port $PORT -e ttgo-t1 -t upload -t monitor
 // Працює однаково для обох середовищ, різниться лише build_flags (-include)
 // у platformio.ini:
 //   env:esp32-st7789      -> include/Setup_ST7789.h        (bodmer/TFT_eSPI, SPI)
@@ -199,7 +200,10 @@ LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
 //NetworkSupervisor wifi;
 
-RouterApiClient routerApi("192.168.28.1", "QWRtaW46cGFzcw==");
+// Хост і base64(login:password) приходять із secrets.ini через build_flags
+// (ROUTER_HOST / ROUTER_LOGIN_AUTHORIZATION) - раніше вони були захардкожені
+// тут, у файлі під git, попри те що механізм для секретів уже існував.
+RouterApiClient routerApi(ROUTER_HOST, ROUTER_LOGIN_AUTHORIZATION);
 
 #if BOARD_HAS_DISPLAY
 Display display;
@@ -300,10 +304,24 @@ void testAsusWRT() {
   Logger::info("");
 }
 
-void display_brightness(uint8_t percent, bool _auto) {
+// Застосувати яскравість БЕЗ запису в NVS.
+void display_brightness_apply(uint8_t percent, bool _auto) {
   display.brightness(percent);
+  isAutoBrightness = _auto;
+}
+
+// Застосувати ТА зберегти в NVS. Викликати лише для явних дій користувача
+// (команда, свайп, кнопка).
+//
+// В авто-режимі значення змінюється на кожну зміну показань сенсора (гістерезис
+// 5%), і раніше кожна з них давала ДВА записи в NVS - це пряме зношування flash
+// (у NVS обмежена кількість циклів стирання). Зберігати там нічого й не
+// потрібно: на старті яскравість в авто-режимі однаково перераховується з
+// сенсора. Тому слухач сенсора користується display_brightness_apply().
+void display_brightness(uint8_t percent, bool _auto) {
+  display_brightness_apply(percent, _auto);
   configStorage.setInt(CFG_DISPLAY_BRIGHTNESS, display.brightness());
-  configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = _auto);
+  configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness);
   Logger::info("display.brightness(%d)%s", display.brightness(), isAutoBrightness ? " (auto)" : "");
 }
 
@@ -592,7 +610,9 @@ void dumpSystemInfo() {
   Logger::info("PSRAM found: %s", psramFound() ? "YES" : "NO");
   if (psramFound()) {
     Logger::info("Total PSRAM: %d bytes (%.2f Mb)", ESP.getPsramSize(), ESP.getPsramSize() / 1024.0 / 1024.0);
-    Logger::info("Free PSRAM:  %d bytes (%.2f Mb)", ESP.getFreePsram() / 1024.0 / 1024.0);
+    // Було: два специфікатори на ОДИН аргумент, до того ж double під %d.
+    Logger::info("Free PSRAM:  %d bytes (%.2f Mb)", ESP.getFreePsram(),
+                 ESP.getFreePsram() / 1024.0 / 1024.0);
   }
 #endif
 /*
@@ -821,6 +841,12 @@ void setupSerialCommander() {
 
   commandHandler.registerCommand("reboot", "reboot device (soft reset)", [](const String& args) {
     dispatcher.dispatch(EVT_REBOOT);
+#if HAS_MQTT_CLIENT
+    // EVT_REBOOT вище призводить до mqtt.disconnect("reboot"), але в
+    // PicoMQTT-гілці це лише кладе publish у чергу вихідних команд - без
+    // очікування offline-LWT не встигав піти до брокера до ESP.restart().
+    mqtt.flushOutgoing(500);
+#endif
 #if defined(BOARD_ESP8266)
     Serial.println("[SystemReset] Rebooting...");
     Serial.flush();
@@ -1359,7 +1385,9 @@ void setupConfigStorage() {
 void loadConfig() {
   showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
   isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
-  display_brightness(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 100), isAutoBrightness);
+  // _apply: на старті ми лише ЧИТАЄМО збережене значення, тому писати його
+  // назад у NVS (як робив display_brightness()) не потрібно.
+  display_brightness_apply(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 100), isAutoBrightness);
   Logger::info("ConfigStorage load done");
 
   Logger::info("\t- %s = %s", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
@@ -1380,8 +1408,9 @@ void setupLightSensor() {
   lightSensor.addListener([]() {
     Logger::info("lightSensor.value() = %4d (%3d%%)", lightSensor.read(), lightSensor.value());
     if (isAutoBrightness) {
-      display_brightness(lightSensor.value(), isAutoBrightness);
-      // Logger::info("display.brightness(%d) *auto*", lightSensor.value());
+      // _apply, а не display_brightness(): без запису в NVS на кожну зміну
+      // показань сенсора (див. коментар біля display_brightness()).
+      display_brightness_apply(lightSensor.value(), isAutoBrightness);
     }
   });
 
@@ -1444,7 +1473,11 @@ void drawSystemInfo() {
 
 #if defined(ESP32)
   display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
-  display.printf(F("Uptime: %02d:%02d:%02d"), uptimeSec / 3600, (uptimeSec / 60) % 60, uptimeSec % 60);
+  // %u + (unsigned): uint32_t на RISC-V (C6) це "long unsigned int", тобто під
+  // %d він не підходить (varargs типи мусять збігатися). Каст робить рядок
+  // однаковим і для Xtensa, і для RISC-V.
+  display.printf(F("Uptime: %02u:%02u:%02u"), (unsigned)(uptimeSec / 3600),
+                 (unsigned)((uptimeSec / 60) % 60), (unsigned)(uptimeSec % 60));
 #endif
 
 #if defined(ESP8266)
@@ -1483,15 +1516,16 @@ void drawSystemInfo() {
 
 #elif BOARD_ESP32_C6_LCD096
   display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
-  snprintf(buf, 120, "CPU: %d MHz", cpuFreq);
+  snprintf(buf, sizeof(buf), "CPU: %u MHz", (unsigned)cpuFreq);
   display.print(buf);
 
   display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
-  snprintf(buf, 120, "Loop rate: %d/s", display.loopFrameRate());
+  snprintf(buf, sizeof(buf), "Loop rate: %u/s", (unsigned)display.loopFrameRate());
   display.print(buf);
 #else
   display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
-  snprintf(buf, 120, "CPU: %d MHz   Loop rate: %d/s", cpuFreq, display.loopFrameRate());
+  snprintf(buf, sizeof(buf), "CPU: %u MHz   Loop rate: %u/s", (unsigned)cpuFreq,
+           (unsigned)display.loopFrameRate());
   display.print(buf);
 #endif
 
@@ -1503,17 +1537,28 @@ void drawSystemInfo() {
 #else
   uint32_t totalHeap = ESP.getHeapSize();
   display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
-  display.printf("Heap free: %d / %d (%d%%)", freeHeap / 1024, totalHeap / 1024, (freeHeap * 100) / totalHeap);
+  // %u + (unsigned) - див. коментар біля "Uptime" вище.
+  // Порядок множення теж важливий: freeHeap * 100 для ~320 KB купи ще влазить
+  // у 32 біти, але запас невеликий - рахуємо через 64-бітний проміжок.
+  display.printf("Heap free: %u / %u (%u%%)", (unsigned)(freeHeap / 1024),
+                 (unsigned)(totalHeap / 1024),
+                 (unsigned)(totalHeap ? (uint64_t)freeHeap * 100 / totalHeap : 0));
 #endif
 
 #if defined(ESP32)
   char* dumpPingStr = dumpPingStatsStr();
   if (dumpPingStr) {
     display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
-    display.print(dumpPingStatsStr());
+    display.print(dumpPingStr);  // було: повторний виклик dumpPingStatsStr()
   }
 
-  snprintf(buf, sizeof(buf), "WiFi: %s (%d dBm)", WiFi.SSID().c_str(), WiFi.RSSI(), getWiFiQuality(WiFi.RSSI()));
+  #if BOARD_ESP32_C6_LCD096
+  // Вузький екран (160px) - без відсотків, тому й getWiFiQuality() тут не
+  // рахуємо (раніше передавався третім, зайвим аргументом на два %-специфікатори).
+  snprintf(buf, sizeof(buf), "WiFi: %s (%d dBm)", WiFi.SSID().c_str(), WiFi.RSSI());
+  #else
+  snprintf(buf, sizeof(buf), "WiFi: %s (%d dBm / %d%%)", WiFi.SSID().c_str(), WiFi.RSSI(), getWiFiQuality(WiFi.RSSI()));
+  #endif
   display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
   display.print(buf);
 
@@ -1546,8 +1591,14 @@ void drawSystemInfo() {
   #endif
 
   ScreenLogTail& tail = screenLogTail();
+  // Цикл іде від НАЙНОВІШОГО (count-1) до найстарішого (0) - найсвіжіший рядок
+  // опиняється зверху. (Попередній коментар тут стверджував протилежне.)
   for (size_t i = tail.count(); i ;--i) {
-    display.println(tail.line(i-1) + skip);  // від найстарішого (0) до найновішого
+    const char* logLine = tail.line(i - 1);
+    // skip обрізає префікс "[I][tag ] " - але тільки якщо рядок реально
+    // довший за нього. Інакше logLine + skip вказував би ЗА '\0', у застарілі
+    // байти попереднього, довшого рядка того ж слота (сміття на екрані).
+    display.println(strlen(logLine) > (size_t)skip ? logLine + skip : logLine);
   }
   #endif
 #endif

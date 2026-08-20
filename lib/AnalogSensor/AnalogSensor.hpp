@@ -53,11 +53,14 @@ public:
 
   // Call periodically (e.g. from a CronTask) to take a new reading.
   void update() {
-    // lock_free прапорець, спільний для всіх викликів методу
-    static std::atomic_flag isExecuting = ATOMIC_FLAG_INIT;
-
-    // test_and_set повертає true, якщо прапорець ВЖЕ був встановлений
-    if (isExecuting.test_and_set(std::memory_order_acquire)) {
+    // _isExecuting - ЧЛЕН класу, а не static у методі: static був би спільним
+    // для ВСІХ інстансів AnalogSensor, і з двома сенсорами update() одного
+    // тихо пропускався б, поки виконується update() іншого.
+    //
+    // exchange повертає попереднє значення: true = хтось уже всередині.
+    // std::atomic<bool>, а не std::atomic_flag - щоб не залежати від того,
+    // як ATOMIC_FLAG_INIT поводиться в member-initializer різних стандартів.
+    if (_isExecuting.exchange(true, std::memory_order_acquire)) {
       return;  // Забороняємо рекурсію або паралельне виконання
     }
 
@@ -79,7 +82,7 @@ public:
     }
 
     // Звільняємо прапорець
-    isExecuting.clear(std::memory_order_release);
+    _isExecuting.store(false, std::memory_order_release);
   }
 
   AnalogSensorListenerId addListener(AnalogSensorListener listener) {
@@ -108,6 +111,9 @@ private:
   const uint8_t _adcPin;
   uint16_t _raw = 0;
   uint16_t _value = 0;
+
+  // Re-entrancy guard для update() - по одному на інстанс, див. update().
+  std::atomic<bool> _isExecuting{false};
 
   const uint16_t _adcMinValue;
   const uint16_t _adcMaxValue;

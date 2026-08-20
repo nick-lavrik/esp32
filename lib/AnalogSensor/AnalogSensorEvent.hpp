@@ -22,5 +22,7 @@ public:
   const uint16_t rawValue;
   const unsigned long timestampMs;
 
-  const uint16_t value() { return rawValue; };
+  // const на типі ПОВЕРНЕННЯ скаляра нічого не давав (компілятор його ігнорує,
+  // -Wignored-qualifiers); const тут доречний на самому методі.
+  uint16_t value() const { return rawValue; };
 };

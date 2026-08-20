@@ -31,6 +31,13 @@ bool RouterApiClient::login() {
   http.addHeader("Referer", String("http://") + _host + "/Main_Login.asp");
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
+  // ОБОВ'ЯЗКОВО до POST: HTTPClient зберігає значення лише тих заголовків
+  // відповіді, які заявлені через collectHeaders(). Без цього виклику
+  // http.header("Set-Cookie") нижче ЗАВЖДИ повертає порожній рядок, тобто
+  // login() не міг завершитись успіхом за жодних умов.
+  static const char* kCollectedHeaders[] = {"Set-Cookie"};
+  http.collectHeaders(kCollectedHeaders, 1);
+
   String body = "login_authorization=" + _loginAuthorization;
   int httpCode = http.POST(body);
 
