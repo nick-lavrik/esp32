@@ -19,12 +19,26 @@ public:
     _activeSplitBlock = (_activeSplitBlock + 1) % DISPLAY_SPLIT_COUNT;
     // _logger.debug("active split block = %d", _activeSplitBlock); delay(600);
     #endif
-    tft_.startWrite(); 
+    tft_.startWrite();
+    _writing = true;
   }
 
-  void endWrite() { 
-    tft_.endWrite(); 
+  void endWrite() {
+    tft_.endWrite();
+    _writing = false;
   }
+
+  // Чи відкрита зараз транзакція шини дисплея.
+  //
+  // Потрібно тим, хто збирається звернутися до шини з-під невідомого
+  // контексту: loop() тримає транзакцію відкритою через увесь кадр, але
+  // ті самі функції викликаються і поза нею (напр. display_flip() -
+  // з консольної команди всередині кадру, а з updateImuFlip() вже після
+  // endWrite()). Дужка YIELD_DISPLAY_BUS() у src/main.cpp питає саме це,
+  // щоб знати, чи треба потім ВІДНОВЛЮВАТИ транзакцію: безумовне
+  // відновлення залишило б її відкритою там, де її не було, і наступний
+  // startWrite() у loop() дав би дедлок.
+  bool isWriting() const { return _writing; }
 
   explicit Display();
   void flip();
@@ -153,6 +167,7 @@ protected:
 
 private:
   TFT_eSPI &tft_;
+  bool _writing = false;  // стан транзакції шини (див. isWriting())
 #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   int8_t _activeSplitBlock = 0;
   TFT_eSprite sprite_;  // вся робота з екраном (drawText/clear/...) йде через спрайт,

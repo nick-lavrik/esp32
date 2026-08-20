@@ -367,7 +367,59 @@ void display_brightness(uint8_t percent, bool _auto) {
   Logger::info("display.brightness(%d)%s", display.brightness(), isAutoBrightness ? " (auto)" : "");
 }
 
+// ---------------------------------------------------------------------------
+// YIELD_DISPLAY_BUS() - RAII-дужка, яка тимчасово віддає SPI-шину дисплея.
+//
+// НАВІЩО: loop() тримає транзакцію дисплея відкритою через УВЕСЬ кадр
+// (display.startWrite() ... display.endWrite()), і саме всередині неї
+// викликаються commandHandler.update() та mqtt.loop(). Тобто будь-яка
+// консольна чи MQTT-команда виконується з-під відкритої транзакції.
+//
+// А SPIClass::beginTransaction() бере НЕ рекурсивний мьютекс paramLock з
+// portMAX_DELAY (framework-arduinoespressif32, libraries/SPI/src/SPI.cpp).
+// Другий take з того самого потоку - вічний дедлок. Плата не просто "не
+// відповідає": вона коректно блокується на семафорі, тому процесор
+// віддано, idle task живий і ЖОДЕН watchdog її не перезавантажить.
+//
+// Хто саме бере транзакцію вдруге:
+//   - драйвер SD (libraries/SD/src/sd_diskio.cpp, struct AcquireSPI) -
+//     на КОЖНУ операцію з карткою;
+//   - сам Arduino_GFX - наприклад Arduino_ST7735::setRotation() робить
+//     _bus->beginWrite(), тобто навіть звичайний flip екрана з команди.
+//
+// Асиметрія викликів нижче навмисна:
+//   endWrite()   - безпечно викликати зайвий раз: SPIClass::endTransaction()
+//                  захищений прапорцем _inTransaction;
+//   startWrite() - НЕ можна двічі поспіль: Arduino_TFT::startWrite() не має
+//                  лічильника вкладеності і напряму робить beginWrite().
+//
+// Відновлення - УМОВНЕ, за display.isWriting(). Ті самі функції
+// викликаються і з-під транзакції (консольний flip усередині кадру), і
+// поза нею (updateImuFlip() - вже після endWrite()). Безумовне
+// відновлення залишило б транзакцію відкритою там, де її не було, і
+// наступний startWrite() у loop() дав би той самий дедлок.
+// ---------------------------------------------------------------------------
+#if defined(DISPLAY_BUS_YIELD) && DISPLAY_BUS_YIELD
+struct DisplayBusYield {
+  const bool _wasWriting;
+  DisplayBusYield() : _wasWriting(display.isWriting()) {
+    if (_wasWriting) tft.endWrite();
+  }
+  ~DisplayBusYield() {
+    if (_wasWriting) tft.startWrite();
+  }
+};
+#define YIELD_DISPLAY_BUS() DisplayBusYield _displayBusYield_
+#else
+#define YIELD_DISPLAY_BUS() ((void)0)
+#endif
+
 void display_flip() {
+  // setRotation() усередині Arduino_GFX сам відкриває транзакцію шини -
+  // без цієї дужки виклик з консольної команди (тобто з-під кадру) вішав
+  // плату намертво, без шансу на watchdog.
+  YIELD_DISPLAY_BUS();
+
   displayConfig.invertY = !displayConfig.invertY;
   displayConfig.invertX = !displayConfig.invertX;
   display.flip();
@@ -840,46 +892,6 @@ void dumpConfigStorage() {
 }
 
 #if BOARD_HAS_SD
-// ---------------------------------------------------------------------------
-// YIELD_DISPLAY_BUS() - RAII-дужка, яка тимчасово віддає SPI-шину дисплея
-// на час звернення до TF-картки.
-//
-// НАВІЩО: loop() тримає транзакцію дисплея відкритою через УВЕСЬ кадр
-// (display.startWrite() ... display.endWrite()), і саме всередині неї
-// викликаються commandHandler.update() та mqtt.loop() - тобто будь-яка
-// консольна чи MQTT-команда виконується з-під відкритої транзакції.
-//
-// На платах, де дисплей і картка сидять на ОДНІЙ SPI-шині
-// (SD_SHARES_DISPLAY_SPI), це смертельно: SPIClass::beginTransaction()
-// бере НЕ рекурсивний мьютекс paramLock з portMAX_DELAY
-// (framework-arduinoespressif32, libraries/SPI/src/SPI.cpp), а драйвер
-// картки робить beginTransaction() на КОЖНУ операцію (libraries/SD/src/
-// sd_diskio.cpp, struct AcquireSPI). Другий take того самого мьютекса з
-// того самого потоку - вічний дедлок, плата зависає намертво.
-//
-// Асиметрія викликів нижче навмисна:
-//   endWrite()   - безпечно викликати зайвий раз: SPIClass::endTransaction()
-//                  захищений прапорцем _inTransaction, а CS дисплея просто
-//                  піднімається в HIGH (що нам тут і потрібно);
-//   startWrite() - НЕ можна викликати двічі поспіль: Arduino_TFT::startWrite()
-//                  не має лічильника вкладеності і напряму робить
-//                  beginWrite() -> той самий дедлок. Тому він тут рівно
-//                  один, у деструкторі.
-//
-// ОБМЕЖЕННЯ: дужка розрахована на виклик З-ПІД відкритої транзакції (тобто
-// з loop()). Якщо застосувати її у setup() - деструктор залишить транзакцію
-// дисплея відкритою. У setupSD() її тому й немає.
-// ---------------------------------------------------------------------------
-#if defined(SD_SHARES_DISPLAY_SPI) && SD_SHARES_DISPLAY_SPI
-struct DisplayBusYield {
-  DisplayBusYield() { tft.endWrite(); }
-  ~DisplayBusYield() { tft.startWrite(); }
-};
-#define YIELD_DISPLAY_BUS() DisplayBusYield _displayBusYield_
-#else
-#define YIELD_DISPLAY_BUS() ((void)0)
-#endif
-
 // ACTIVE_SD — локальний (не глобальний!) макрос-псевдонім лише для двох
 // функцій нижче: dumpSDlistDir()/dumpSDInfo(). Визначається безпосередньо
 // перед використанням і одразу #undef-иться, щоб не впливати на інший код
