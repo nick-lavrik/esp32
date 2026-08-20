@@ -59,7 +59,11 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 | Вбудовані фони (`BACKGROUND_IMAGES_COUNT`) | 0 | 0 | **1** | 0 | 0 | 0 | 0 |
 | Хвіст логів на екран (`SCREEN_LOG_TAIL_LINES`) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
-¹ Піни SD для `esp32-c6` у `build_flags` задані, але `BOARD_HAS_SD=0` — код SD не компілюється.
+¹ `esp32-c6`: SD увімкнено (`BOARD_HAS_SD=1`), шина **спільна** з дисплеєм так само, як на
+  `esp32-c6-lcd096` — `SD_SCK=1`/`SD_MOSI=2` збігаються з `TFT_SCLK`/`TFT_MOSI`, окремі `SD_MISO=3`
+  і CS: 4 (SD) / 14 (LCD); тому тут теж стоїть `SD_SHARES_DISPLAY_SPI=1` (див. виноску ²).
+  Піни взято з `docs.waveshare.com/ESP32-C6-Touch-LCD-1.47` і **на залізі ще не підтверджені**:
+  картка поки не піднімається (`sdCommand(): Card Failed! cmd: 0x00` — CMD0 без відповіді).
 ² `esp32-c6-lcd096`: SPI-шина **спільна** з дисплеєм (SCK=7, MOSI=6, MISO=5), окремі CS: 4 (SD) /
   14 (LCD). `SPI.begin()` робить `setupSD()` — обов'язково **до** `setupDisplay()`.
   Перевірено на залізі: картка монтується на робочих 4 МГц (`SD_FREQ`), 400 кГц — лише фолбек.

@@ -882,8 +882,8 @@ static bool sdProbeWaitReady(uint32_t timeoutMs) {
 // Повертає R1, або 0xFF - картка не відповіла, або 0xFE - картка не
 // звільнила лінію (busy). Обидва службові коди мають виставлений біт 7,
 // тому не можуть збігтися з валідною R1.
-static uint8_t sdProbeCmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
-  if (!sdProbeWaitReady(500)) return 0xFE;
+static uint8_t sdProbeCmd(uint8_t cmd, uint32_t arg, uint8_t crc, uint32_t waitMs = 500) {
+  if (!sdProbeWaitReady(waitMs)) return 0xFE;
 
   SPI.transfer(0xFF);
   SPI.transfer(0x40 | cmd);
@@ -940,12 +940,25 @@ void sdProbe(bool force) {
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
 
-  // Стан лінії MISO при деактивованій картці: HIGH = картка вставлена і
-  // тримає підтяг; LOW - або картки немає, або MISO не той пін.
+  // Чи тягне лінію DO хтось ЗЗОВНІ (картка або зовнішній резистор)?
+  //
+  // Читати з INPUT_PULLUP тут БЕЗГЛУЗДО - внутрішній підтяг сам дає HIGH,
+  // і тест проходить навіть на піні, до якого нічого не підключено (перша
+  // версія проби саме так і брехала). Єдиний спосіб побачити ЗОВНІШНІЙ
+  // підтяг - притиснути пін власним pull-down: якщо він усе одно читається
+  // як HIGH, значить ззовні його тягне щось сильніше.
+  //
+  // Те саме стосується і роботи по SPI: spiAttachMISO() робить
+  // pinMode(miso, INPUT) БЕЗ підтягу (esp32-hal-spi.c), тож непідключена
+  // лінія плаває і читається як 0x00 - неотличимо від "картка зайнята".
+  pinMode(SD_MISO, INPUT_PULLDOWN);
+  delay(2);
+  const bool pulledExternally = digitalRead(SD_MISO);
   pinMode(SD_MISO, INPUT_PULLUP);
   delay(2);
-  Logger::info("MISO при CS=HIGH: %s (очікується HIGH, якщо картка вставлена)",
-               digitalRead(SD_MISO) ? "HIGH" : "LOW");
+  Logger::info("MISO=%d: зовнішній підтяг %s", SD_MISO,
+               pulledExternally ? "Є (картка/резистор на лінії)"
+                                : "ВІДСУТНІЙ - на цьому піні найімовірніше нічого немає");
 
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
@@ -958,7 +971,7 @@ void sdProbe(bool force) {
   Logger::info("CMD0 (GO_IDLE_STATE) -> R1=0x%02X %s", r1,
                r1 == 0x01   ? "OK (картка в idle)"
                : r1 == 0xFF ? "НЕМАЄ ВІДПОВІДІ - картка/піни/живлення"
-               : r1 == 0xFE ? "BUSY - картка тримає DO в LOW"
+               : r1 == 0xFE ? "лінія DO постійно в LOW (не підключена або картка зайнята)"
                : r1 == 0x00 ? "відповіла, але не в idle"
                             : "несподівано");
 
@@ -984,13 +997,282 @@ void sdProbe(bool force) {
     Logger::info("  пінах (SD_CS/SD_SCK/SD_MOSI/SD_MISO у platformio.ini),");
     Logger::info("  контакті слота або живленні 3V3.");
   } else if (r1 == 0xFE) {
-    Logger::info("ВИСНОВОК: картка на шині є, але не звільняє лінію. Найчастіше");
-    Logger::info("  це залишковий busy після демонтування - допоможе reboot.");
+    Logger::info("ВИСНОВОК: лінія DO постійно читається як 0. Два варіанти:");
+    Logger::info("  a) SD_MISO не той пін / картки на ньому немає - якщо рядок");
+    Logger::info("     про зовнішній підтяг вище каже ВІДСУТНІЙ, то саме це;");
+    Logger::info("  b) залишковий busy після демонтування - тоді поможе reboot.");
+    Logger::info("  Підібрати піни автоматично: sdscan");
   } else {
     Logger::info("ВИСНОВОК: шина і картка справні. Якщо SD.begin() все одно");
     Logger::info("  падає - справа у файловій системі: потрібен FAT32/FAT16");
     Logger::info("  (exFAT і картки >32GB Arduino-бібліотека SD не монтує).");
   }
+  if (wasMounted) {
+    Logger::warn("Картку демонтовано пробою - виконай reboot, щоб повернути SD.");
+  }
+  Logger::info("============================================================");
+}
+
+// ---------------------------------------------------------------------------
+// sdscan - автопідбір SD_MISO/SD_CS перебором (команда "sdscan").
+//
+// НАВІЩО: SD_SCK/SD_MOSI спільні з дисплеєм, тому вони вже підтверджені тим,
+// що дисплей працює. А SD_MISO/SD_CS ніде більше не задіяні - якщо вони взяті
+// з документації "схожої" плати і не збігаються з реальною розводкою, картка
+// мовчить, і відрізнити це від несправної картки по логах SD неможливо.
+// Скан перебирає пари (CS, MISO) при фіксованих SCK/MOSI і шукає ту, на якій
+// CMD0 повертає 0x01.
+//
+// БЕЗПЕКА: перебираються лише GPIO зі списку нижче. Свідомо ВИКЛЮЧЕНІ піни,
+// смикання яких зашкодило б: 12/13 (USB Serial/JTAG - вбило б консоль),
+// 16/17 (UART0), 24..30 (шина SPI-флеша), 8/9 (strapping/boot). Піни, зайняті
+// дисплеєм і самою шиною, відсіюються в рантаймі нижче.
+static const uint8_t SD_SCAN_CANDIDATES[] = {0, 3, 4, 5, 6, 7, 10, 11, 18, 19, 20, 21};
+
+static bool sdScanPinBusy(uint8_t pin) {
+  if (pin == SD_SCK || pin == SD_MOSI) return true;
+#if defined(TFT_CS) && (TFT_CS >= 0)
+  if (pin == TFT_CS) return true;
+#endif
+#if defined(TFT_DC) && (TFT_DC >= 0)
+  if (pin == TFT_DC) return true;
+#endif
+#if defined(TFT_RST) && (TFT_RST >= 0)
+  if (pin == TFT_RST) return true;
+#endif
+#if defined(TFT_BL) && (TFT_BL >= 0)
+  if (pin == TFT_BL) return true;
+#endif
+  return false;
+}
+
+// Одна спроба CMD0 на конкретній парі пінів. Таймаути тут навмисно короткі
+// (5 мс): комбінацій понад сотня, а робоча пара відповідає одразу.
+static uint8_t sdScanTry(uint8_t cs, uint8_t miso) {
+  SPI.end();
+  SPI.begin(SD_SCK, miso, SD_MOSI, cs);
+
+  pinMode(cs, OUTPUT);
+  digitalWrite(cs, HIGH);
+
+  SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+  for (int i = 0; i < 10; ++i) SPI.transfer(0xFF);  // >=74 такти при CS=HIGH
+
+  digitalWrite(cs, LOW);
+  uint8_t r1 = sdProbeCmd(0, 0x00000000, 0x95, 5);
+  digitalWrite(cs, HIGH);
+  SPI.transfer(0xFF);
+  SPI.endTransaction();
+
+  return r1;
+}
+
+void sdScan() {
+  YIELD_DISPLAY_BUS();
+
+  Logger::info("========= SD pin scan ======================================");
+
+  if (SD.cardType() != CARD_NONE) {
+    Logger::info("Картка вже змонтована на CS=%d MISO=%d - скан не потрібен.", SD_CS, SD_MISO);
+    Logger::info("============================================================");
+    return;
+  }
+
+  Logger::info("Фіксовані (спільні з дисплеєм, тому вже підтверджені): SCK=%d MOSI=%d", SD_SCK, SD_MOSI);
+  Logger::info("Поточні (перевіряються): CS=%d MISO=%d", SD_CS, SD_MISO);
+
+  // Дисплей на тій самій шині - тримаємо його CS у HIGH на весь скан.
+#if defined(TFT_CS) && (TFT_CS >= 0)
+  pinMode(TFT_CS, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+#endif
+
+  const size_t n = sizeof(SD_SCAN_CANDIDATES);
+  int found = 0;
+  int tried = 0;
+
+  for (size_t i = 0; i < n; ++i) {
+    const uint8_t cs = SD_SCAN_CANDIDATES[i];
+    if (sdScanPinBusy(cs)) continue;
+
+    for (size_t j = 0; j < n; ++j) {
+      const uint8_t miso = SD_SCAN_CANDIDATES[j];
+      if (miso == cs || sdScanPinBusy(miso)) continue;
+
+      ++tried;
+      const uint8_t r1 = sdScanTry(cs, miso);
+
+      if (r1 == 0x01) {
+        ++found;
+        Logger::info("✅ ЗНАЙДЕНО: CS=%d MISO=%d -> CMD0 R1=0x01", cs, miso);
+      } else if (!(r1 & 0x80)) {
+        // Відповідь є, але не idle - теж вартий уваги кандидат.
+        Logger::info("?  CS=%d MISO=%d -> CMD0 R1=0x%02X (відповідь є, але не idle)", cs, miso, r1);
+      }
+    }
+  }
+
+  // Повертаємо шину на штатні піни, інакше дисплей лишиться на пінах з
+  // останньої перебраної комбінації.
+  SPI.end();
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  Logger::info("------------------------------------------------------------");
+  Logger::info("Перебрано комбінацій: %d, знайдено: %d", tried, found);
+  if (found) {
+    Logger::info("Пропиши знайдену пару в platformio.ini (SD_CS/SD_MISO) і перепрошийся.");
+  } else {
+    Logger::info("Жодна пара не відповіла. Найімовірніше картка не вставлена,");
+    Logger::info("  слот без живлення, або SD_SCK/SD_MOSI на цій платі інші,");
+    Logger::info("  ніж піни дисплея (тоді скан із фіксованими SCK/MOSI безсилий).");
+  }
+  Logger::info("============================================================");
+}
+
+// ---------------------------------------------------------------------------
+// sdbb - програмна (bit-bang) проба картки, команда "sdbb".
+//
+// НАВІЩО ще одна проба: sdprobe їде на апаратній SPI-периферії, тому його
+// мовчання можна пояснити щонайменше трьома різними причинами - хибні піни,
+// GPIO matrix/perimanager віддав пін іншій периферії, або картка справді не
+// відповідає. Bit-bang не використовує SPI-периферію взагалі: тільки
+// digitalWrite/digitalRead, тому лишає рівно одну можливу причину - залізо.
+//
+// Друкується СИРИЙ дамп прийнятих байтів, а не лише розібрана R1. Він
+// однозначно розрізняє три стани лінії:
+//   FF FF FF ... - лінія підтягнута, картка мовчить (немає/не живиться);
+//   00 00 00 ... - лінія притиснута в нуль (немає підтягу або вічний busy);
+//   будь-що інше - картка на лінії реагує, і далі вже видно як саме.
+// ---------------------------------------------------------------------------
+static uint8_t sdBitBangTransfer(uint8_t out) {
+  uint8_t in = 0;
+  for (int i = 7; i >= 0; --i) {
+    digitalWrite(SD_MOSI, (out >> i) & 1);
+    delayMicroseconds(5);
+    digitalWrite(SD_SCK, HIGH);   // дані читаються по наростаючому фронту (SPI mode 0)
+    delayMicroseconds(5);
+    in = (uint8_t)((in << 1) | (digitalRead(SD_MISO) ? 1 : 0));
+    digitalWrite(SD_SCK, LOW);
+  }
+  return in;
+}
+
+static void sdBitBangDump(const char* label, uint8_t* buf, int n) {
+  char hex[3 * 12 + 1] = {0};
+  int pos = 0;
+  for (int i = 0; i < n && pos < (int)sizeof(hex) - 3; ++i) {
+    pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", buf[i]);
+  }
+  Logger::info("  %-22s %s", label, hex);
+}
+
+void sdBitBang() {
+  YIELD_DISPLAY_BUS();
+
+  Logger::info("========= SD bit-bang probe ================================");
+  Logger::info("Піни: CS=%d SCK=%d MOSI=%d MISO=%d (без SPI-периферії)", SD_CS, SD_SCK, SD_MOSI, SD_MISO);
+
+  const bool wasMounted = (SD.cardType() != CARD_NONE);
+  if (wasMounted) {
+    Logger::warn("Картка змонтована - демонтую; після проби знадобиться reboot");
+    SD.end();
+    delay(50);
+  }
+
+  // Забираємо піни в SPI-периферії, інакше pinMode/digitalWrite на них
+  // конфліктують з GPIO matrix.
+  SPI.end();
+
+#if defined(TFT_CS) && (TFT_CS >= 0)
+  pinMode(TFT_CS, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+#endif
+
+  pinMode(SD_SCK, OUTPUT);
+  pinMode(SD_MOSI, OUTPUT);
+  pinMode(SD_CS, OUTPUT);
+  pinMode(SD_MISO, INPUT_PULLUP);
+  digitalWrite(SD_SCK, LOW);
+  digitalWrite(SD_MOSI, HIGH);
+  digitalWrite(SD_CS, HIGH);
+  delay(5);
+
+  uint8_t buf[10];
+
+  // 1. Лінія в спокої: CS=HIGH, женемо такти. Картка не вибрана, тому має
+  //    віддавати суцільні 0xFF (лінія підтягнута).
+  for (int i = 0; i < 10; ++i) buf[i] = sdBitBangTransfer(0xFF);
+  sdBitBangDump("CS=HIGH, 80 тактів:", buf, 10);
+
+  // 2. CMD0 при CS=LOW.
+  digitalWrite(SD_CS, LOW);
+  delayMicroseconds(50);
+  sdBitBangTransfer(0xFF);
+  sdBitBangTransfer(0x40);  // CMD0
+  sdBitBangTransfer(0x00);
+  sdBitBangTransfer(0x00);
+  sdBitBangTransfer(0x00);
+  sdBitBangTransfer(0x00);
+  sdBitBangTransfer(0x95);  // CRC для CMD0
+  for (int i = 0; i < 10; ++i) buf[i] = sdBitBangTransfer(0xFF);
+  sdBitBangDump("CMD0 відповідь:", buf, 10);
+  digitalWrite(SD_CS, HIGH);
+  sdBitBangTransfer(0xFF);
+
+  // 3. Чи керуються лінії взагалі: пишемо рівень і читаємо пін назад.
+  //    Якщо пін не піддається - він відданий іншій периферії або
+  //    закорочений на платі.
+  auto checkDrive = [](const char* name, uint8_t pin) {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+    delayMicroseconds(50);
+    const bool low = digitalRead(pin);
+    digitalWrite(pin, HIGH);
+    delayMicroseconds(50);
+    const bool high = digitalRead(pin);
+    Logger::info("  %-5s (GPIO%-2d) керується: %s", name, pin,
+                 (!low && high) ? "ТАК" : "НІ - пін не піддається!");
+  };
+  checkDrive("SCK", SD_SCK);
+  checkDrive("MOSI", SD_MOSI);
+  checkDrive("CS", SD_CS);
+
+  // Аналіз відповіді на CMD0.
+  bool allFF = true, allZero = true, sawR1 = false;
+  for (int i = 0; i < 10; ++i) {
+    if (buf[i] != 0xFF) allFF = false;
+    if (buf[i] != 0x00) allZero = false;
+    if (buf[i] != 0xFF && !(buf[i] & 0x80)) sawR1 = true;
+  }
+
+  Logger::info("------------------------------------------------------------");
+  if (sawR1 && wasMounted) {
+    Logger::info("ВИСНОВОК: картка ВІДПОВІЛА на bit-bang, і апаратний SPI до цього");
+    Logger::info("  вже змонтував її. Тобто справні і залізо, і піни, і SPI -");
+    Logger::info("  ця проба тут нічого не діагностує, лише демонтувала картку.");
+  } else if (sawR1) {
+    Logger::info("ВИСНОВОК: картка ВІДПОВІЛА на bit-bang, але апаратний SPI її не");
+    Logger::info("  підняв. Залізо і піни справні - причину шукати в SPI");
+    Logger::info("  (частота, спільна з дисплеєм шина, стан CS).");
+  } else if (allFF) {
+    Logger::info("ВИСНОВОК: суцільні FF - лінія підтягнута, але картка мовчить.");
+    Logger::info("  Це поведінка порожнього слота або картки без живлення:");
+    Logger::info("  перевір посадку картки в слоті та 3V3 на слоті.");
+  } else if (allZero) {
+    Logger::info("ВИСНОВОК: суцільні 00 - лінію тримає в нулі. Якщо при цьому");
+    Logger::info("  MOSI/SCK/CS керуються, то MISO або не той пін, або закорочений.");
+  } else {
+    Logger::info("ВИСНОВОК: на лінії є активність, але це не R1. Найімовірніше");
+    Logger::info("  збій синхронізації - але картка фізично присутня.");
+  }
+
+  // Повертаємо шину апаратному SPI, інакше дисплей залишиться без неї.
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
   if (wasMounted) {
     Logger::warn("Картку демонтовано пробою - виконай reboot, щоб повернути SD.");
   }
@@ -1053,10 +1335,24 @@ void dumpStatus(const String& section) {
 #if BOARD_HAS_SD
   } else if (section.equals("sd")) {
     YIELD_DISPLAY_BUS();
+    // ОБОВ'ЯЗКОВА перевірка перед readRAW(): на відміну від cardType(), який
+    // чесно віддає CARD_NONE при _pdrv == 0xFF, SDFS::readRAW() передає цей
+    // самий 0xFF прямо в ff_sd_read(), а той робить s_cards[pdrv] БЕЗ
+    // перевірки меж (масив на FF_VOLUMES елементів). Читання за межами
+    // масиву + розіменування сміттєвого вказівника = миттєвий reset плати.
+    // Саме так "status sd" на незмонтованій картці перезавантажував пристрій.
     #if defined(BOARD_ESP32_S3_LCD147)
+    if (SD_MMC.cardType() == CARD_NONE) {
+      Logger::warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    } else {
       SDCardInspector::printAll(SD_MMC, logger);
+    }
     #else
+    if (SD.cardType() == CARD_NONE) {
+      Logger::warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    } else {
       SDCardInspector::printAll(SD, logger);
+    }
     #endif
   } else if (section.equals("sd+")) {
     dumpSDInfo();
@@ -1094,6 +1390,12 @@ void setupSerialCommander() {
   commandHandler.registerCommand(
       "sdprobe", "low-level TF card probe over SPI: sdprobe [force] (force demounts the card until reboot)",
       [](const String& args) { sdProbe(args.equalsIgnoreCase("force")); });
+
+  commandHandler.registerCommand("sdscan", "brute-force SD_CS/SD_MISO pins (SCK/MOSI kept fixed)",
+                                 [](const String& args) { sdScan(); });
+
+  commandHandler.registerCommand("sdbb", "bit-bang TF card probe (no SPI peripheral), raw byte dump",
+                                 [](const String& args) { sdBitBang(); });
 #endif
 
   commandHandler.registerCommand("flip", "flip display (180)", [](const String& args) { display_flip(); });
