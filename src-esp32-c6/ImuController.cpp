@@ -53,6 +53,7 @@ constexpr float THRESHOLD_G = 0.6f;
 constexpr uint8_t STABLE_SAMPLES = 5;
 
 ImuController::Orientation g_candidate = ImuController::Orientation::Unknown;
+// ImuController::Orientation g_candidate = ImuController::Orientation::TopDown;
 uint8_t g_stableCount = 0;
 uint32_t g_lastPollMs = 0;
 

@@ -440,16 +440,20 @@ void updateImuFlip() {
   const ImuController::Orientation now = ImuController::orientation();
 
   if (now == ImuController::Orientation::Unknown) return;
-  if (last == ImuController::Orientation::Unknown) {
+
+
+  if (last == ImuController::Orientation::Unknown && now == ImuController::Orientation::TopUp) {
     last = now;  // базова орієнтація зі старту, без flip
     return;
   }
+  
   if (now == last) return;
 
   last = now;
   Logger::info("[IMU] орієнтація змінилась: %s (%s=%.2fg) -> flip",
                ImuController::orientationName(now), ImuController::upAxisName(),
                ImuController::upAxisValue());
+
   display_flip();
 #endif
 }
@@ -2334,7 +2338,7 @@ void drawTime() {
   ntp.ftime("%H:%M:%S", timeStr, sizeof(timeStr));
   // ntp.ftime("%H:%M:%S.%Q", timeStr, sizeof(timeStr));
 
-#if BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147 || BOARD_ESP32_C6_LCD096
+#if BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147 || BOARD_ESP32_C6 || BOARD_ESP32_C6_LCD096
   // time
   #if BOARD_ESP32_C6_LCD096
   display.setTextSize(2);  // x2
