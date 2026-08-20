@@ -378,21 +378,23 @@ void show_clock(bool show) {
   Logger::debug("showClock = %s", showClock ? "YES" : "NO");
 }
 
-#if defined(I2C_SDA) && defined(I2C_SCL)
 // I2C-шина СПІЛЬНА для тача й IMU, тому Wire.begin() робиться рівно один раз
 // тут, а не в кожному драйвері: повторний Wire.begin() з тими самими пінами
 // нешкідливий, але з РІЗНИМИ - мовчки переприв'язує шину і ламає той
 // пристрій, що ініціалізувався першим.
 void setupI2C() {
+  #if defined(I2C_SDA) && defined(I2C_SCL)
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setClock(400000);
   Logger::info("I2C: SDA=%d SCL=%d @400kHz", I2C_SDA, I2C_SCL);
+  #endif
 }
 
 // Скан шини. Потрібен, бо документація і сторонні драйвери розходяться в
 // адресах (AXS5106L: 0x51 у Waveshare FAQ проти 0x63 у toto04/axs5106l),
 // а єдиний спосіб дізнатися правду - спитати саму плату.
 void i2cScan() {
+#if defined(I2C_SDA) && defined(I2C_SCL)
   Logger::info("========= I2C scan (SDA=%d SCL=%d) =========================", I2C_SDA, I2C_SCL);
 
   int found = 0;
@@ -410,14 +412,17 @@ void i2cScan() {
   Logger::info("------------------------------------------------------------");
   Logger::info(found ? "Знайдено пристроїв: %d" : "Нічого не знайдено - перевір піни/живлення", found);
   Logger::info("============================================================");
-}
+#else
+  Logger::error("I2C diabled (I2C_SDA / I2C_SCL not defined)");
 #endif
+}
 
-#if BOARD_HAS_IMU
 void setupImu() {
+#if BOARD_HAS_IMU
   if (ImuController::setup()) {
     Logger::info("IMU setup done");
   }
+#endif
 }
 
 // Переворот плати догори дриґом перевертає й зображення, і навпаки.
@@ -428,6 +433,7 @@ void setupImu() {
 // Стартова орієнтація фіксується як базова і сама по собі flip не викликає -
 // плата, увімкнена вже перевернутою, показує звичайний екран.
 void updateImuFlip() {
+#if BOARD_HAS_IMU
   static ImuController::Orientation last = ImuController::Orientation::Unknown;
 
   ImuController::update();
@@ -445,8 +451,8 @@ void updateImuFlip() {
                ImuController::orientationName(now), ImuController::upAxisName(),
                ImuController::upAxisValue());
   display_flip();
-}
 #endif
+}
 
 void setupTouchScreen() {
 #if BOARD_HAS_TOUCHSCREEN
@@ -2586,6 +2592,8 @@ void setup() {
   setupSerial();
   Logger::info("free heap memory from scratch: %u", freeHeap);
 
+  setupI2C();  // обов'язково ДО setupTouchScreen()/setupImu() - шина спільна
+
   setupSD();
   setupLittleFS();
   setupEventDispatcher();
@@ -2593,13 +2601,8 @@ void setup() {
   setupSerialCommander();
   setupBlinkLED();
   setupDisplay();
-#if defined(I2C_SDA) && defined(I2C_SCL)
-  setupI2C();  // обов'язково ДО setupTouchScreen()/setupImu() - шина спільна
-#endif
   setupTouchScreen();
-#if BOARD_HAS_IMU
   setupImu();
-#endif
   setupWiFi();
   setupNtpService();
   setupBackgroundImage();
@@ -2675,9 +2678,7 @@ void loop() {
 #if BOARD_HAS_TOUCHSCREEN
  touchController.update();
 #endif
-#if BOARD_HAS_IMU
   updateImuFlip();
-#endif
 
   display.flush();
   // loopRgbLed();
