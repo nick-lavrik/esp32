@@ -586,7 +586,7 @@ void setupMqttClient() {
   _logger.info("topic prefix = '%s'", mqtt.keyGenerator().prefix().c_str());
 
   // mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
-  scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "hearbeat"); });
+  scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "heartbeat"); });
 
   /* #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("#", [](const char* topic, const char* payload) {
@@ -1520,6 +1520,37 @@ void setupSerialCommander() {
 
   commandHandler.registerCommand("scan", "scan WiFi networks", [](const String& args) { WiFi_scan(); });
 
+#if SCREEN_LOG_TAIL_LINES > 0
+  commandHandler.registerCommand(
+      "history", "print the buffered tail of the log (last SCREEN_LOG_TAIL_LINES lines)",
+      [](const String& args) {
+        ScreenLogTail& tail = screenLogTail();
+        const size_t n = tail.count();
+
+        if (n == 0) {
+          Logger::info("history: буфер порожній");
+          return;
+        }
+
+        // pause() обов'язковий: інакше рядки, які ми ЗАРАЗ друкуємо, самі
+        // потраплять у той самий кільцевий буфер і витіснять з нього
+        // справжню історію ще під час друку.
+        tail.pause();
+
+        // Пишемо напряму в Serial під тим самим rwlock, яким користується
+        // логер, а не через Logger::info(): рядки в буфері ВЖЕ містять свій
+        // префікс "[I][tag ] ", і друк через логер додав би поверх нього
+        // другий.
+        rwlock::write(Serial, 50, []() { Serial.println("=== log history (oldest first) ==="); });
+        for (size_t i = 0; i < n; ++i) {
+          const char* logLine = tail.line(i);
+          rwlock::write(Serial, 50, [logLine]() { Serial.println(logLine); });
+        }
+        rwlock::write(Serial, 50, []() { Serial.println("=== end of history ==="); });
+
+        tail.resume();
+      });
+#endif
 #if BOARD_HAS_SD && !defined(BOARD_ESP32_S3_LCD147)
   commandHandler.registerCommand(
       "sdprobe", "low-level TF card probe over SPI: sdprobe [force] (force demounts the card until reboot)",

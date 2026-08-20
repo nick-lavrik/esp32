@@ -1,6 +1,7 @@
 #include "SerialLogger.hpp"
 
 #include <cstdio>
+#include <cstring>
 
 #include "LogLevelManager.hpp"
 #include "PrintQueueRegistry.hpp"
@@ -47,29 +48,67 @@ const char* SerialLogger::levelName(LogLevel level) {
   }
 }
 
+namespace {
+
+// Відкочує позицію назад, поки вона стоїть на байті-ПРОДОВЖЕННІ UTF-8
+// (10xxxxxx), тобто всередині багатобайтового символу.
+//
+// Навіщо: обрізання рядка по байту може розрізати символ навпіл. Хвіст
+// втрачається, а початок лишається — і термінал показує його як U+FFFD
+// ('�'). У проєкті логи українською, тому це не теоретична проблема:
+// саме звідси в консолі бралися послідовності виду "������".
+size_t utf8Backtrack(const char* s, size_t pos, size_t floor) {
+  while (pos > floor && (static_cast<unsigned char>(s[pos]) & 0xC0) == 0x80) {
+    --pos;
+  }
+  return pos;
+}
+
+}  // namespace
+
 void SerialLogger::log(LogLevel level, const char* fmt, va_list args) const {
   if (level > LogLevelManager::instance().getLevel(_tag)) {
     return;
   }
 
   static constexpr size_t BUF_SIZE = PrintQueue::kLineSize;
-  char buf[BUF_SIZE];
-
-  int len = vsnprintf(buf, sizeof(buf), fmt, args);
-  if (len >= static_cast<int>(sizeof(buf))) {
-    // рядок обрізано vsnprintf - позначаємо явно
-    buf[sizeof(buf) - 4] = '.';
-    buf[sizeof(buf) - 3] = '.';
-    buf[sizeof(buf) - 2] = '.';
-    buf[sizeof(buf) - 1] = '\0';
-  }
-
   char line[BUF_SIZE];
-  int lineLen = snprintf(line, sizeof(line), "[%s][%-5s] %s\n", levelName(level), _tag, buf);
-  if (lineLen >= static_cast<int>(sizeof(line))) {
-    line[sizeof(line) - 2] = '\n';
-    line[sizeof(line) - 1] = '\0';
+
+  // Префікс і повідомлення формуються в ОДИН буфер.
+  //
+  // Раніше буферів було два по BUF_SIZE: спершу vsnprintf() у buf, потім
+  // snprintf("[%s][%-5s] %s\n") у line. Через це довгий текст різався ДВІЧІ,
+  // причому друге обрізання враховувало ще й префікс — тобто фактичний ліміт
+  // був не BUF_SIZE, а BUF_SIZE мінус довжина префікса, і друге обрізання
+  // затирало кінець першого. Обидва рази — по сирому байту, без огляду на
+  // межі UTF-8.
+  const int prefixLen = snprintf(line, sizeof(line), "[%s][%-5s] ", levelName(level), _tag);
+  if (prefixLen < 0 || static_cast<size_t>(prefixLen) >= sizeof(line) - 2) {
+    return;  // префікс не влазить — писати нічого (не має статись)
   }
+
+  // Місце під сам текст: лишаємо 2 байти на '\n' і '\0'.
+  const size_t avail = sizeof(line) - static_cast<size_t>(prefixLen) - 2;
+  const int msgLen = vsnprintf(line + prefixLen, avail + 1, fmt, args);
+  if (msgLen < 0) {
+    return;  // помилка форматування
+  }
+
+  const bool truncated = static_cast<size_t>(msgLen) > avail;
+  size_t end = static_cast<size_t>(prefixLen) + (truncated ? avail : static_cast<size_t>(msgLen));
+
+  if (truncated) {
+    // Звільнити місце під маркер "..." і відкотитись до межі символу, щоб
+    // не лишити обірваний UTF-8 перед маркером.
+    static constexpr size_t kMarkLen = 3;
+    size_t cut = (end >= static_cast<size_t>(prefixLen) + kMarkLen) ? end - kMarkLen : static_cast<size_t>(prefixLen);
+    cut = utf8Backtrack(line, cut, static_cast<size_t>(prefixLen));
+    memcpy(line + cut, "...", kMarkLen);
+    end = cut + kMarkLen;
+  }
+
+  line[end] = '\n';
+  line[end + 1] = '\0';
 
   // Пряме write з таймаутом 10мс; якщо _output зайнятий - рядок піде
   // в per-output чергу (PrintQueueRegistry) і буде відправлений пізніше
