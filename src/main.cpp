@@ -538,18 +538,56 @@ void setupSD() {
  
   Logger::error("SD_MMC init fail.");
 #else
+  // --- SPI-гілка ---------------------------------------------------------
+  // На esp32-c6-lcd096 шина СПІЛЬНА з дисплеєм (SCK=7, MOSI=6), окремі
+  // CS: 4 (SD) / 14 (LCD). setupSD() навмисно викликається ПЕРЕД
+  // setupDisplay() (див. setup()), тому на цей момент TFT_CS ще НЕ
+  // сконфігурований драйвером дисплея і висить плаваючим входом. ST7735
+  // write-only і сам MISO не тягне, але поки його CS не підтягнутий у
+  // HIGH, він приймає весь init-трафік картки як власні команди - і
+  // залишає дисплей у невизначеному стані. Тому деактивуємо всі інші CS
+  // шини ДО першого такту SCK.
+#if defined(TFT_CS) && (TFT_CS >= 0)
+  pinMode(TFT_CS, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+#endif
+
+  // CS картки має бути HIGH ще до SPI.begin(): за специфікацією SD картка
+  // переходить у SPI-режим лише побачивши >=74 такти при деактивованому CS.
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  // Внутрішній підтяг на MISO: на дешевих платах зовнішнього резистора на
+  // лінії DO картки часто немає, і поки картка не вибрана, лінія "висить" -
+  // контролер читає сміття замість 0xFF і CMD0/CMD8 не проходять.
+  pinMode(SD_MISO, INPUT_PULLUP);
+
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+
+  Logger::info("SD (SPI): CS=%d SCK=%d MOSI=%d MISO=%d", SD_CS, SD_SCK, SD_MOSI, SD_MISO);
+
+  // Сходинки частот: СПОЧАТКУ робоча SD_FREQ, і лише якщо вона не
+  // піднялась - 400 кГц (частота ініціалізації за специфікацією SD) як
+  // запасний варіант. Порядок принциповий: перша успішна сходинка стає
+  // робочою частотою шини на весь сеанс, тому 400 кГц першою означала б
+  // вдесятеро повільніший SD навіть там, де 4 МГц працюють.
+  // Якщо в лозі видно fail на SD_FREQ і успіх на 400 кГц - проблема в
+  // якості шини (спільна з дисплеєм), а не в пінах чи картці.
+  const uint32_t freqs[] = {(uint32_t)SD_FREQ, 400000UL};
   const int maxAttempts = 3;
 
-  for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
-    if (SD.begin(SD_CS, SPI, 4000000)) {
-      Logger::info("SD card init done (%d/%d)", attempt, maxAttempts);
-      return;
+  for (uint32_t freq : freqs) {
+    for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+      if (SD.begin(SD_CS, SPI, freq)) {
+        Logger::info("SD card init done (%u Hz, спроба %d/%d)", (unsigned)freq, attempt, maxAttempts);
+        return;
+      }
+      delay(100);
     }
-    delay(100);
+    Logger::warn("SD init fail @ %u Hz", (unsigned)freq);
   }
 
-  Logger::error("SD init fail.");
+  Logger::error("SD init fail. Перевір: картка вставлена? FAT32/FAT16 (НЕ exFAT, НЕ >32GB)? піни?");
 #endif
 #else
   Logger::warn("SD disabled.");
@@ -680,6 +718,46 @@ void dumpConfigStorage() {
 }
 
 #if BOARD_HAS_SD
+// ---------------------------------------------------------------------------
+// YIELD_DISPLAY_BUS() - RAII-дужка, яка тимчасово віддає SPI-шину дисплея
+// на час звернення до TF-картки.
+//
+// НАВІЩО: loop() тримає транзакцію дисплея відкритою через УВЕСЬ кадр
+// (display.startWrite() ... display.endWrite()), і саме всередині неї
+// викликаються commandHandler.update() та mqtt.loop() - тобто будь-яка
+// консольна чи MQTT-команда виконується з-під відкритої транзакції.
+//
+// На платах, де дисплей і картка сидять на ОДНІЙ SPI-шині
+// (SD_SHARES_DISPLAY_SPI), це смертельно: SPIClass::beginTransaction()
+// бере НЕ рекурсивний мьютекс paramLock з portMAX_DELAY
+// (framework-arduinoespressif32, libraries/SPI/src/SPI.cpp), а драйвер
+// картки робить beginTransaction() на КОЖНУ операцію (libraries/SD/src/
+// sd_diskio.cpp, struct AcquireSPI). Другий take того самого мьютекса з
+// того самого потоку - вічний дедлок, плата зависає намертво.
+//
+// Асиметрія викликів нижче навмисна:
+//   endWrite()   - безпечно викликати зайвий раз: SPIClass::endTransaction()
+//                  захищений прапорцем _inTransaction, а CS дисплея просто
+//                  піднімається в HIGH (що нам тут і потрібно);
+//   startWrite() - НЕ можна викликати двічі поспіль: Arduino_TFT::startWrite()
+//                  не має лічильника вкладеності і напряму робить
+//                  beginWrite() -> той самий дедлок. Тому він тут рівно
+//                  один, у деструкторі.
+//
+// ОБМЕЖЕННЯ: дужка розрахована на виклик З-ПІД відкритої транзакції (тобто
+// з loop()). Якщо застосувати її у setup() - деструктор залишить транзакцію
+// дисплея відкритою. У setupSD() її тому й немає.
+// ---------------------------------------------------------------------------
+#if defined(SD_SHARES_DISPLAY_SPI) && SD_SHARES_DISPLAY_SPI
+struct DisplayBusYield {
+  DisplayBusYield() { tft.endWrite(); }
+  ~DisplayBusYield() { tft.startWrite(); }
+};
+#define YIELD_DISPLAY_BUS() DisplayBusYield _displayBusYield_
+#else
+#define YIELD_DISPLAY_BUS() ((void)0)
+#endif
+
 // ACTIVE_SD — локальний (не глобальний!) макрос-псевдонім лише для двох
 // функцій нижче: dumpSDlistDir()/dumpSDInfo(). Визначається безпосередньо
 // перед використанням і одразу #undef-иться, щоб не впливати на інший код
@@ -726,6 +804,8 @@ void dumpSDInfo() {
   // digitalWrite(33, HIGH); // Отключаем TOUCH_CS
   // digitalWrite(5, HIGH);  // SD_CS = HIGH (пока отключен)
  
+  YIELD_DISPLAY_BUS();
+
   Logger::info("========= SD Card Info =====================================");
  
   uint8_t cardType = ACTIVE_SD.cardType();
@@ -765,6 +845,158 @@ void dumpSDInfo() {
 }
  
 #undef ACTIVE_SD
+
+#if !defined(BOARD_ESP32_S3_LCD147)
+// ---------------------------------------------------------------------------
+// Низькорівневий пробник TF-картки по SPI (команда "sdprobe").
+//
+// НАВІЩО: SD.begin() повертає лише bool, і за ним неможливо відрізнити
+// три принципово різні причини відмови:
+//   1) картка взагалі не відповідає  -> помилка в пінах/проводці/живленні;
+//   2) картка відповідає на CMD0/CMD8 -> шина справна, а не монтується
+//      файлова система (exFAT/пошкоджений розділ/картка >32GB);
+//   3) відповідає лише на низькій частоті -> проблема з якістю шини
+//      (тут вона СПІЛЬНА з дисплеєм).
+// Пробник шле CMD0 (GO_IDLE_STATE) і CMD8 (SEND_IF_COND) вручну, як це
+// робить сама специфікація SD в SPI-режимі, і друкує сирі R1-відповіді.
+// ---------------------------------------------------------------------------
+
+// Одна команда SD в SPI-режимі; повертає R1 (0xFF = картка не відповіла).
+// Картка тримає лінію DO (MISO) притиснутою в LOW, поки зайнята - і поки
+// вона це робить, будь-яке читання дає 0x00.
+//
+// САМЕ НА ЦЕ попалась перша версія проби: вона вважала валідною R1 будь-який
+// байт зі скинутим бітом 7, а 0x00 цю умову задовольняє. Тому busy-стан
+// читався як "CMD0 -> R1=0x00", хоча насправді картка просто ще не
+// відпустила лінію після GO_IDLE_STATE, який робить SD.end().
+// Повертає false, якщо картка не звільнилась за timeoutMs.
+static bool sdProbeWaitReady(uint32_t timeoutMs) {
+  uint32_t start = millis();
+  do {
+    if (SPI.transfer(0xFF) == 0xFF) return true;
+  } while (millis() - start < timeoutMs);
+  return false;
+}
+
+// Одна команда SD у SPI-режимі.
+// Повертає R1, або 0xFF - картка не відповіла, або 0xFE - картка не
+// звільнила лінію (busy). Обидва службові коди мають виставлений біт 7,
+// тому не можуть збігтися з валідною R1.
+static uint8_t sdProbeCmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
+  if (!sdProbeWaitReady(500)) return 0xFE;
+
+  SPI.transfer(0xFF);
+  SPI.transfer(0x40 | cmd);
+  SPI.transfer((uint8_t)(arg >> 24));
+  SPI.transfer((uint8_t)(arg >> 16));
+  SPI.transfer((uint8_t)(arg >> 8));
+  SPI.transfer((uint8_t)arg);
+  SPI.transfer(crc);
+
+  // R1 приходить у межах 8 байтів: перший байт, що НЕ 0xFF (шина в спокої)
+  // і має скинутий біт 7.
+  for (int i = 0; i < 10; ++i) {
+    uint8_t r = SPI.transfer(0xFF);
+    if (r != 0xFF && !(r & 0x80)) return r;
+  }
+  return 0xFF;
+}
+
+// force=false - неруйнівний режим (за замовчуванням): якщо картка вже
+// змонтована, сира проба не виконується взагалі. Причина в тому, що
+// відібрати шину у драйвера можна лише через SD.end(), а повторний
+// SD.begin() у тому самому сеансі надійно НЕ піднімається (перевірено на
+// цій платі: "sdWait: Wait Failed" -> "GO_IDLE_STATE failed" -> f_mount (3)),
+// тобто проба коштувала б робочої картки до перезавантаження.
+void sdProbe(bool force) {
+  YIELD_DISPLAY_BUS();
+
+  Logger::info("========= SD probe (raw SPI) ===============================");
+  Logger::info("Піни: CS=%d SCK=%d MOSI=%d MISO=%d", SD_CS, SD_SCK, SD_MOSI, SD_MISO);
+
+  if (SD.cardType() != CARD_NONE && !force) {
+    Logger::info("Картка вже змонтована - сира проба не потрібна і не безпечна.");
+    Logger::info("  Деталі по картці: status sd");
+    Logger::info("  Якщо проба потрібна саме зараз: sdprobe force");
+    Logger::info("  (це демонтує картку остаточно, до reboot).");
+    Logger::info("============================================================");
+    return;
+  }
+
+  // Звільняємо шину від драйвера SD (якщо він піднявся) і деактивуємо
+  // дисплей - інакше ST7735 їстиме наші такти як свої команди.
+  const bool wasMounted = (SD.cardType() != CARD_NONE);
+  if (wasMounted) {
+    Logger::warn("force: демонтую картку, після проби знадобиться reboot");
+    SD.end();
+    // sdcard_uninit() шле картці GO_IDLE_STATE - їй треба час відпустити DO.
+    delay(50);
+  }
+
+#if defined(TFT_CS) && (TFT_CS >= 0)
+  pinMode(TFT_CS, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+#endif
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  // Стан лінії MISO при деактивованій картці: HIGH = картка вставлена і
+  // тримає підтяг; LOW - або картки немає, або MISO не той пін.
+  pinMode(SD_MISO, INPUT_PULLUP);
+  delay(2);
+  Logger::info("MISO при CS=HIGH: %s (очікується HIGH, якщо картка вставлена)",
+               digitalRead(SD_MISO) ? "HIGH" : "LOW");
+
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+
+  // >=74 такти при CS=HIGH - обов'язковий перехід картки в SPI-режим.
+  for (int i = 0; i < 10; ++i) SPI.transfer(0xFF);
+
+  digitalWrite(SD_CS, LOW);
+  uint8_t r1 = sdProbeCmd(0, 0x00000000, 0x95);  // CMD0 GO_IDLE_STATE
+  Logger::info("CMD0 (GO_IDLE_STATE) -> R1=0x%02X %s", r1,
+               r1 == 0x01   ? "OK (картка в idle)"
+               : r1 == 0xFF ? "НЕМАЄ ВІДПОВІДІ - картка/піни/живлення"
+               : r1 == 0xFE ? "BUSY - картка тримає DO в LOW"
+               : r1 == 0x00 ? "відповіла, але не в idle"
+                            : "несподівано");
+
+  // CMD8 має сенс за будь-якої валідної R1 (біт 7 скинутий), не лише 0x01.
+  if (!(r1 & 0x80)) {
+    uint8_t r8 = sdProbeCmd(8, 0x000001AA, 0x87);  // CMD8 SEND_IF_COND
+    uint8_t echo[4] = {0};
+    for (int i = 0; i < 4; ++i) echo[i] = SPI.transfer(0xFF);
+    Logger::info("CMD8 (SEND_IF_COND) -> R1=0x%02X echo=%02X %02X %02X %02X %s", r8, echo[0], echo[1],
+                 echo[2], echo[3],
+                 (r8 == 0x01 && echo[3] == 0xAA) ? "OK (SDHC/SDXC v2)"
+                 : (r8 & 0x04)                   ? "illegal command (стара SDSC v1)"
+                                                 : "несподівано");
+  }
+
+  digitalWrite(SD_CS, HIGH);
+  SPI.transfer(0xFF);
+  SPI.endTransaction();
+
+  Logger::info("------------------------------------------------------------");
+  if (r1 == 0xFF) {
+    Logger::info("ВИСНОВОК: картка не відповідає взагалі - шукати причину в");
+    Logger::info("  пінах (SD_CS/SD_SCK/SD_MOSI/SD_MISO у platformio.ini),");
+    Logger::info("  контакті слота або живленні 3V3.");
+  } else if (r1 == 0xFE) {
+    Logger::info("ВИСНОВОК: картка на шині є, але не звільняє лінію. Найчастіше");
+    Logger::info("  це залишковий busy після демонтування - допоможе reboot.");
+  } else {
+    Logger::info("ВИСНОВОК: шина і картка справні. Якщо SD.begin() все одно");
+    Logger::info("  падає - справа у файловій системі: потрібен FAT32/FAT16");
+    Logger::info("  (exFAT і картки >32GB Arduino-бібліотека SD не монтує).");
+  }
+  if (wasMounted) {
+    Logger::warn("Картку демонтовано пробою - виконай reboot, щоб повернути SD.");
+  }
+  Logger::info("============================================================");
+}
+#endif  // !BOARD_ESP32_S3_LCD147
 #endif  // BOARD_HAS_SD
  
 void dumpLittleFSInfo() {
@@ -820,8 +1052,7 @@ void dumpStatus(const String& section) {
     EspPartitionInspector::printAll(logger, true);
 #if BOARD_HAS_SD
   } else if (section.equals("sd")) {
-    // SDCardInspector::printAll(SD, logger);
-    // SDCardInspector::printAll(SD_MMC, Serial);
+    YIELD_DISPLAY_BUS();
     #if defined(BOARD_ESP32_S3_LCD147)
       SDCardInspector::printAll(SD_MMC, logger);
     #else
@@ -858,6 +1089,12 @@ void setupSerialCommander() {
   });
 
   commandHandler.registerCommand("scan", "scan WiFi networks", [](const String& args) { WiFi_scan(); });
+
+#if BOARD_HAS_SD && !defined(BOARD_ESP32_S3_LCD147)
+  commandHandler.registerCommand(
+      "sdprobe", "low-level TF card probe over SPI: sdprobe [force] (force demounts the card until reboot)",
+      [](const String& args) { sdProbe(args.equalsIgnoreCase("force")); });
+#endif
 
   commandHandler.registerCommand("flip", "flip display (180)", [](const String& args) { display_flip(); });
 

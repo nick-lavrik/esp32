@@ -62,6 +62,20 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 ¹ Піни SD для `esp32-c6` у `build_flags` задані, але `BOARD_HAS_SD=0` — код SD не компілюється.
 ² `esp32-c6-lcd096`: SPI-шина **спільна** з дисплеєм (SCK=7, MOSI=6, MISO=5), окремі CS: 4 (SD) /
   14 (LCD). `SPI.begin()` робить `setupSD()` — обов'язково **до** `setupDisplay()`.
+  Перевірено на залізі: картка монтується на робочих 4 МГц (`SD_FREQ`), 400 кГц — лише фолбек.
+  Спільна шина дає дві пастки, обидві вже оброблені в `src/main.cpp`:
+  - **`TFT_CS` при старті.** `setupSD()` іде до `setupDisplay()`, тож GPIO14 ще плаваючий вхід і
+    ST7735 приймає init-трафік картки за свої команди. `setupSD()` явно піднімає `TFT_CS` у HIGH
+    (і `SD_CS` теж — картка переходить у SPI-режим лише побачивши ≥74 такти при деактивованому CS).
+  - **Дедлок на `paramLock`.** `loop()` тримає транзакцію дисплея відкритою через увесь кадр, і саме
+    всередині неї викликаються `commandHandler.update()` та `mqtt.loop()`. `SPIClass::beginTransaction()`
+    бере **не рекурсивний** мьютекс із `portMAX_DELAY`, а драйвер картки (`sd_diskio.cpp`, `AcquireSPI`)
+    робить `beginTransaction()` на кожну операцію — тобто будь-яке звернення до SD з команди вішає
+    плату намертво. Захист — RAII-дужка `YIELD_DISPLAY_BUS()`, увімкнена прапорцем
+    `SD_SHARES_DISPLAY_SPI=1`; застосована в `sdProbe()`, `dumpSDInfo()` і `status sd`.
+    Її `endWrite()`/`startWrite()` навмисно асиметричні: зайвий `endWrite()` безпечний
+    (`SPIClass::endTransaction()` захищений `_inTransaction`), а `Arduino_TFT::startWrite()` не має
+    лічильника вкладеності, тому подвійний виклик дав би той самий дедлок.
 ³ RISC-V (C6) не толерантний до невирівняного доступу до пам'яті; tjpgd під TJpg_Decoder на ньому
   повертав биті значення заголовка (`width>0`, `height=0`). Тому на обох C6 — `bitbank2/JPEGDEC`.
 
