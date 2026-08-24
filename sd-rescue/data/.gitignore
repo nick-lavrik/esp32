@@ -1,0 +1,16 @@
+# Артефакти сканування: великі, відтворювані і специфічні для конкретної
+# картки. У git тримаємо лише компактні результати відновлення (gdt_fixed.bin,
+# root_children*.json), які коштували годин читання з деградованої картки.
+*.jsonl
+*.heartbeat.json
+*.tmp
+gdt_fixed.bin
+occupied.bin
+occupied_conservative.bin
+file_list.txt
+imager.pid
+imager_stdout.txt
+watchdog.log
+walk_progress.txt
+*.img
+*.img.state

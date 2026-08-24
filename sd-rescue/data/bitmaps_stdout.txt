@@ -1,0 +1,15 @@
+{
+ "block_size": 4096,
+ "blocks": 60937216,
+ "groups": 1860,
+ "blocks_per_group": 32768,
+ "part_offset": 541065216,
+ "stats": {
+  "groups": 1860,
+  "csum_ok": 773,
+  "csum_bad": 727,
+  "desc_bad": 360,
+  "blocks_used": 32404203
+ },
+ "used_bytes": 132727615488
+}

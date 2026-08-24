@@ -44,10 +44,24 @@
 
 #include <Arduino.h>
 #include <SPI.h>
+#if defined(ESP32) && __has_include(<soc/rtc_cntl_reg.h>)
+// Регістр примусового download-boot для команди "bootloader". На частині
+// чипів (напр. ESP32-C6) RTC-домен перебудований і цього заголовка немає -
+// там команда просто не реєструється, а прошивка через USB-Serial/JTAG і так
+// входить у завантажувач без кнопок.
+#include <soc/rtc_cntl_reg.h>
+#define HAS_FORCE_DOWNLOAD_BOOT 1
+#endif
 
 #include "Display.h"
 #if BOARD_HAS_SD
-#if defined(BOARD_ESP32_S3_LCD147)
+// SD_USE_SDMMC - внутрішній прапорець: SDMMC-режим є лише на платі з таким
+// роз'ємом, і лише якщо його явно не відключили через SD_FORCE_SPI.
+#if defined(BOARD_ESP32_S3_LCD147) && !defined(SD_FORCE_SPI)
+#define SD_USE_SDMMC 1
+#endif
+
+#if defined(SD_USE_SDMMC)
 // Ця плата підключає TF-карту через SD_MMC (4-bit: D0/D1/D2/D3/CLK/CMD),
 // а не через SPI (CS/MOSI/MISO/SCK), як інші плати проєкту.
 //
@@ -61,6 +75,28 @@
 #else
 #include <SD.h>
 #include <SDCardInspector.hpp>
+#endif
+
+#if defined(BOARD_ESP32_S3_LCD147)
+// USB Mass Storage є лише на платі з native USB. Підключається незалежно від
+// того, як читається картка (SPI чи SDMMC) - модуль отримує читач замиканням.
+#include <SdMassStorage.h>
+#endif
+// Raw-читання секторів і розбір суперблока ext4 не залежать від того,
+// SPI це чи SDMMC (доступ до картки - через шаблон), тому підключаються
+// для обох гілок.
+#include <Ext4SuperblockInspector.hpp>
+#include <SDRawReader.hpp>
+// Діагностика картки (sdbench/sdcrc/sdverify/sdmap) працює в обох режимах
+// через спільний базовий клас SdBulkReader; різниця лише в тому, як сектори
+// дістаються з заліза. ActiveBulkReader - псевдонім потрібної реалізації.
+#if defined(SD_USE_SDMMC)
+#include <SdMmcBulkReader.hpp>
+using ActiveBulkReader = SdMmcBulkReader;
+#else
+#include <SdSpiBulkReader.hpp>
+#include <SDImageServer.hpp>
+using ActiveBulkReader = SdSpiBulkReader;
 #endif
 #endif
 #include <LittleFS.h>
@@ -694,7 +730,13 @@ void setupMqttClient() {
 
 void setupSD() {
 #if BOARD_HAS_SD
-#if defined(BOARD_ESP32_S3_LCD147)
+// SD_USE_SDMMC - внутрішній прапорець: SDMMC-режим є лише на платі з таким
+// роз'ємом, і лише якщо його явно не відключили через SD_FORCE_SPI.
+#if defined(BOARD_ESP32_S3_LCD147) && !defined(SD_FORCE_SPI)
+#define SD_USE_SDMMC 1
+#endif
+
+#if defined(SD_USE_SDMMC)
   // SD_MMC (4-bit): піни задаються з build_flags (SD_D0/D1/D2/D3/CLK/CMD).
   if (!SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0, SD_D1, SD_D2, SD_D3)) {
     Logger::error("SD_MMC.setPins() fail.");
@@ -892,13 +934,13 @@ void dumpConfigStorage() {
 }
 
 #if BOARD_HAS_SD
-// ACTIVE_SD — локальний (не глобальний!) макрос-псевдонім лише для двох
-// функцій нижче: dumpSDlistDir()/dumpSDInfo(). Визначається безпосередньо
+// ACTIVE_SD — локальний (не глобальний!) макрос-псевдонім лише для функцій
+// нижче: dumpSDlistDir()/dumpSDInfo()/dumpSdRaw()/dumpSdExt4(). Визначається безпосередньо
 // перед використанням і одразу #undef-иться, щоб не впливати на інший код
 // файлу чи транзитивні включення <SD.h> в сторонніх бібліотеках (напр.
 // ESP Mail Client -> MB_FS.h), де глобальний "#define SD SD_MMC" ламає
 // компіляцію (конфлікт з їхніми власними SD.*-викликами).
-#if defined(BOARD_ESP32_S3_LCD147)
+#if defined(SD_USE_SDMMC)
 #define ACTIVE_SD SD_MMC
 #include <SDCardInspector.hpp>
 #else
@@ -978,9 +1020,678 @@ void dumpSDInfo() {
   Logger::info("============================================================");
 }
  
+// ---------------------------------------------------------------------------
+// Порятунок даних з картки, яку не бачить хост (команди "sdraw" / "sdext4").
+//
+// НАВІЩО: коли SD картку не визначає комп'ютер, а ESP32 її читає, плата стає
+// єдиним каналом доступу до даних. Обидві команди працюють в обхід файлової
+// системи, тому не залежать від того, чи вміє ESP32 монтувати те, що на
+// картці — ext4 (тип розділу 0x83) він не вміє в принципі.
+//
+// Спільна для обох перевірка cardType() != CARD_NONE — не косметика:
+// SDFS::readRAW() на незмонтованій картці передає _pdrv == 0xFF прямо в
+// ff_sd_read(), який індексує s_cards[pdrv] без перевірки меж, і плата
+// ресетиться (та сама пастка, що описана вище для "status sd").
+// ---------------------------------------------------------------------------
+
+// Максимум секторів за один виклик "sdraw". Обмеження суто проти залиття
+// логу: 16 секторів - це вже 512 рядків hexdump у Serial.
+static constexpr uint32_t kSdRawMaxSectors = 16;
+
+// Повертає перший LBA розділу за його індексом у MBR (1..4), або 0, якщо
+// такого розділу немає. Дозволяє звати "sdext4 2" замість "sdext4 1056768".
+static uint32_t sdPartitionFirstLba(uint8_t partitionIndex) {
+  const auto partitions = SDCardInspector::collectPartitions(ACTIVE_SD);
+
+  for (const auto& info : partitions) {
+    if (info.index == partitionIndex) {
+      return info.firstSectorLBA;
+    }
+  }
+
+  return 0;
+}
+
+// Кількість секторів УСІЄЇ картки.
+//
+// НАВІЩО НЕ numSectors(): у SDFS (SPI-режим) він повертає розмір картки, а в
+// SDMMCFS - розмір ЗМОНТОВАНОЇ файлової системи, тобто тут 512-мегабайтного
+// boot-розділу (SD_MMC.cpp: numSectors() = totalBytes() / sector_size, а
+// totalBytes() питає f_getfree про змонтований том). Через це на SD_MMC усе
+// за межами першого розділу відкидалося як вихід за межі картки - разом з
+// ext4-розділом, по який ми й прийшли.
+//
+// cardSize() в обох класах рахується з CSD-регістра самої картки, тому дає
+// однаковий і правильний результат незалежно від режиму та від того, що саме
+// змонтовано.
+#if defined(BOARD_ESP32_S3_LCD147)
+// Читач для USB Mass Storage. Окремий від sdImageBulkReader: той живе у
+// гілці HTTP-сервера, якої на цій платі немає.
+static ActiveBulkReader mscBulkReader;
+#endif
+
+static uint64_t activeCardSectors() {
+  return ACTIVE_SD.cardSize() / SDRawReader::kSectorSize;
+}
+
+#if defined(BOARD_ESP32_S3_LCD147)
+// Перемонтування картки на прохання USB-callback.
+//
+// Робиться з loop(), а не з самого callback: виклик end()/begin() драйвера з
+// таску TinyUSB валив систему - плата перезавантажувалась посеред знімання
+// образу, а хост бачив лише "No medium found". Тут ми у головному потоці,
+// який і володіє драйвером картки.
+//
+// Навіщо взагалі: після серії CRC-збоїв ця картка перестає відповідати
+// цілком, і без перемонтування знімання образу зупинилося б на першій такій
+// серії - причому хост отримував би нулі, не дізнавшись про помилку.
+void remountCardIfMscAsked() {
+  if (!sdMassStorageNeedsRecovery()) {
+    return;
+  }
+
+  YIELD_DISPLAY_BUS();
+  Logger::warn("серія помилок читання - перемонтовую картку");
+
+  ACTIVE_SD.end();
+  delay(200);
+  setupSD();
+
+  mscBulkReader.begin(activeCardSectors());
+  sdMassStorageInvalidatePrefetch();
+
+  Logger::info("картку перемонтовано, cardType=%d", (int)ACTIVE_SD.cardType());
+}
+#endif
+
+
+#if defined(BOARD_ESP32_S3_LCD147)
+// "sdmsc on|off|status" - віддати картку хосту як USB-накопичувач.
+//
+// Читач секторів передається в MSC замиканням: сам модуль не знає, чи картка
+// підключена по SPI, чи по SDMMC (див. коментар до SdMscSectorReader).
+void dumpSdMsc(const String& args) {
+  static TLogger logger("sdmsc");
+
+  const String action = args.length() > 0 ? args : String("status");
+
+  if (action.equalsIgnoreCase("on")) {
+    YIELD_DISPLAY_BUS();
+
+    if (ACTIVE_SD.cardType() == CARD_NONE) {
+      logger.error("SD не змонтована - віддавати хосту нічого");
+      return;
+    }
+
+    if (!mscBulkReader.isReady() && !mscBulkReader.begin(activeCardSectors())) {
+      logger.error("bulk-читач картки не піднявся");
+      return;
+    }
+
+    sdMassStorageBegin(
+        [](uint32_t lba, uint32_t count, uint8_t* out) {
+          return mscBulkReader.readSectors(lba, count, out);
+        },
+        (uint32_t)activeCardSectors());
+    return;
+  }
+
+  if (action.equalsIgnoreCase("off")) {
+    sdMassStorageEnd();
+    return;
+  }
+
+  sdMassStoragePrintStatus();
+}
+#endif  // BOARD_ESP32_S3_LCD147
+
+
+// "sdraw <lba> [count]" - hexdump сирих секторів картки.
+void dumpSdRaw(const String& args) {
+  static TLogger logger("sdraw");
+
+  YIELD_DISPLAY_BUS();
+
+  if (ACTIVE_SD.cardType() == CARD_NONE) {
+    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    return;
+  }
+
+  char buffer[32];
+  strlcpy(buffer, args.c_str(), sizeof(buffer));
+
+  char* countToken = nullptr;
+  char* lbaToken = strtok_r(buffer, " ", &countToken);
+
+  if (lbaToken == nullptr || *lbaToken == '\0') {
+    logger.warn("use: sdraw <lba> [count]   (напр. sdraw 0, sdraw 1056768 2)");
+    return;
+  }
+
+  const uint32_t lba = strtoul(lbaToken, nullptr, 0);  // 0 -> приймає і 0x-hex
+  uint32_t count = (countToken != nullptr) ? strtoul(countToken, nullptr, 0) : 1;
+
+  if (count == 0) {
+    count = 1;
+  }
+  if (count > kSdRawMaxSectors) {
+    logger.warn("count=%lu завеликий, обрізано до %lu", (unsigned long)count,
+                (unsigned long)kSdRawMaxSectors);
+    count = kSdRawMaxSectors;
+  }
+
+  SDRawReader::hexdump(ACTIVE_SD, lba, count, logger);
+}
+
+// "sdext4 <partition> [sb_lba]" - розбір суперблока ext2/3/4 на розділі MBR.
+//
+// Другий аргумент - абсолютний LBA суперблока; потрібен, коли основний
+// суперблок побитий і треба перевірити його резервну копію (адресу копії
+// рахуємо з полів "per group" та "first block", які друкує ця ж команда).
+void dumpSdExt4(const String& args) {
+  static TLogger logger("ext4");
+
+  YIELD_DISPLAY_BUS();
+
+  if (ACTIVE_SD.cardType() == CARD_NONE) {
+    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    return;
+  }
+
+  char buffer[32];
+  strlcpy(buffer, args.c_str(), sizeof(buffer));
+
+  char* sbLbaToken = nullptr;
+  char* partToken = strtok_r(buffer, " ", &sbLbaToken);
+
+  if (partToken == nullptr || *partToken == '\0') {
+    logger.warn("use: sdext4 <partition 1..4> [sb_lba]   (напр. sdext4 2)");
+    return;
+  }
+
+  const uint32_t partitionIndex = strtoul(partToken, nullptr, 0);
+  if (partitionIndex < 1 || partitionIndex > 4) {
+    logger.warn("номер розділу має бути 1..4 (див. status sd)");
+    return;
+  }
+
+  const uint32_t partitionFirstLba = sdPartitionFirstLba((uint8_t)partitionIndex);
+  if (partitionFirstLba == 0) {
+    logger.warn("розділ %lu не знайдено в MBR (див. status sd)", (unsigned long)partitionIndex);
+    return;
+  }
+
+  // Суперблок лежить за фіксованим зміщенням 1024 байти від початку РОЗДІЛУ,
+  // тобто через 2 сектори по 512 байт після його першого LBA.
+  const bool hasExplicitLba = (sbLbaToken != nullptr && *sbLbaToken != '\0');
+  const uint32_t superblockLba =
+      hasExplicitLba ? strtoul(sbLbaToken, nullptr, 0)
+                     : partitionFirstLba + Ext4SuperblockInspector::kSuperblockSectorOffset;
+
+  logger.info("розділ %lu: first LBA %lu, суперблок з LBA %lu%s", (unsigned long)partitionIndex,
+              (unsigned long)partitionFirstLba, (unsigned long)superblockLba,
+              hasExplicitLba ? " (задано вручну)" : "");
+
+  // 1024 байти суперблока = два послідовних сектори. Читаємо їх окремими
+  // викликами readRAW() (його API - рівно один сектор за раз).
+  uint8_t superblock[Ext4SuperblockInspector::kSuperblockSize];
+
+  for (uint32_t i = 0; i < Ext4SuperblockInspector::kSuperblockSectorCount; ++i) {
+    uint8_t* target = superblock + i * SDRawReader::kSectorSize;
+
+    if (!SDRawReader::readSector(ACTIVE_SD, superblockLba + i, target)) {
+      logger.error("не вдалось прочитати LBA %lu (сектор биті або поза межами)",
+                   (unsigned long)(superblockLba + i));
+      return;
+    }
+  }
+
+  Ext4SuperblockInspector::printAll(superblock, logger);
+}
+
+// "sdbench [lba] [sectors]" - фактична швидкість послідовного raw-читання.
+//
+// НАВІЩО: рішення "знімати образ через плату чи ні" залежить не від
+// SD_FREQ у build_flags, а від виміряних КБ/с. Команда друкує ще й прогноз
+// на 1 GiB - множенням на реальний обсяг даних одразу видно, скільки годин
+// (чи днів) займе копіювання.
+void dumpSdBench(const String& args) {
+  static TLogger logger("sdbench");
+
+  YIELD_DISPLAY_BUS();
+
+  if (ACTIVE_SD.cardType() == CARD_NONE) {
+    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    return;
+  }
+
+  char buffer[32];
+  strlcpy(buffer, args.c_str(), sizeof(buffer));
+
+  char* rest = nullptr;
+  char* lbaToken = strtok_r(buffer, " ", &rest);
+  char* sectorsToken = strtok_r(nullptr, " ", &rest);
+  char* chunkToken = strtok_r(nullptr, " ", &rest);
+
+  const uint32_t lba = (lbaToken != nullptr && *lbaToken != '\0') ? strtoul(lbaToken, nullptr, 0) : 0;
+  uint32_t sectors = (sectorsToken != nullptr) ? strtoul(sectorsToken, nullptr, 0) : 2048;
+  const uint32_t chunk = (chunkToken != nullptr) ? strtoul(chunkToken, nullptr, 0) : 1;
+
+  if (sectors == 0) {
+    sectors = 2048;  // 1 MiB - достатньо, щоб усереднити накладні витрати
+  }
+
+  logger.info("читаю %lu секторів (%lu KiB) з LBA %lu, пачками по %lu...", (unsigned long)sectors,
+              (unsigned long)(sectors / 2), (unsigned long)lba, (unsigned long)chunk);
+
+  RawReadStats stats;
+
+  if (chunk > 1) {
+    static ActiveBulkReader bulkReader;
+
+    if (!bulkReader.isReady() && !bulkReader.begin(activeCardSectors())) {
+      logger.error("не вдалось ініціалізувати bulk-читач картки");
+      return;
+    }
+
+    // Буфер під пачку виділяється в heap: при великому chunk впертись у
+    // найбільший ВІЛЬНИЙ блок легко (LCD-буфери фрагментують купу), тому
+    // друкуємо його поруч - інакше невдалий malloc виглядав би як "0 ok / 0 fail".
+    logger.info("bulk-режим: потрібно %lu B, найбільший вільний блок %lu B",
+                (unsigned long)(chunk * 512), (unsigned long)ESP.getMaxAllocHeap());
+#if !defined(SD_USE_SDMMC)
+    // pdrv є лише у SPI-реалізації: там він визначається перебором і його
+    // значення - перше, що варто побачити в логу, якщо читання не пішло.
+    logger.info("  pdrv=%u", (unsigned int)bulkReader.pdrv());
+#endif
+
+    stats = bulkReader.measureRead(lba, sectors, chunk);
+
+    if (stats.sectorsOk == 0 && stats.sectorsFailed == 0) {
+      logger.error("нічого не прочитано - найімовірніше не вистачило heap на буфер");
+      return;
+    }
+  } else {
+    stats = SDRawReader::measureRead(ACTIVE_SD, lba, sectors);
+  }
+
+  logger.info("прочитано  : %lu ok / %lu fail", (unsigned long)stats.sectorsOk,
+              (unsigned long)stats.sectorsFailed);
+
+  if (stats.sectorsFailed > 0) {
+    logger.warn("перший збійний LBA: %lu", (unsigned long)stats.firstFailedLba);
+  }
+
+  if (stats.elapsedMs == 0 || stats.sectorsOk == 0) {
+    logger.warn("немає що міряти (нуль часу або нуль успішних секторів)");
+    return;
+  }
+
+  // Рахуємо в double: цілочисельне (sectorsOk * 512 * 1000) / elapsedMs
+  // переповнює uint32 вже на кількох мегабайтах.
+  const double bytes = (double)stats.sectorsOk * SDRawReader::kSectorSize;
+  const double bytesPerSecond = bytes * 1000.0 / (double)stats.elapsedMs;
+  const double minutesPerGiB = (1024.0 * 1024.0 * 1024.0) / bytesPerSecond / 60.0;
+
+  logger.info("час        : %lu ms", (unsigned long)stats.elapsedMs);
+  logger.info("швидкість  : %.1f KiB/s (%.2f MiB/s)", bytesPerSecond / 1024.0,
+              bytesPerSecond / (1024.0 * 1024.0));
+  logger.info("прогноз    : %.1f хв на 1 GiB (%.1f год на 50 GiB)", minutesPerGiB,
+              minutesPerGiB * 50.0 / 60.0);
+}
+
+// "sdcrc <lba> <count> [chunk]" - CRC32 діапазону, прочитаного НА ПЛАТІ.
+//
+// НАВІЩО: два виклики з тими самими аргументами мусять дати той самий CRC.
+// Якщо не дають - дані нестабільні, і команда одразу показує, на якому саме
+// шляху: chunk=1 читає посекторно (CMD17), chunk>1 - пачками (CMD18).
+// Без цієї команди нестабільність, помічену на хості, неможливо відрізнити
+// від помилок транспорту.
+void dumpSdCrc(const String& args) {
+  static TLogger logger("sdcrc");
+
+  YIELD_DISPLAY_BUS();
+
+  if (ACTIVE_SD.cardType() == CARD_NONE) {
+    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    return;
+  }
+
+  char buffer[40];
+  strlcpy(buffer, args.c_str(), sizeof(buffer));
+
+  char* rest = nullptr;
+  char* lbaToken = strtok_r(buffer, " ", &rest);
+  char* countToken = strtok_r(nullptr, " ", &rest);
+  char* chunkToken = strtok_r(nullptr, " ", &rest);
+
+  if (lbaToken == nullptr || *lbaToken == '\0') {
+    logger.warn("use: sdcrc <lba> <count> [chunk]   (напр. sdcrc 1056768 1024 64)");
+    return;
+  }
+
+  const uint32_t lba = strtoul(lbaToken, nullptr, 0);
+  uint32_t count = (countToken != nullptr) ? strtoul(countToken, nullptr, 0) : 1024;
+  const uint32_t chunk = (chunkToken != nullptr) ? strtoul(chunkToken, nullptr, 0) : 1;
+
+  if (count == 0) {
+    count = 1024;
+  }
+
+  static ActiveBulkReader crcReader;
+
+  if (!crcReader.isReady() && !crcReader.begin(activeCardSectors())) {
+    logger.error("не вдалось визначити pdrv картки");
+    return;
+  }
+
+  // Четвертий аргумент вмикає читання з голосуванням: два виклики команди з
+  // тими самими аргументами мусять дати той самий CRC. Це і є перевірка, що
+  // голосування справді прибирає мерехтіння бітів, а не просто маскує його.
+  char* passesToken = strtok_r(nullptr, " ", &rest);
+  const uint32_t passes = (passesToken != nullptr) ? strtoul(passesToken, nullptr, 0) : 0;
+
+  if (passes >= 3) {
+    const uint32_t chunkSectors = (chunk > SdBulkReader::kMaxVotedChunkSectors)
+                                      ? SdBulkReader::kMaxVotedChunkSectors
+                                      : (chunk > 0 ? chunk : 1);
+
+    uint8_t* buffer = (uint8_t*)malloc(chunkSectors * SDRawReader::kSectorSize);
+    if (buffer == nullptr) {
+      logger.error("немає heap на буфер %lu B", (unsigned long)(chunkSectors * 512));
+      return;
+    }
+
+    SdBulkReader::VoteStats total;
+    uint32_t crcVoted = 0xFFFFFFFF;
+    const uint32_t startMs = millis();
+
+    for (uint32_t done = 0; done < count;) {
+      const uint32_t remaining = count - done;
+      const uint32_t take = (remaining < chunkSectors) ? remaining : chunkSectors;
+
+      const auto voteStats = crcReader.readSectorsVoted(lba + done, take, buffer, (uint8_t)passes);
+
+      total.sectorsStable += voteStats.sectorsStable;
+      total.sectorsRecovered += voteStats.sectorsRecovered;
+      total.sectorsUncertain += voteStats.sectorsUncertain;
+      total.sectorsFailed += voteStats.sectorsFailed;
+      total.bitsFixed += voteStats.bitsFixed;
+      total.bitsUncertain += voteStats.bitsUncertain;
+
+      crcVoted = SDRawReader::crc32Update(crcVoted, buffer, take * SDRawReader::kSectorSize);
+      done += take;
+    }
+
+    crcVoted ^= 0xFFFFFFFF;
+    free(buffer);
+
+    logger.info("LBA %lu +%lu, голосування %lu проходів -> CRC32 %08lX (%lu ms)",
+                (unsigned long)lba, (unsigned long)count, (unsigned long)passes,
+                (unsigned long)crcVoted, (unsigned long)(millis() - startMs));
+    logger.info("  сектори: %lu стабільних / %lu відновлених / %lu невпевнених / %lu не читались",
+                (unsigned long)total.sectorsStable, (unsigned long)total.sectorsRecovered,
+                (unsigned long)total.sectorsUncertain, (unsigned long)total.sectorsFailed);
+    logger.info("  біти   : %lu виправлено, з них %lu без надійної більшості",
+                (unsigned long)total.bitsFixed, (unsigned long)total.bitsUncertain);
+    return;
+  }
+
+  RawReadStats stats;
+  const uint32_t crc = crcReader.crc32Range(lba, count, chunk, stats);
+
+  logger.info("LBA %lu +%lu, chunk %lu -> CRC32 %08lX  (ok %lu / fail %lu, %lu ms)",
+              (unsigned long)lba, (unsigned long)count, (unsigned long)chunk,
+              (unsigned long)crc, (unsigned long)stats.sectorsOk,
+              (unsigned long)stats.sectorsFailed, (unsigned long)stats.elapsedMs);
+}
+
+// "sdverify <lba> <sectors> [chunk] [passes] [delay_ms]" - чи повторюється читання.
+//
+// НАВІЩО: на цій картці SD-протокол помилок не показує (CRC16 кожного блоку
+// валідний, fail=0), але дані щоразу різні. Команда читає діапазон кілька
+// разів і друкує, які саме чанки не повторюються - тобто будує карту
+// придатних до порятунку ділянок. Параметр delay_ms перевіряє, чи не зникає
+// нестабільність при повільнішому читанні (просадка живлення / перегрів).
+void dumpSdVerify(const String& args) {
+  static TLogger logger("sdverify");
+
+  YIELD_DISPLAY_BUS();
+
+  if (ACTIVE_SD.cardType() == CARD_NONE) {
+    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    return;
+  }
+
+  char buffer[64];
+  strlcpy(buffer, args.c_str(), sizeof(buffer));
+
+  char* rest = nullptr;
+  char* lbaToken = strtok_r(buffer, " ", &rest);
+  char* sectorsToken = strtok_r(nullptr, " ", &rest);
+  char* chunkToken = strtok_r(nullptr, " ", &rest);
+  char* passesToken = strtok_r(nullptr, " ", &rest);
+  char* delayToken = strtok_r(nullptr, " ", &rest);
+
+  if (lbaToken == nullptr || *lbaToken == '\0') {
+    logger.warn("use: sdverify <lba> <sectors> [chunk] [passes] [delay_ms]");
+    return;
+  }
+
+  const uint32_t lba = strtoul(lbaToken, nullptr, 0);
+  const uint32_t sectors = (sectorsToken != nullptr) ? strtoul(sectorsToken, nullptr, 0) : 1024;
+  const uint32_t chunk = (chunkToken != nullptr) ? strtoul(chunkToken, nullptr, 0) : 64;
+  const uint32_t passes = (passesToken != nullptr) ? strtoul(passesToken, nullptr, 0) : 2;
+  const uint32_t delayMs = (delayToken != nullptr) ? strtoul(delayToken, nullptr, 0) : 0;
+
+  static ActiveBulkReader verifyReader;
+
+  if (!verifyReader.isReady() && !verifyReader.begin(activeCardSectors())) {
+    logger.error("не вдалось визначити pdrv картки");
+    return;
+  }
+
+  logger.info("перевіряю LBA %lu +%lu, chunk %lu, проходів %lu, пауза %lu ms",
+              (unsigned long)lba, (unsigned long)sectors, (unsigned long)chunk,
+              (unsigned long)passes, (unsigned long)delayMs);
+
+  const auto stats = verifyReader.verifyRange(lba, sectors, chunk, (uint8_t)passes, delayMs, logger);
+
+  logger.info("чанків     : %lu (стабільних %lu / нестабільних %lu)",
+              (unsigned long)stats.chunksTotal, (unsigned long)stats.chunksStable,
+              (unsigned long)stats.chunksUnstable);
+  logger.info("не читались: %lu секторів", (unsigned long)stats.sectorsFailed);
+  logger.info("час        : %lu ms", (unsigned long)stats.elapsedMs);
+
+  if (stats.chunksUnstable > 0) {
+    logger.warn("перший нестабільний LBA: %lu", (unsigned long)stats.firstUnstableLba);
+  }
+}
+
+// "sdmap [first_lba] [last_lba] [points] [sectors] [passes]" - карта деградації.
+//
+// Друкує по символу на точку: '.' - читається повторювано, 'x' - щоразу
+// інакше (мерехтіння бітів), 'E' - не читається зовсім. Потрібна, щоб
+// відрізнити локальне пошкодження від деградації всієї картки: від цього
+// залежить, чи має сенс витягувати дані і які саме ділянки.
+void dumpSdMap(const String& args) {
+  static TLogger logger("sdmap");
+
+  YIELD_DISPLAY_BUS();
+
+  if (ACTIVE_SD.cardType() == CARD_NONE) {
+    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    return;
+  }
+
+  char buffer[80];
+  strlcpy(buffer, args.c_str(), sizeof(buffer));
+
+  char* rest = nullptr;
+  char* firstToken = strtok_r(buffer, " ", &rest);
+  char* lastToken = strtok_r(nullptr, " ", &rest);
+  char* pointsToken = strtok_r(nullptr, " ", &rest);
+  char* sectorsToken = strtok_r(nullptr, " ", &rest);
+  char* passesToken = strtok_r(nullptr, " ", &rest);
+
+  const uint32_t totalSectors = activeCardSectors();
+
+  const uint32_t firstLba = (firstToken != nullptr && *firstToken != '\0')
+                                ? strtoul(firstToken, nullptr, 0) : 0;
+  const uint32_t lastLba = (lastToken != nullptr) ? strtoul(lastToken, nullptr, 0) : totalSectors;
+  const uint32_t points = (pointsToken != nullptr) ? strtoul(pointsToken, nullptr, 0) : 200;
+  const uint32_t sectors = (sectorsToken != nullptr) ? strtoul(sectorsToken, nullptr, 0) : 8;
+  const uint32_t passes = (passesToken != nullptr) ? strtoul(passesToken, nullptr, 0) : 3;
+
+  static ActiveBulkReader mapReader;
+
+  if (!mapReader.isReady() && !mapReader.begin(totalSectors)) {
+    logger.error("не вдалось визначити pdrv картки");
+    return;
+  }
+
+  logger.info("карта LBA %lu..%lu, точок %lu по %lu секторів, проходів %lu",
+              (unsigned long)firstLba, (unsigned long)lastLba, (unsigned long)points,
+              (unsigned long)sectors, (unsigned long)passes);
+  logger.info("'.' повторюване читання, 'x' мерехтить, 'E' не читається");
+
+  const uint32_t startMs = millis();
+  const uint32_t unstable =
+      mapReader.scanMap(firstLba, lastLba, points, sectors, (uint8_t)passes, logger);
+
+  logger.info("нестабільних точок: %lu з %lu (%.1f%%), %lu ms", (unsigned long)unstable,
+              (unsigned long)points, points > 0 ? (100.0 * unstable / points) : 0.0,
+              (unsigned long)(millis() - startMs));
+}
+
+#if !defined(SD_USE_SDMMC)
+// ---------------------------------------------------------------------------
+// Режим знімання образу картки (команда "sdimg").
+//
+// НАВІЩО ОКРЕМИЙ РЕЖИМ: картка і дисплей висять на СПІЛЬНІЙ SPI-шині
+// (SD_SCK=1/SD_MOSI=2 і піни панелі), а віддача образу - це години
+// безперервних читань по 32 KiB. Замість того, щоб синхронізувати кожну
+// транзакцію з дисплеєм, у цьому режимі loop() просто НЕ малює нічого:
+// шина повністю належить картці, а порядок доступу гарантований тим, що
+// і читання, і віддача в сокет ідуть з одного потоку (див. loop()).
+//
+// Побічний ефект: поки режим активний, екран показує останній кадр -
+// статичну заставку з адресою сервера, яку малюємо один раз при вмиканні.
+// ---------------------------------------------------------------------------
+
+SDImageServer sdImageServer(SDImageServerConfig{});
+static ActiveBulkReader sdImageBulkReader;
+
+bool isSdImageModeActive() { return sdImageServer.isActive(); }
+
+// Один раз малює заставку з адресою сервера - далі дисплей не чіпаємо.
+static void drawSdImageSplash() {
+  display.startWrite();
+  display.clear(TFT_BLACK);
+  display.setTextFont(2);
+  display.setTextSize(1);
+  display.drawText(6, 8, "SD IMAGE MODE", TFT_GREEN);
+  display.drawText(6, 32, WiFi.localIP().toString().c_str(), TFT_WHITE);
+  display.drawText(6, 56, "port 8080  /sd.img", TFT_WHITE);
+  display.drawText(6, 88, "display frozen:", TFT_YELLOW);
+  display.drawText(6, 110, "SPI belongs to card", TFT_YELLOW);
+  display.endWrite();
+  display.flush();
+}
+
+void dumpSdImage(const String& args) {
+  static TLogger logger("sdimg");
+
+  const String action = args.length() > 0 ? args : String("status");
+
+  if (action.equalsIgnoreCase("on")) {
+    if (sdImageServer.isActive()) {
+      logger.warn("сервер уже піднятий");
+      return;
+    }
+
+    YIELD_DISPLAY_BUS();
+
+    if (ACTIVE_SD.cardType() == CARD_NONE) {
+      logger.error("SD не змонтована - віддавати нічого (деталі: status sd+).");
+      return;
+    }
+
+    const size_t totalSectors = activeCardSectors();
+
+    if (!sdImageBulkReader.isReady() && !sdImageBulkReader.begin(totalSectors)) {
+      logger.error("не вдалось визначити pdrv картки - образ віддавати не можу");
+      return;
+    }
+
+    // Читач замикається на bulk-reader: пачками (CMD18) - утричі швидше за
+    // посекторне читання, див. заміри в SdSpiBulkReader.hpp.
+    sdImageServer.setSectorReader([](uint32_t lba, uint32_t count, uint8_t* out) {
+      return sdImageBulkReader.readSectors(lba, count, out);
+    });
+    sdImageServer.setTotalSectors(totalSectors);
+
+    if (!sdImageServer.begin()) {
+      return;
+    }
+
+    // Вимикаємо WiFi power save НА ЧАС ЗНІМАННЯ.
+    //
+    // Це не мікрооптимізація, а різниця в два порядки: у режимі
+    // WIFI_PS_MIN_MODEM (дефолт arduino-esp32) радіо просинається лише до
+    // beacon-а, тому RTT дорівнює beacon interval (~100 мс), і потік по
+    // TCP просідає до одиниць KiB/s - виміряно на цій платі: 7.2 KiB/s
+    // проти 1.35 MiB/s, які дає сама картка. Для передачі десятків GiB
+    // сон радіо неприйнятний; повертаємо його у "sdimg off".
+    WiFi.setSleep(false);
+    logger.info("WiFi power save вимкнено (RSSI %d dBm)", WiFi.RSSI());
+
+    // Заставку малюємо ПІСЛЯ успішного підняття сервера: інакше при відмові
+    // екран залишився б замороженим ні для чого.
+    drawSdImageSplash();
+
+    logger.info("дисплей заморожено, шина віддана картці");
+    logger.info("на хості: sudo qemu-nbd --read-only --connect=/dev/nbd0 \\");
+    logger.info("  'json:{\"driver\":\"raw\",\"file\":{\"driver\":\"http\",\"url\":\"http://%s:8080/sd.img\"}}'",
+                WiFi.localIP().toString().c_str());
+    return;
+  }
+
+  if (action.equalsIgnoreCase("off")) {
+    if (!sdImageServer.isActive()) {
+      logger.warn("сервер і так не піднятий");
+      return;
+    }
+
+    sdImageServer.end();
+
+    // Повертаємо енергозбереження радіо: у звичайному режимі плата не
+    // ганяє гігабайти, а WIFI_PS_NONE тримає приймач увімкненим постійно.
+    WiFi.setSleep(true);
+    logger.info("дисплей розморожено, WiFi power save повернено");
+    return;
+  }
+
+  // status
+  logger.info("сервер     : %s", sdImageServer.isActive() ? "активний" : "зупинений");
+
+  if (sdImageServer.isActive()) {
+    logger.info("адреса     : http://%s:8080/sd.img", WiFi.localIP().toString().c_str());
+  }
+
+  logger.info("образ      : %llu байт", (unsigned long long)sdImageServer.totalBytes());
+  logger.info("віддано    : %llu байт (запитів %lu)",
+              (unsigned long long)sdImageServer.bytesServed(),
+              (unsigned long)sdImageServer.requestsServed());
+  logger.info("збійних    : %lu секторів (останній LBA %lu)",
+              (unsigned long)sdImageServer.badSectors(),
+              (unsigned long)sdImageServer.lastBadLba());
+}
+#endif  // !SD_USE_SDMMC
+
 #undef ACTIVE_SD
 
-#if !defined(BOARD_ESP32_S3_LCD147)
+#if !defined(SD_USE_SDMMC)
 // ---------------------------------------------------------------------------
 // Низькорівневий пробник TF-картки по SPI (команда "sdprobe").
 //
@@ -1412,7 +2123,7 @@ void sdBitBang() {
   }
   Logger::info("============================================================");
 }
-#endif  // !BOARD_ESP32_S3_LCD147
+#endif  // !SD_USE_SDMMC
 #endif  // BOARD_HAS_SD
  
 void dumpLittleFSInfo() {
@@ -1475,7 +2186,7 @@ void dumpStatus(const String& section) {
     // перевірки меж (масив на FF_VOLUMES елементів). Читання за межами
     // масиву + розіменування сміттєвого вказівника = миттєвий reset плати.
     // Саме так "status sd" на незмонтованій картці перезавантажував пристрій.
-    #if defined(BOARD_ESP32_S3_LCD147)
+    #if defined(SD_USE_SDMMC)
     if (SD_MMC.cardType() == CARD_NONE) {
       Logger::warn("SD не змонтована - читати нічого (деталі: status sd+).");
     } else {
@@ -1520,6 +2231,27 @@ void setupSerialCommander() {
 
   commandHandler.registerCommand("scan", "scan WiFi networks", [](const String& args) { WiFi_scan(); });
 
+#if defined(HAS_FORCE_DOWNLOAD_BOOT)
+  commandHandler.registerCommand(
+      "bootloader", "reboot into ROM download mode (for flashing without BOOT/RESET buttons)",
+      [](const String& args) {
+        // НАВІЩО: на платах з native USB (S3 у режимі ARDUINO_USB_MODE=0)
+        // esptool не може сам перевести плату в завантажувач - послідовність
+        // DTR/RTS, якою він це робить через апаратний CDC, у TinyUSB не
+        // відтворюється, і прошивка падає з "No serial data received".
+        // Єдиною альтернативою лишалося тримати BOOT і тиснути RESET руками.
+        //
+        // Цей регістр - той самий шлях, яким користується сам ROM: прапорець
+        // примусового download-boot зберігається в RTC-домені, тому переживає
+        // перезапуск ядра.
+        Logger::warn("перезавантажуюсь у режим завантажувача (download mode)");
+        Serial.flush();
+        delay(100);
+        REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+        esp_restart();
+      });
+#endif
+
 #if SCREEN_LOG_TAIL_LINES > 0
   commandHandler.registerCommand(
       "history", "print the buffered tail of the log (last SCREEN_LOG_TAIL_LINES lines)",
@@ -1551,7 +2283,7 @@ void setupSerialCommander() {
         tail.resume();
       });
 #endif
-#if BOARD_HAS_SD && !defined(BOARD_ESP32_S3_LCD147)
+#if BOARD_HAS_SD && !defined(SD_USE_SDMMC)
   commandHandler.registerCommand(
       "sdprobe", "low-level TF card probe over SPI: sdprobe [force] (force demounts the card until reboot)",
       [](const String& args) { sdProbe(args.equalsIgnoreCase("force")); });
@@ -1561,6 +2293,40 @@ void setupSerialCommander() {
 
   commandHandler.registerCommand("sdbb", "bit-bang TF card probe (no SPI peripheral), raw byte dump",
                                  [](const String& args) { sdBitBang(); });
+#endif
+
+#if BOARD_HAS_SD
+  commandHandler.registerCommand("sdraw", "hexdump raw SD sectors, bypassing the filesystem: sdraw <lba> [count]",
+                                 [](const String& args) { dumpSdRaw(args); });
+
+  commandHandler.registerCommand("sdext4", "parse ext2/3/4 superblock of an MBR partition: sdext4 <1..4> [sb_lba]",
+                                 [](const String& args) { dumpSdExt4(args); });
+
+  commandHandler.registerCommand("sdbench", "measure raw sequential read speed: sdbench [lba] [sectors] [chunk]",
+                                 [](const String& args) { dumpSdBench(args); });
+
+  commandHandler.registerCommand("sdcrc", "CRC32 of a sector range read on-device: sdcrc <lba> <count> [chunk] [vote_passes]",
+                                 [](const String& args) { dumpSdCrc(args); });
+
+  commandHandler.registerCommand(
+      "sdverify", "check read repeatability, map unstable areas: sdverify <lba> <sectors> [chunk] [passes] [delay_ms]",
+      [](const String& args) { dumpSdVerify(args); });
+
+  commandHandler.registerCommand(
+      "sdmap", "degradation map across the card: sdmap [first_lba] [last_lba] [points] [sectors] [passes]",
+      [](const String& args) { dumpSdMap(args); });
+
+#if !defined(SD_USE_SDMMC)
+  commandHandler.registerCommand(
+      "sdimg", "serve the whole card over HTTP for imaging (freezes the display): sdimg on|off|status",
+      [](const String& args) { dumpSdImage(args); });
+#endif
+
+#if defined(BOARD_ESP32_S3_LCD147)
+  commandHandler.registerCommand(
+      "sdmsc", "expose the card to the host as a read-only USB drive: sdmsc on|off|status",
+      [](const String& args) { dumpSdMsc(args); });
+#endif
 #endif
 
   commandHandler.registerCommand("flip", "flip display (180)", [](const String& args) { display_flip(); });
@@ -2721,6 +3487,23 @@ void setup() {
 #endif
 int wifi_state = 0;
 void loop() {
+#if defined(BOARD_ESP32_S3_LCD147)
+  remountCardIfMscAsked();
+#endif
+
+#if BOARD_HAS_SD && !defined(SD_USE_SDMMC)
+  // Режим знімання образу: дисплей навмисно не малюється - SPI-шина спільна
+  // з карткою, і будь-яка транзакція панелі посеред читання сектора зіпсувала
+  // б і кадр, і дані. Serial-команди обслуговуємо далі, щоб режим можна було
+  // вимкнути ("sdimg off").
+  if (isSdImageModeActive()) {
+    sdImageServer.handleClient();
+    commandHandler.update();
+    delay(1);
+    return;
+  }
+#endif
+
   display.startWrite();
   PrintQueue::flush();
   doPing();

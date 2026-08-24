@@ -8,3 +8,6 @@
 .vscode/ipch
 compile_commands.json
 secrets.ini
+
+# Персональні налаштування Claude Code (hooks, попапи) - не для команди
+.claude/settings.local.json

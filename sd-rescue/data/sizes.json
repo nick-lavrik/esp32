@@ -1,0 +1,79 @@
+{
+ "/home/nick/Work": {
+  "files": 495,
+  "bytes": 269460257,
+  "ok": 439,
+  "bad_csum": 56,
+  "insane": 0
+ },
+ "/home/nick/Bookshelf": {
+  "files": 188,
+  "bytes": 5652799601,
+  "ok": 176,
+  "bad_csum": 12,
+  "insane": 0
+ },
+ "/home/nick/Downloads": {
+  "files": 4,
+  "bytes": 3037101111,
+  "ok": 4,
+  "bad_csum": 0,
+  "insane": 0
+ },
+ "/home/nick/.config": {
+  "files": 799,
+  "bytes": 444070498,
+  "ok": 689,
+  "bad_csum": 110,
+  "insane": 0
+ },
+ "/home/nick/sdk": {
+  "files": 4649,
+  "bytes": 35884918,
+  "ok": 4528,
+  "bad_csum": 121,
+  "insane": 0
+ },
+ "/root": {
+  "files": 14,
+  "bytes": 11652,
+  "ok": 14,
+  "bad_csum": 0,
+  "insane": 0
+ },
+ "/etc": {
+  "files": 1045,
+  "bytes": 7542530,
+  "ok": 892,
+  "bad_csum": 153,
+  "insane": 0
+ },
+ "/boot": {
+  "files": 212,
+  "bytes": 470517521,
+  "ok": 187,
+  "bad_csum": 25,
+  "insane": 0
+ },
+ "/opt": {
+  "files": 1046,
+  "bytes": 421490433,
+  "ok": 852,
+  "bad_csum": 194,
+  "insane": 0
+ },
+ "/media": {
+  "files": 1566,
+  "bytes": 3248341001,
+  "ok": 1557,
+  "bad_csum": 9,
+  "insane": 0
+ },
+ "/home/nick": {
+  "files": 9874,
+  "bytes": 12539382354,
+  "ok": 9457,
+  "bad_csum": 417,
+  "insane": 0
+ }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "SDImageServer",
+  "version": "0.1.0",
+  "description": "HTTP server exposing an SD card as a raw disk image (Range requests, qemu-nbd compatible)",
+  "keywords": ["esp32", "sd", "sdcard", "raw", "http", "range", "nbd", "recovery"],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  },
+  "export": {
+    "include": [
+      "*.hpp",
+      "*.cpp",
+      "library.json"
+    ]
+  }
+}
