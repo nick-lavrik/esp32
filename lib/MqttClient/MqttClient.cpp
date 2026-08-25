@@ -24,8 +24,14 @@ MqttClient::MqttClient(const MqttConfig& config)
       // PicoMQTT - див. коментар біля _picoWifiClient в .hpp. Templated
       // конструктор: Client(ClientType&, host, port, id, user, password,
       // reconnect_interval_millis, keep_alive_millis, socket_timeout_millis).
-      , _mqttClient(_picoWifiClient, config.host, config.port, config.clientId,
-                  config.username, config.password, 5000, 60000, 5000)
+      // config.useTls -> той самий templated-конструктор, але з
+      // WiFiClientSecure. Налаштування самого TLS (setInsecure/setCACert) -
+      // у begin(), бо на момент роботи списку ініціалізації _config ще не
+      // гарантовано ініціалізований раніше за цей член.
+      , _mqttClient(config.useTls ? static_cast<::Client&>(_picoSecureClient)
+                                  : static_cast<::Client&>(_picoWifiClient),
+                  config.host, config.port, config.clientId,
+                  config.username, config.password, config.reconnectIntervalMs, 60000, 5000)
 #endif
      {
 #if defined(ESP32)
@@ -64,7 +70,9 @@ const MqttKeyGenerator& MqttClient::keyGenerator() const {
 }
 
 std::string MqttClient::resolveTopic(const char* topic) const {
-  if (_keyGenerator != nullptr) {
+  // useKeyGenerator == false -> топік іде брокеру байт-у-байт (EcoFlow та інші
+  // брокери з жорсткою схемою топіків, де провідний '/' значущий).
+  if (_config.useKeyGenerator && _keyGenerator != nullptr) {
     return _keyGenerator->key(topic);
   }
   return topic != nullptr ? std::string(topic) : std::string();
@@ -106,8 +114,9 @@ void MqttClient::begin() {
   // assert() в xTaskCreatePinnedToCore. xTaskCreate сумісний з усіма
   // варіантами (single-core і dual-core), планувальник сам обирає ядро.
   _taskShouldRun = true;
-  xTaskCreate(&MqttClient::networkTaskTrampoline, "mqtt-net",
-              /*stackSize=*/8192, this, /*priority=*/5, &_networkTaskHandle);
+  xTaskCreate(&MqttClient::networkTaskTrampoline,
+              _config.taskName != nullptr ? _config.taskName : "mqtt-net",
+              _config.taskStackSize, this, /*priority=*/5, &_networkTaskHandle);
 #endif
 }
 
@@ -232,6 +241,16 @@ void MqttClient::begin() {
 
   if (_keyGenerator == nullptr) { _keyGenerator = &_defaultKeyGenerator; }
 
+  if (_config.useTls) {
+    // _picoSecureClient уже прив'язаний до _mqttClient у конструкторі -
+    // тут лише режим перевірки сертифіката.
+    if (_config.caCert != nullptr) {
+      _picoSecureClient.setCACert(_config.caCert);
+    } else {
+      _picoSecureClient.setInsecure();
+    }
+  }
+
   // Базова конфігурація клієнта
   _mqttClient.host = _config.host;
   _mqttClient.port = _config.port;
@@ -284,15 +303,31 @@ void MqttClient::begin() {
   // колбека. Використовувати enqueueIncoming(), як зроблено для PubSubClient
   // в handleMessage() нижче, щоб колбеки addListener() лишались у головному
   // потоці.
-  _mqttClient.SubscribedMessageListener::subscribe(resolveTopic("#").c_str(), [this](const char *t, const void* m, const size_t s) {
+  // Root-підписка: один топік, далі роздача по addListener()-фільтрах.
+  // Для стороннього брокера це НЕ "#" (див. MqttConfig::rootSubscribeTopic).
+  const char* rootTopic = _config.rootSubscribeTopic != nullptr ? _config.rootSubscribeTopic : "#";
+  _mqttClient.SubscribedMessageListener::subscribe(resolveTopic(rootTopic).c_str(), [this](const char *t, const void* m, const size_t s) {
     this->enqueueIncoming(t, (const uint8_t*)m, s);
     // this->dispatchMessage(t, (const uint8_t*)m, s);
-  }, 2 * 1024);
+  }, _config.rootSubscribeBufferSize);
 
 
   _mqttClient.begin();
 
 #if defined(ESP32)
+  startNetworkTask();
+#endif
+}
+
+#if defined(ESP32)
+void MqttClient::startNetworkTask() {
+  // Страховка від двох тасків на одному клієнті: попередній міг ще не вийти
+  // (suspend() з таймаутом, аварійний шлях).
+  const uint32_t start = millis();
+  while (_taskRunning && millis() - start < kSuspendTimeoutMs) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+
   // xTaskCreate (без пінінгу) - навмисно, не xTaskCreatePinnedToCore(core=1):
   // ESP32-C6/H2 (RISC-V) - single-core, core=1 там не існує і валить
   // assert() в xTaskCreatePinnedToCore. xTaskCreate сумісний з усіма
@@ -306,10 +341,64 @@ void MqttClient::begin() {
   // на ДРУГОМУ такому виклику поспіль (перший, CONNACK, встигає; SUBACK -
   // ні). Пріоритет 1 (як головний loop()) залишає більше "повітря" для
   // WiFi/lwIP стеку. Якщо це не допоможе - наступний крок: tskIDLE_PRIORITY+1.
-  xTaskCreate(&MqttClient::networkTaskTrampoline, "mqtt-net",
-              /*stackSize=*/8192, this, /*priority=*/tskIDLE_PRIORITY + 1, &_networkTaskHandle);
-#endif
+  xTaskCreate(&MqttClient::networkTaskTrampoline,
+              _config.taskName != nullptr ? _config.taskName : "mqtt-net",
+              _config.taskStackSize, this, /*priority=*/tskIDLE_PRIORITY + 1, &_networkTaskHandle);
 }
+
+bool MqttClient::suspend() {
+  if (_suspended) { return true; }
+
+  // 1. Просимо таск вийти і ЧЕКАЄМО фактичного виходу: доки він живий, він -
+  //    єдиний власник _mqttClient, і чіпати клієнт звідси не можна.
+  //
+  //    Таймаут з ЗАПАСОМ: одна ітерація таска - це _mqttClient.loop(), який
+  //    всередині може блокуватись на весь socket_timeout_millis (5 с у
+  //    конструкторі) на wait_for_reply, плюс vTaskDelay(100). Колишні 2 с
+  //    були МЕНШІ за це вікно, тож під навантаженням suspend() виходив по
+  //    таймауту при живому таску - і далі два потоки писали в один сокет.
+  _taskShouldRun = false;
+  const uint32_t start = millis();
+  while (_taskRunning && millis() - start < kSuspendTimeoutMs) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+
+  if (_taskRunning) {
+    // Аномалія: таск завис глибше, ніж дозволяє socket_timeout. Відкочуємось -
+    // хай працює далі, ніж ризикувати гонкою на сокеті.
+    _taskShouldRun = true;
+    Logger::error("[MQTT] %s: мережевий таск не зупинився за %u мс - suspend скасовано",
+                  _config.taskName != nullptr ? _config.taskName : "mqtt",
+                  (unsigned)kSuspendTimeoutMs);
+    return false;
+  }
+
+  _suspended = true;
+  _networkTaskHandle = nullptr;  // таск сам зробив vTaskDelete(nullptr)
+
+  // 2. Тепер безпечно рвемо з'єднання з головного потоку.
+  _mqttClient.disconnect();
+  _connected.store(false, std::memory_order_relaxed);
+
+  // 3. Головне заради чого все: stop() -> stop_ssl_socket() -> mbedtls_ssl_free()
+  //    + mbedtls_ssl_config_free(). Без цього буфери сесії лишаються в heap
+  //    навіть після disconnect().
+  if (_config.useTls) {
+    _picoSecureClient.stop();
+  } else {
+    _picoWifiClient.stop();
+  }
+  return true;
+}
+
+void MqttClient::resume() {
+  if (!_suspended) { return; }
+  _suspended = false;
+  // Слухачі й черги на місці; PicoMQTT сам перепідключиться у своєму loop(),
+  // а resubscribeAll() з connected_callback поновить підписки.
+  startNetworkTask();
+}
+#endif
 
 void MqttClient::loop() {
 #if defined(ESP32)
@@ -358,11 +447,13 @@ void MqttClient::networkTaskLoop() {
   // брокера, потім спотворений запис читався брокером як UNSUBSCRIBE
   // невідповідного топіка, врешті протокол розсинхронізовувався і
   // з'єднання рвалось по socket_timeout).
+  _taskRunning = true;
   while (_taskShouldRun) {
     drainOutgoingQueue();
     _mqttClient.loop();
     vTaskDelay(pdMS_TO_TICKS(100));
   }
+  _taskRunning = false;  // сигнал для suspend(), що клієнт більше нікому не належить
   vTaskDelete(nullptr);
 }
 #endif
@@ -394,6 +485,15 @@ bool MqttClient::connect() {
 // ==========================================
 // СПІЛЬНІ МЕТОДИ ДЛЯ ПУБЛІКАЦІЙ ТА ЛІСТЕНЕРІВ
 // ==========================================
+
+#if !(defined(ESP32) && __has_include(<PicoMQTT.h>))
+// Пауза TLS-сесії має сенс лише для ESP32+PicoMQTT (див. коментар у .hpp);
+// на решті конфігурацій - явний no-op, щоб виклики лишались переносними.
+// true - "паузити нічого": постійної TLS-сесії у власному таску тут немає.
+bool MqttClient::suspend() { return true; }
+void MqttClient::resume() {}
+void MqttClient::startNetworkTask() {}
+#endif
 
 bool MqttClient::flushOutgoing(uint32_t timeoutMs) {
 #if defined(ESP32) && __has_include(<PicoMQTT.h>)
@@ -432,6 +532,12 @@ void MqttClient::reportDroppedMessages() {
   if (incoming > 0 || outgoing > 0) {
     Logger::warn("[MQTT] черга переповнена, відкинуто: %u вхідних, %u вихідних",
                  (unsigned)incoming, (unsigned)outgoing);
+  }
+
+  uint32_t denied = _subscribeDenied.exchange(0, std::memory_order_relaxed);
+  if (denied > 0) {
+    Logger::warn("[MQTT] %s: брокер відхилив %u підписок (SUBACK=0x80) - перевір права акаунта",
+                 _config.taskName != nullptr ? _config.taskName : "mqtt", (unsigned)denied);
   }
 #endif
 }
@@ -671,7 +777,13 @@ void MqttClient::resubscribeAll() {
     _mqttClient.subscribe(topic.c_str());
 #elif __has_include(<PicoMQTT.h>)
     // Явно кваліфіковано BasicClient:: - див. коментар у drainOutgoingQueue().
-    _mqttClient.PicoMQTT::BasicClient::subscribe(topic.c_str());
+    // qos_granted == 0x80 - брокер ВІДХИЛИВ підписку (ACL); мовчки ковтати це
+    // не можна, інакше клієнт виглядає справним і просто нічого не отримує.
+    uint8_t qosGranted = 0;
+    bool accepted = _mqttClient.PicoMQTT::BasicClient::subscribe(topic.c_str(), 0, &qosGranted);
+    if (!accepted || qosGranted == 0x80) {
+      _subscribeDenied.fetch_add(1, std::memory_order_relaxed);
+    }
 #endif
   }
 }

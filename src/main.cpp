@@ -1,11 +1,13 @@
 // main.cpp
 //
+// pio run -t compiledb
 // esptool --port /dev/ttyUSB0 --after hard-reset chip-id
 // python3 -m serial.tools.miniterm --echo --non-exclusive /dev/ttyUSB0 115200
 // docker run --rm -it -p 1883:1883 -p 9883:9883 eclipse-mosquitto mosquitto -v -c /mosquitto/config/mosquitto.conf
 // mosquitto_sub -h broker.hivemq.com -p 1883 -t "mykola-lavryk/#" -F "@Y-@m-@d @H:@M:@S [%q/%r] %-50t %p" # qos/retain
 // mosquitto_pub -h 192.168.1.71 -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock off"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6-lcd096 -m "clock on"
+// mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock on"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-ttgo-t1 -m "clock on"
 //
 // cls && export PORT=/dev/ttyACM1 && pio run --monitor-port $PORT --upload-port $PORT -e ttgo-t1 -t upload -t monitor
@@ -130,6 +132,13 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <RouterClientListIterator.hpp>
 
 #include "ScreenLogTail.hpp"
+
+// HAS_ECOFLOW_CLIENT приходить з build_flags (див. platformio.ini, env з
+// PicoMQTT). Свідомо НЕ виводимо його тут з __has_include: значення має бути
+// однаковим і для компілятора, і для IDE-індексатора.
+#if HAS_ECOFLOW_CLIENT
+#include "EcoFlow/EcoFlowClient.hpp"
+#endif
 
 #include "BackgroundImages.hpp"
 #include "SizeFormatter.hpp"
@@ -260,6 +269,24 @@ MqttClient mqtt(makeMqttConfig());
 // runtime override поверх MqttConfig::prefix; заповнюється лише за наявності
 // CFG_MQTT_TOPIC_PREFIX в ConfigStorage, див. setupMqttClient()
 MqttKeyGenerator mqttTopicPrefixOverride;
+#endif
+
+#if HAS_ECOFLOW_CLIENT
+EcoFlowClient::Config makeEcoFlowConfig() {
+  EcoFlowClient::Config config;
+  config.mqttHost = ECOFLOW_MQTT_HOST;
+  config.mqttPort = ECOFLOW_MQTT_PORT;
+  config.mqttUsername = ECOFLOW_MQTT_USERNAME;
+  config.mqttPassword = ECOFLOW_MQTT_PASSWORD;
+  config.accessKey = ECOFLOW_ACCESS_KEY;
+  config.secretKey = ECOFLOW_SECRET_KEY;
+  // Окремий id від основного MQTT-клієнта: збіг id у межах акаунта змушує
+  // брокер вибивати клієнтів по черзі.
+  config.clientId = MQTT_CLIENT_ID "-ecoflow";
+  return config;
+}
+
+EcoFlowClient ecoflow(makeEcoFlowConfig());
 #endif
 
 LittleFsStaticSource littleFsSource(LittleFS);
@@ -605,6 +632,134 @@ void setupLittleFS() {
     Logger::info("LittleFS mounted successfully (done)");
   }
 }
+
+#if HAS_ECOFLOW_CLIENT
+// Дамп телеметрії EcoFlow у лог. Вимкнений за замовчуванням: пристрій шле
+// quota кілька разів на секунду і десятками параметрів у кожному повідомленні.
+bool ecoflowVerbose = false;
+
+void setupEcoFlow() {
+  static TLogger _logger{"ecoflow"};
+
+  ecoflow.onQuota([](const String& serialNumber, JsonDocument& doc) {
+    if (!ecoflowVerbose) { return; }
+
+    // Схема повідомлення: {"id":..,"version":"1.0","timestamp":..,"params":{..}}
+    // Набір ключів у params залежить від моделі, тому нічого не інтерпретуємо -
+    // лише показуємо, що саме прийшло.
+    JsonObjectConst params = doc["params"].as<JsonObjectConst>();
+    size_t count = params.isNull() ? 0 : params.size();
+    _logger.info("quota %s params:%u", serialNumber.c_str(), (unsigned)count);
+
+    if (!ecoflowVerbose) { return; }
+
+    for (JsonPairConst kv : params) {
+      String value;
+      serializeJson(kv.value(), value);
+      _logger.debug("  %-32s = %s", kv.key().c_str(), value.c_str());
+    }
+  });
+
+  ecoflow.onStatus([](const String& serialNumber, JsonDocument& doc) {
+    // {"id":..,"version":"1.0","timestamp":..,"params":{"status":0|1}}
+    int status = doc["params"]["status"] | -1;
+    _logger.info("status %s -> %s", serialNumber.c_str(),
+                 status == 1 ? "online" : (status == 0 ? "offline" : "unknown"));
+  });
+
+  // Старт ВІДКЛАДЕНИЙ до синхронізації часу. Причина: перед підпискою треба
+  // отримати серійні номери через REST, а підпис EcoFlow містить timestamp -
+  // з незапущеним годинником сервер відхиляє запит (та й TLS-хендшейк на
+  // 9-й секунді після ввімкнення ще падає з connect failed: -1).
+  //
+  // Чому опитування, а не колбек ntp.addCallback(): той викликається з
+  // SNTP-таска, а звідти не можна ні HTTPS (стек), ні EventDispatcher (він у
+  // своєму ж хедері позначений як НЕ потокобезпечний). Будь-який подієвий
+  // варіант однаково звівся б до передачі сигналу в головний потік - а
+  // TaskController уже крутиться саме там, тож перевірка isSynced() раз на
+  // 5 с робить те саме без зайвої машинерії.
+  //
+  // Задача знімає сама себе після вдалого старту; доти повторює спроби -
+  // це заодно покриває тимчасову відсутність мережі.
+  static TaskId ecoflowStartTaskId = 0;
+  ecoflowStartTaskId = scheduler.addCronTask(5000, []() {
+    if (ecoflow.isStarted()) {
+      scheduler.removeTask(ecoflowStartTaskId);
+      return;
+    }
+    if (!ntp.isSynced() || ecoflow.isBusy() || !WiFi.isConnected()) {
+      return;
+    }
+    _logger.info("час синхронізовано - піднімаємо EcoFlow");
+    ecoflow.beginAsync();
+  });
+
+  commandHandler.registerCommand("ecoflow", "show EcoFlow cloud MQTT status", [](const String args) {
+    _logger.info("connected = %s, account = %s", ecoflow.isConnected() ? "yes" : "no",
+                 ecoflow.account().c_str());
+    _logger.info("broker = %s:%d, verbose = %s", ECOFLOW_MQTT_HOST, ECOFLOW_MQTT_PORT,
+                 ecoflowVerbose ? "on" : "off");
+    // TLS-сесія - найбільший споживач heap у цьому клієнті, тому цифри тут
+    // корисніші за загальний 'dump-heap': саме вони кажуть, чи пройде REST.
+    _logger.info("heap = %u Б вільно, найбільший блок = %u Б", (unsigned)ESP.getFreeHeap(),
+                 (unsigned)ESP.getMaxAllocHeap());
+    if (ecoflow.lastError().length() > 0) {
+      _logger.warn("last error: %s", ecoflow.lastError().c_str());
+    }
+
+    _logger.info("отримано повідомлень = %u, останній топік = %s", ecoflow.messageCount(),
+                 ecoflow.lastTopic().length() > 0 ? ecoflow.lastTopic().c_str() : "(жодного)");
+
+    const auto& devices = ecoflow.devices();
+    if (devices.empty()) {
+      _logger.info("devices: (жодного ще не бачили в топіках)");
+    }
+    for (const auto& device : devices) {
+      _logger.info("  %s %-20s %s", device.serialNumber.c_str(), device.name.c_str(),
+                   device.online ? "online" : "offline");
+    }
+  });
+
+  // Обидві REST-команди йдуть у власний таск: TLS-хендшейк не вміщується
+  // комфортно в стек головного loopTask, а пауза MQTT на час запиту заблокувала
+  // б sketch loop() на кілька секунд (дисплей/тач завмирали б).
+  commandHandler.registerCommand(
+    "ecoflow-devices", "fetch EcoFlow device list over REST (async, result in log)",
+    [](const String args) {
+      if (!ecoflow.refreshDevicesAsync()) {
+        _logger.error("не запущено: %s", ecoflow.lastError().c_str());
+        return;
+      }
+      _logger.info("запит пішов, результат буде в лозі (MQTT на паузі ~2-5 с)");
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-verbose", "toggle EcoFlow telemetry dump: ecoflow-verbose [on|off]",
+    [](const String args) {
+      String value = args;
+      value.trim();
+      if (value.length() > 0) {
+        ecoflowVerbose = (value == "on" || value == "1" || value == "true");
+      } else {
+        ecoflowVerbose = !ecoflowVerbose;
+      }
+      _logger.info("verbose = %s", ecoflowVerbose ? "on" : "off");
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-cert", "re-issue EcoFlow MQTT credentials over REST (async, result in log)",
+    [](const String args) {
+      if (!ecoflow.refreshCredentialsAsync()) {
+        _logger.error("не запущено: %s", ecoflow.lastError().c_str());
+        return;
+      }
+      _logger.info("запит пішов, результат буде в лозі (MQTT на паузі ~2-5 с)");
+    }
+  );
+}
+#endif
 
 void setupMqttClient() {
   #if HAS_MQTT_CLIENT
@@ -3467,6 +3622,11 @@ void setup() {
   setupTaskCommander();
   setupLightSensor();
   setupMqttClient();
+#if HAS_ECOFLOW_CLIENT
+  // Після setupNtpService(): REST-підпис EcoFlow використовує timestamp, а
+  // MQTT-хендшейк - перевірку строку дії сертифіката.
+  setupEcoFlow();
+#endif
   setupFlipButton();
   setupWiFiIcon();
   loadConfig();
@@ -3539,6 +3699,9 @@ void loop() {
     uint32_t dt = millis() - t0;
     if (dt > 200) Logger::warn("mqtt.loop() took %ums", dt);
     // --- В loop(), замість (або поруч з) mqtt.loop() на час тесту: ---
+#if HAS_ECOFLOW_CLIENT
+    ecoflow.loop();
+#endif
   }
   #endif
 

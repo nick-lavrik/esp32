@@ -10,6 +10,8 @@
 #include <WiFiClientSecure.h>
 #elif __has_include(<PicoMQTT.h>)
 #include <PicoMQTT.h>
+#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #endif
 
 #if defined(ESP32)
@@ -75,6 +77,22 @@ public:
   // піти до брокера. Для PubSubClient-гілки та ESP8266 - завжди true (там
   // publish синхронний).
   bool flushOutgoing(uint32_t timeoutMs = 500);
+
+  // Тимчасово знімає мережевий таск і РВЕ TLS-сесію, звільняючи mbedTLS-буфери
+  // (~32 КБ heap на сесію: CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=16384 на кожен
+  // напрямок). Потрібно, бо ESP32-C6 не тягне дві одночасні TLS-сесії: спроба
+  // підняти HTTPS поверх живого MQTT-over-TLS падає в mbedTLS з
+  // "BIGNUM - Memory allocation failed" ще на RSA-операції хендшейку.
+  //
+  // Черги повідомлень і список слухачів зберігаються - resume() перепідключає
+  // клієнт і повторно підписується (resubscribeAll() з connected_callback).
+  // Лише ESP32 + PicoMQTT; на інших конфігураціях - no-op.
+  // Повертає false, якщо мережевий таск не завершився у відведений час: тоді
+  // клієнт НЕ чіпається і лишається працювати. Краще відмовити у REST, ніж
+  // писати в сокет одночасно з живим таском - це ламає MQTT-потік намертво.
+  bool suspend();
+  void resume();
+  bool isSuspended() const { return _suspended; }
 
   bool publish(const char* topic, const char* payload, bool retained = false);
   bool publish(const char* topic, const uint8_t* payload, unsigned int length, bool retained = false);
@@ -186,6 +204,13 @@ private:
   // але явний WiFiClient-член - робочий обхідний шлях, підтверджений
   // ізольованим тестом.
   WiFiClient _picoWifiClient;
+  // Окремий TLS-сокет для config.useTls. PicoMQTT приймає будь-який ::Client
+  // через templated-конструктор, тому WiFiClientSecure підставляється замість
+  // WiFiClient без змін у самій бібліотеці. Обидва члени існують завжди
+  // (обираємо один у конструкторі) - інакше довелось би розводити типи
+  // шаблоном по всьому класу. Ціна - зайвий порожній WiFiClientSecure у
+  // plain-режимі: він не робить нічого, доки не викликано connect().
+  WiFiClientSecure _picoSecureClient;
   PicoMQTT::Client _mqttClient;
 #endif
 
@@ -204,6 +229,11 @@ private:
   // розбирає її лише loop() головного потоку. Достатньо однієї затримки в
   // loop() (ефект зображення, "status sd", блокуючий doPing()) під потоком
   // повідомлень - і купа закінчувалась.
+  // Скільки чекати виходу мережевого таска в suspend(). Має бути помітно
+  // більшим за socket_timeout_millis (5 с), інакше suspend() повертається при
+  // ЖИВОМУ таску - див. коментар у MqttClient::suspend().
+  static constexpr uint32_t kSuspendTimeoutMs = 10000;
+
   static constexpr size_t kMaxIncomingQueue = 32;
   static constexpr size_t kMaxOutgoingQueue = 32;
 
@@ -239,6 +269,13 @@ private:
   std::atomic<uint32_t> _droppedIncoming{0};
   std::atomic<uint32_t> _droppedOutgoing{0};
 
+  // Скільки SUBSCRIBE брокер відхилив (SUBACK = 0x80). Без цього лічильника
+  // відмова за ACL виглядає як повна тиша при isConnected() == true - клієнт
+  // "підключений", підписки прийняті на вигляд, а повідомлень нема. Саме так
+  // поводиться EcoFlow, коли accessKey відкликано: конект проходить, права -
+  // порожні. Інкрементує мережевий таск, читає й скидає loop().
+  std::atomic<uint32_t> _subscribeDenied{0};
+
 #if __has_include(<PicoMQTT.h>)
   // Черга вихідних команд (тільки PicoMQTT) - див. коментар вище біля
   // _networkMutex. Розбирається виключно в networkTaskLoop().
@@ -251,6 +288,15 @@ private:
 #endif
 
   volatile bool _taskShouldRun = false;
+  // Ставиться самим мережевим таском: true на вході в networkTaskLoop(), false
+  // перед vTaskDelete(nullptr). Дозволяє suspend() дочекатися РЕАЛЬНОГО виходу
+  // таска, перш ніж чіпати _mqttClient з головного потоку (інакше два потоки
+  // одночасно писали б у сокет - див. коментар у networkTaskLoop()).
+  volatile bool _taskRunning = false;
+  bool _suspended = false;
+
+  // Спільна частина begin()/resume(): піднімає мережевий таск.
+  void startNetworkTask();
 
   static void networkTaskTrampoline(void* param);
   void networkTaskLoop();
