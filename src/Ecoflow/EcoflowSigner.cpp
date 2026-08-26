@@ -1,8 +1,8 @@
-#include "EcoFlowSigner.hpp"
+#include "EcoflowSigner.hpp"
 
 #include <mbedtls/md.h>
 
-String EcoFlowSigner::hmacSha256Hex(const String &secretKey, const String &message) {
+String EcoflowSigner::hmacSha256Hex(const String &secretKey, const String &message) {
   unsigned char hmacResult[32];
 
   mbedtls_md_context_t ctx;
@@ -23,7 +23,7 @@ String EcoFlowSigner::hmacSha256Hex(const String &secretKey, const String &messa
   return hex;
 }
 
-String EcoFlowSigner::buildCanonicalString(const String &accessKey, const String &nonce,
+String EcoflowSigner::buildCanonicalString(const String &accessKey, const String &nonce,
                                            const String &timestamp,
                                            const std::map<String, String> &extraParams) {
   String canonical;
@@ -37,7 +37,7 @@ String EcoFlowSigner::buildCanonicalString(const String &accessKey, const String
   return canonical;
 }
 
-String EcoFlowSigner::sign(const String &accessKey, const String &secretKey, const String &nonce,
+String EcoflowSigner::sign(const String &accessKey, const String &secretKey, const String &nonce,
                            const String &timestamp, const std::map<String, String> &extraParams) {
   String canonical = buildCanonicalString(accessKey, nonce, timestamp, extraParams);
   return hmacSha256Hex(secretKey, canonical);

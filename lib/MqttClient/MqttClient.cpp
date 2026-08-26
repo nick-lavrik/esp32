@@ -277,7 +277,7 @@ void MqttClient::begin() {
 
   _mqttClient.connected_callback = [this]() {
     _connected.store(true, std::memory_order_relaxed);
-    Serial.println("[MQTT] Connected to broker successfully!");
+    Serial.printf("[%s:%d] Connected to broker successfully!\n", _mqttClient.host.c_str(), _mqttClient.port);
     this->resubscribeAll();
 
     bool hasOnlineMessage = _config.lwtOnlineMessage != nullptr && _config.lwtOnlineMessage[0] != '\0';
@@ -289,12 +289,12 @@ void MqttClient::begin() {
 
   _mqttClient.disconnected_callback = [this]() {
     _connected.store(false, std::memory_order_relaxed);
-    Serial.println("[MQTT] Disconnected from broker.");
+    Serial.printf("[%s:%d] Disconnected from broker\n", _mqttClient.host.c_str(), _mqttClient.port);
   };
 
   _mqttClient.connection_failure_callback = [this]() {
     _connected.store(false, std::memory_order_relaxed);
-    Serial.println("[MQTT] Connect fail.");
+    Serial.printf("[%s:%d] Connect fail.\n", _mqttClient.host.c_str(), _mqttClient.port);
   };
 
   // TODO: коли буде підключено per-topic message dispatch для PicoMQTT
@@ -498,6 +498,15 @@ void MqttClient::resume() {}
 void MqttClient::startNetworkTask() {}
 #endif
 #endif
+
+size_t MqttClient::networkTaskStackHeadroom() const {
+#if defined(ESP32)
+  if (_networkTaskHandle == nullptr) { return 0; }
+  return uxTaskGetStackHighWaterMark(_networkTaskHandle) * sizeof(StackType_t);
+#else
+  return 0;
+#endif
+}
 
 bool MqttClient::flushOutgoing(uint32_t timeoutMs) {
 #if defined(ESP32) && __has_include(<PicoMQTT.h>)

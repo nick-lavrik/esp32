@@ -12,7 +12,7 @@
 // {account} - це certificateAccount з GET /iot-open/sign/certification
 //             (він же MQTT username), НЕ accessKey.
 // {sn}      - серійний номер пристрою з GET /iot-open/sign/device/list.
-namespace EcoFlowMqttTopics {
+namespace EcoflowMqttTopics {
 
 // Періодична телеметрія пристрою (основне джерело даних).
 inline String quota(const String &account, const String &sn) {
@@ -40,6 +40,13 @@ inline String getReply(const String &account, const String &sn) {
     return "/open/" + account + "/" + sn + "/get_reply";
 }
 
+// Приватний API застосунку: ОДИН топік на пристрій, у якому приходить усе
+// (для DELTA mini це 201 поле проти 23 в Open Platform). Акаунт у шляху не
+// фігурує - права визначаються самим підключенням.
+inline String appProperty(const String &sn) {
+    return "/app/device/property/" + sn;
+}
+
 // Root-підписка одразу на всі топіки акаунта. ACL EcoFlow прив'язаний до
 // certificateAccount, тому '#' у межах свого акаунта дозволений (на відміну
 // від глобального "#", який брокер відхиляє).
@@ -47,4 +54,4 @@ inline String accountWildcard(const String &account) {
     return "/open/" + account + "/#";
 }
 
-}  // namespace EcoFlowMqttTopics
+}  // namespace EcoflowMqttTopics

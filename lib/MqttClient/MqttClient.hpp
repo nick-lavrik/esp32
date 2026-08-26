@@ -94,6 +94,12 @@ public:
   void resume();
   bool isSuspended() const { return _suspended; }
 
+  // Скільки байтів стеку мережевого таска НЕ використано в найгірший момент.
+  // Потрібно, щоб підбирати MqttConfig::taskStackSize за фактом, а не навмання:
+  // TLS-хендшейк - найглибше місце, і промах тут = крах у мережевому таску.
+  // 0, якщо таска немає (не ESP32 або клієнт на паузі).
+  size_t networkTaskStackHeadroom() const;
+
   bool publish(const char* topic, const char* payload, bool retained = false);
   bool publish(const char* topic, const uint8_t* payload, unsigned int length, bool retained = false);
   bool subscribe(const char* topic);

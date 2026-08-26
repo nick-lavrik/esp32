@@ -8,7 +8,11 @@
 // mosquitto_pub -h 192.168.1.71 -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock off"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6-lcd096 -m "clock on"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock on"
+// mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "desaturate 0.30"
+// mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "darken 0.30"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-ttgo-t1 -m "clock on"
+//
+// ./esp bg-save assets/background-02-320x172.h   # 55040 значень, ~35 с
 //
 // cls && export PORT=/dev/ttyACM1 && pio run --monitor-port $PORT --upload-port $PORT -e ttgo-t1 -t upload -t monitor
 // Працює однаково для обох середовищ, різниться лише build_flags (-include)
@@ -47,12 +51,17 @@
 #include <Arduino.h>
 #include <SPI.h>
 #if defined(ESP32) && __has_include(<soc/rtc_cntl_reg.h>)
-// Регістр примусового download-boot для команди "bootloader". На частині
-// чипів (напр. ESP32-C6) RTC-домен перебудований і цього заголовка немає -
-// там команда просто не реєструється, а прошивка через USB-Serial/JTAG і так
-// входить у завантажувач без кнопок.
 #include <soc/rtc_cntl_reg.h>
+// Регістр примусового download-boot для команди "bootloader".
+//
+// Перевіряти НАЯВНІСТЬ ЗАГОЛОВКА тут недостатньо: на класичному ESP32 (xtensa,
+// ttgo-t1 / esp32-st7789) soc/rtc_cntl_reg.h є, але самого RTC_CNTL_OPTION1_REG
+// у ньому немає - у того чипа download mode вмикається лише апаратно (GPIO0 на
+// ресеті). Тому дивимось на сам макрос, інакше збірка падає з
+// "'RTC_CNTL_OPTION1_REG' was not declared in this scope".
+#if defined(RTC_CNTL_OPTION1_REG) && defined(RTC_CNTL_FORCE_DOWNLOAD_BOOT)
 #define HAS_FORCE_DOWNLOAD_BOOT 1
+#endif
 #endif
 
 #include "Display.h"
@@ -117,6 +126,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <ImageEffects.hpp>
 #include <JpegImage.hpp>
 #include <LittleFsStaticSource.hpp>
+#include <LogLevelManager.hpp>
 #include <Logger.hpp>
 #include <MqttClient.hpp>
 #include <MqttKeyGenerator.hpp>
@@ -137,8 +147,8 @@ using ActiveBulkReader = SdSpiBulkReader;
 // PicoMQTT). Свідомо НЕ виводимо його тут з __has_include: значення має бути
 // однаковим і для компілятора, і для IDE-індексатора.
 #if HAS_ECOFLOW_CLIENT
-#include "EcoFlow/EcoFlowClient.hpp"
-#include "EcoFlow/EcoFlowDeviceRegistry.hpp"
+#include "Ecoflow/EcoflowClient.hpp"
+#include "Ecoflow/EcoflowDeviceRegistry.hpp"
 #endif
 
 #include "BackgroundImages.hpp"
@@ -161,6 +171,14 @@ const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 // runtime override для MQTT_TOPIC_PREFIX (напр. dev/prod/qa/local, регіон, тощо); порожнє
 // -> дефолт з secrets.ini
 const char* CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix";
+// runtime-override для ECOFLOW_AUTOCONNECT: "1"/"0"; порожнє -> build-time дефолт
+const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
+// Останні випущені app-креденшели (команда 'ecoflow-app-login'). Зберігаються
+// як резервна копія й журнал: застосувати їх з NVS на льоту не можна - MqttConfig
+// копіює вказівники в конструкторі глобального EcoflowClient, тобто до setup().
+const char* CFG_ECOFLOW_APP_ACCOUNT = "ecoflow.acc";
+const char* CFG_ECOFLOW_APP_PASSWORD = "ecoflow.pass";
+const char* CFG_ECOFLOW_APP_USER_ID = "ecoflow.uid";
 
 TouchScreenConfig makeTouchScreenConfig() {
   TouchScreenConfig c;
@@ -273,22 +291,31 @@ MqttKeyGenerator mqttTopicPrefixOverride;
 #endif
 
 #if HAS_ECOFLOW_CLIENT
-EcoFlowClient::Config makeEcoFlowConfig() {
-  EcoFlowClient::Config config;
+EcoflowClient::Config makeEcoFlowConfig() {
+  EcoflowClient::Config config;
   config.mqttHost = ECOFLOW_MQTT_HOST;
   config.mqttPort = ECOFLOW_MQTT_PORT;
   config.mqttUsername = ECOFLOW_MQTT_USERNAME;
   config.mqttPassword = ECOFLOW_MQTT_PASSWORD;
   config.accessKey = ECOFLOW_ACCESS_KEY;
   config.secretKey = ECOFLOW_SECRET_KEY;
+#if defined(ECOFLOW_USER_ID)
+  // Потрібен лише для app-каналу (clientId ANDROID_..._<userId>).
+  config.userId = ECOFLOW_USER_ID;
+#endif
+#if defined(ECOFLOW_LOGIN) && defined(ECOFLOW_PASSWORD)
+  // Лише для 'ecoflow-app-login': перевипуск app-креденшелів.
+  config.email = ECOFLOW_LOGIN;
+  config.emailPassword = ECOFLOW_PASSWORD;
+#endif
   // Окремий id від основного MQTT-клієнта: збіг id у межах акаунта змушує
   // брокер вибивати клієнтів по черзі.
   config.clientId = MQTT_CLIENT_ID "-ecoflow";
   return config;
 }
 
-EcoFlowClient ecoflow(makeEcoFlowConfig());
-EcoFlowDeviceRegistry ecoflowDevices;
+EcoflowClient ecoflow(makeEcoFlowConfig());
+EcoflowDeviceRegistry ecoflowDevices;
 #endif
 
 LittleFsStaticSource littleFsSource(LittleFS);
@@ -640,24 +667,57 @@ void setupLittleFS() {
 // quota кілька разів на секунду і десятками параметрів у кожному повідомленні.
 bool ecoflowVerbose = false;
 
+// Приймає або серійник, або короткий індекс зі списку (0..N) - набирати
+// 16-символьний sn руками в консолі незручно. Порожній рядок = не розпізнано,
+// причина вже в лозі.
+static String ecoflowSerialFromKey(const String& key) {
+  static TLogger _logger{"ecoflow"};
+  String value = key;
+  value.trim();
+  if (value.length() == 0) {
+    return String();
+  }
+
+  bool numeric = true;
+  for (size_t i = 0; i < value.length(); i++) {
+    if (!isdigit((int)value[i])) { numeric = false; break; }
+  }
+
+  if (numeric) {
+    const size_t index = (size_t)value.toInt();
+    if (index >= ecoflowDevices.devices().size()) {
+      _logger.error("index out of range (0..%u)",
+                    (unsigned)(ecoflowDevices.devices().size() - 1));
+      return String();
+    }
+    return String(ecoflowDevices.devices()[index].info->serialNumber);
+  }
+
+  for (const auto& state : ecoflowDevices.devices()) {
+    if (value == state.info->serialNumber) { return value; }
+  }
+  _logger.error("unknown device: %s", value.c_str());
+  return String();
+}
+
 void setupEcoFlow() {
   static TLogger _logger{"ecoflow"};
 
   // Зміна наявності мережі - головна подія, яку тут відслідковують: разом із
   // нею друкуємо, СКІЛЬКИ пристрій пробув у попередньому стані.
-  ecoflowDevices.onGridChange([](const EcoFlowDeviceState& state) {
-    if (state.previousGrid == EcoFlowGridState::Unknown) {
+  ecoflowDevices.onGridChange([](const EcoflowDeviceState& state) {
+    if (state.previousGrid == EcoflowGridState::Unknown) {
       // Перше визначення після старту - не перехід, тривалості ще немає.
-      _logger.info("%s: %s (initial)", state.info->name, ecoFlowGridStateName(state.grid));
+      _logger.info("%s: %s (initial)", state.info->name, ecoflowGridStateName(state.grid));
       return;
     }
     _logger.warn("%s: %s -> %s after %s (change #%u)", state.info->name,
-                 ecoFlowGridStateName(state.previousGrid), ecoFlowGridStateName(state.grid),
-                 EcoFlowDeviceRegistry::formatDuration(state.previousGridDurationMs).c_str(),
+                 ecoflowGridStateName(state.previousGrid), ecoflowGridStateName(state.grid),
+                 EcoflowDeviceRegistry::formatDuration(state.previousGridDurationMs).c_str(),
                  (unsigned)state.gridChangeCount);
   });
 
-  ecoflowDevices.onSocChange([](const EcoFlowDeviceState& state, int8_t previousSoc) {
+  ecoflowDevices.onSocChange([](const EcoflowDeviceState& state, int8_t previousSoc) {
     if (!ecoflowVerbose) { return; }
     _logger.info("%s: charge %d%% -> %d%%", state.info->name, (int)previousSoc,
                  (int)state.socPercent);
@@ -697,27 +757,60 @@ void setupEcoFlow() {
   // Стартуємо ОДРАЗУ: серійні номери прошиті, тому підписка не залежить ні від
   // REST, ні від синхронізованого часу (раніше старт доводилось відкладати саме
   // через підпис REST-запиту, що містить timestamp).
-  ecoflow.begin();
+  //
+  // ...але лише якщо autoconnect увімкнено: TLS-сесія коштує ~57 КБ heap, і на
+  // платі без PSRAM це може бути дорожче за саму телеметрію.
+  String autoConnectStored = configStorage.getString(CFG_ECOFLOW_AUTOCONNECT, "");
+  const bool autoConnect = autoConnectStored.length() > 0 ? (autoConnectStored.toInt() != 0)
+                                                          : (ECOFLOW_AUTOCONNECT != 0);
+  if (autoConnect) {
+    ecoflow.begin();
+  } else {
+    _logger.info("autoconnect is off - use 'ecoflow-start' to connect");
+  }
 
   // Одноразова звірка з хмарою, коли зʼявиться час: REST потрібен лише щоб
   // помітити пристрій, доданий у застосунку, але відсутній у прошитому
   // переліку. Задача знімає себе після першої вдалої спроби.
+  ecoflow.setRegistry(&ecoflowDevices);
+
+  ecoflow.onAppCredentials([](const EcoflowMqttCredentials& credentials, const String& userId) {
+    configStorage.setString(CFG_ECOFLOW_APP_ACCOUNT, credentials.certificateAccount);
+    configStorage.setString(CFG_ECOFLOW_APP_PASSWORD, credentials.certificatePassword);
+    configStorage.setString(CFG_ECOFLOW_APP_USER_ID, userId);
+    _logger.info("saved to NVS");
+
+    // Порівнюємо з тим, що зашито: якщо різне - на льоту не підхопиться.
+    if (credentials.certificateAccount != String(ECOFLOW_MQTT_USERNAME)) {
+      _logger.warn("build-time account differs (%s) - put the values above into "
+                   "secrets.ini and reflash",
+                   ECOFLOW_MQTT_USERNAME);
+    }
+  });
+
+  // Щойно зʼявиться час (REST-підпис містить timestamp) - тягнемо ПОВНИЙ знімок
+  // стану кожного пристрою. Без цього наявність мережі лишається unknown до
+  // першої реальної зміни: MQTT-quota шле лише дельти.
   static TaskId ecoflowAuditTaskId = 0;
   ecoflowAuditTaskId = scheduler.addCronTask(30 * 1000UL, []() {
     if (!ntp.isSynced() || !WiFi.isConnected() || ecoflow.isBusy()) { return; }
     scheduler.removeTask(ecoflowAuditTaskId);
-    ecoflow.refreshDevicesAsync();
+    ecoflow.syncSnapshotsAsync();
   });
 
   commandHandler.registerCommand("ecoflow", "show EcoFlow cloud MQTT status", [](const String args) {
     _logger.info("connected = %s, account = %s", ecoflow.isConnected() ? "yes" : "no",
                  ecoflow.account().c_str());
-    _logger.info("broker = %s:%d, verbose = %s", ECOFLOW_MQTT_HOST, ECOFLOW_MQTT_PORT,
+    _logger.info("broker = %s:%d, channel = %s, verbose = %s", ECOFLOW_MQTT_HOST,
+                 ECOFLOW_MQTT_PORT, EcoflowClient::channelName(ecoflow.channel()),
                  ecoflowVerbose ? "on" : "off");
     // TLS-сесія - найбільший споживач heap у цьому клієнті, тому цифри тут
     // корисніші за загальний 'dump-heap': саме вони кажуть, чи пройде REST.
-    _logger.info("heap = %u B free, largest block = %u B", (unsigned)ESP.getFreeHeap(),
+    _logger.info("running = %s, heap = %u B free, largest block = %u B",
+                 ecoflow.isRunning() ? "yes" : "no", (unsigned)ESP.getFreeHeap(),
                  (unsigned)ESP.getMaxAllocHeap());
+    // Запас стеку мережевого таска: підстава змінювати MqttConfig::taskStackSize.
+    _logger.info("net task stack headroom = %u B", (unsigned)ecoflow.networkStackHeadroom());
     if (ecoflow.lastError().length() > 0) {
       _logger.warn("last error: %s", ecoflow.lastError().c_str());
     }
@@ -725,21 +818,41 @@ void setupEcoFlow() {
     _logger.info("messages received = %u, last topic = %s", ecoflow.messageCount(),
                  ecoflow.lastTopic().length() > 0 ? ecoflow.lastTopic().c_str() : "(none)");
 
-    _logger.info("%-16s %-18s %-8s %-6s %-9s %s", "SERIAL", "NAME", "PRESENCE", "CHARGE",
-                 "GRID", "IN THIS STATE FOR");
+    _logger.info("");
+    _logger.info("%-1s %-16s %-18s %-7s %6s %-9s %7s %s", "#", "SERIAL", "NAME", "STATUS",
+                 "CHARGE", "GRID", "TIME", "SPAN");
+    size_t deviceIndex = 0;
     for (const auto& state : ecoflowDevices.devices()) {
-      char charge[8] = "  -";
+      // Без ведучих пробілів: колонку вирівнює сам printf ("%6s").
+      char charge[8] = "-";
       if (state.hasSoc()) { snprintf(charge, sizeof(charge), "%d%%", (int)state.socPercent); }
 
       String gridFor = "-";
       if (state.gridSinceMs != 0) {
-        gridFor = EcoFlowDeviceRegistry::formatDuration(millis() - state.gridSinceMs);
+        gridFor = EcoflowDeviceRegistry::formatDuration(millis() - state.gridSinceMs);
       }
 
-      _logger.info("%-16s %-18s %-8s %-6s %-9s %s", state.info->serialNumber, state.info->name,
-                   state.online ? "online" : "offline", charge,
-                   ecoFlowGridStateName(state.grid), gridFor.c_str());
+      // TIME стоїть ПІСЛЯ GRID: EcoFlow віддає одне поле remainTime і на заряд,
+      // і на розряд, тому саме сусідство з GRID і пояснює, що воно означає.
+      const String remaining = EcoflowDeviceRegistry::formatRemainTime(state.remainTimeMinutes);
+
+      // Той самий індекс, що приймають 'ecoflow-params' і 'ecoflow-capture'.
+      // CHARGE і TIME вирівняні вправо, щоб числа читались колонкою.
+      // Три стани, а не два: REST-знімок заповнює CHARGE/TIME, але НЕ доводить,
+      // що пристрій живий - раніше це виглядало як "offline із свіжими даними".
+      // lastMessageMs == 0 означає саме "жодного повідомлення ще не чули".
+      const char* presence = state.lastMessageMs == 0 ? "unknown"
+                                                      : (state.online ? "online" : "offline");
+
+      _logger.info("%-1u %-16s %-18s %-7s %6s %-9s %7s %s", (unsigned)deviceIndex++,
+                   state.info->serialNumber,
+                   state.info->name, presence, charge,
+                   state.gridInferred ? (String(ecoflowGridStateName(state.grid)) + "*").c_str()
+                                      : ecoflowGridStateName(state.grid),
+                   remaining.c_str(),
+                   gridFor.c_str());
     }
+    _logger.info("");
   });
 
   // Обидві REST-команди йдуть у власний таск: TLS-хендшейк не вміщується
@@ -753,6 +866,184 @@ void setupEcoFlow() {
         return;
       }
       _logger.info("request sent, result will appear in the log (MQTT suspended ~2-5 s)");
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-app-login", "issue private-API MQTT credentials (email+password -> account/password)",
+    [](const String args) {
+      if (!ecoflow.issueAppCredentialsAsync()) {
+        _logger.error("not started: %s", ecoflow.lastError().c_str());
+        return;
+      }
+      _logger.info("logging in, result will appear in the log (MQTT paused)");
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-capture", "capture ALL params: ecoflow-capture <on|off> [sn|index|all]",
+    [](const String args) {
+      String rest = args;
+      rest.trim();
+      const int space = rest.indexOf(' ');
+      String mode = space < 0 ? rest : rest.substring(0, space);
+      String target = space < 0 ? String("all") : rest.substring(space + 1);
+      mode.trim();
+      target.trim();
+
+      if (mode.length() == 0) {
+        for (const auto& state : ecoflowDevices.devices()) {
+          _logger.info("  %-16s capture=%-3s params=%u%s", state.info->serialNumber,
+                       state.captureAll ? "all" : "imp",
+                       (unsigned)state.trackedParams.size(),
+                       state.droppedParams ? "  (limit reached)" : "");
+        }
+        _logger.info("use: ecoflow-capture <on|off> [sn|index|all]");
+        return;
+      }
+
+      const bool enable = (mode == "on" || mode == "1" || mode == "true");
+      // Порожній serial у setCaptureAll() означає "усі пристрої".
+      String serial;
+      if (target.length() > 0 && target != "all") {
+        serial = ecoflowSerialFromKey(target);
+        if (serial.length() == 0) { return; }
+      }
+      const size_t affected = ecoflowDevices.setCaptureAll(serial, enable);
+      _logger.info("capture all = %s for %u device(s)", enable ? "on" : "off",
+                   (unsigned)affected);
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-params", "show captured params: ecoflow-params <sn|index> [pattern, e.g. *_in_*]",
+    [](const String args) {
+      String rest = args;
+      rest.trim();
+      // Другий аргумент - glob-фільтр по ключу. Ключі зберігаються
+      // нормалізованими (snake_case), тому '*_in_*' ловить і 'inv_ac_in_vol',
+      // і 'ac_in_vol', попри різні схеми в API.
+      String pattern;
+      const int space = rest.indexOf(' ');
+      if (space >= 0) {
+        pattern = rest.substring(space + 1);
+        pattern.trim();
+        rest = rest.substring(0, space);
+      }
+      String key = rest;
+      key.trim();
+      if (key.length() == 0) {
+        _logger.info("use: ecoflow-params <sn|index>");
+        size_t i = 0;
+        for (const auto& state : ecoflowDevices.devices()) {
+          _logger.info("  %u  %-16s %-18s capture=%s params=%u", (unsigned)i++,
+                       state.info->serialNumber, state.info->name,
+                       state.captureAll ? "all" : "imp",
+                       (unsigned)state.trackedParams.size());
+        }
+        return;
+      }
+
+      const String serial = ecoflowSerialFromKey(key);
+      if (serial.length() == 0) { return; }
+
+      // Друкуємо ЗАХОПЛЕНЕ, а не свіжий REST-запит: так команда миттєва і не
+      // рве MQTT-сесію. Щоб підтягти повний стан з хмари - 'ecoflow-sync'.
+      for (const auto& state : ecoflowDevices.devices()) {
+        if (serial != state.info->serialNumber) { continue; }
+        _logger.info("%s (%s): %u params, capture=%s%s", state.info->name,
+                     state.info->serialNumber, (unsigned)state.trackedParams.size(),
+                     state.captureAll ? "all" : "important-only",
+                     state.snapshotAvailable ? "" : ", MQTT-only");
+        if (state.droppedParams > 0) {
+          _logger.warn("  %u more keys dropped - per-device limit reached",
+                       (unsigned)state.droppedParams);
+        }
+
+        // std::map уже впорядкований лексикографічно, тому однакові префікси
+        // ('inv_*', 'pd_*') виводяться згрупованими без окремого сортування.
+        size_t shown = 0;
+        for (const auto& kv : state.trackedParams) {
+          if (pattern.length() > 0 &&
+              !EcoflowDeviceRegistry::wildcardMatch(pattern.c_str(), kv.first.c_str())) {
+            continue;
+          }
+          _logger.info("  %-34s = %.3f", kv.first.c_str(), kv.second);
+          shown++;
+        }
+        if (pattern.length() > 0) {
+          _logger.info("  %u of %u params match '%s'", (unsigned)shown,
+                       (unsigned)state.trackedParams.size(), pattern.c_str());
+        }
+
+        // Порожній результат майже завжди означає одне з трьох - підказуємо, що
+        // саме, бо інакше виглядає як "пристрій цього не шле".
+        if (shown == 0 && pattern.length() > 0) {
+          char normalized[EcoflowDeviceRegistry::kMaxKeyLength];
+          EcoflowDeviceRegistry::normalizeKey(pattern.c_str(), normalized, sizeof(normalized));
+          if (EcoflowDeviceRegistry::isBlacklistedParam(normalized)) {
+            _logger.info("  reason: key is blacklisted");
+          } else if (!state.captureAll &&
+                     !EcoflowDeviceRegistry::isWhitelistedParam(normalized)) {
+            _logger.info("  reason: not whitelisted; try 'ecoflow-capture on %s'",
+                         state.info->serialNumber);
+          } else if (pattern.indexOf('*') < 0) {
+            _logger.info("  reason: not received yet (quota sends only changed fields)");
+            _logger.info("  hint: keys are normalized - try '*%s*'", normalized);
+          }
+        }
+        return;
+      }
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-sync", "pull full state snapshot for every device over REST",
+    [](const String args) {
+      if (!ecoflow.syncSnapshotsAsync()) {
+        _logger.error("not started: %s", ecoflow.lastError().c_str());
+        return;
+      }
+      _logger.info("snapshot sync started, result will appear in the log");
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-start", "connect EcoFlow cloud MQTT (frees nothing, costs ~57 KB heap)",
+    [](const String args) {
+      if (!ecoflow.start()) {
+        _logger.error("start failed: %s", ecoflow.lastError().c_str());
+        return;
+      }
+      _logger.info("running = %s", ecoflow.isRunning() ? "yes" : "no");
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-stop", "drop EcoFlow cloud MQTT and free its TLS session (~57 KB)",
+    [](const String args) {
+      if (!ecoflow.stop()) {
+        _logger.error("stop failed: %s", ecoflow.lastError().c_str());
+      }
+    }
+  );
+
+  commandHandler.registerCommand(
+    "ecoflow-auto", "connect EcoFlow on boot: ecoflow-auto [on|off]",
+    [](const String args) {
+      String value = args;
+      value.trim();
+      if (value.length() == 0) {
+        String stored = configStorage.getString(CFG_ECOFLOW_AUTOCONNECT, "");
+        _logger.info("autoconnect = %s%s",
+                     stored.length() > 0 ? (stored.toInt() ? "on" : "off")
+                                         : (ECOFLOW_AUTOCONNECT ? "on" : "off"),
+                     stored.length() > 0 ? "" : " (build-time default)");
+        return;
+      }
+      const bool on = (value == "on" || value == "1" || value == "true");
+      configStorage.setString(CFG_ECOFLOW_AUTOCONNECT, on ? "1" : "0");
+      _logger.info("autoconnect = %s (applies on next boot)", on ? "on" : "off");
     }
   );
 
@@ -1056,6 +1347,10 @@ void dumpSystemInfo() {
 */
 
   Logger::info("");
+  uint32_t uptimeSec = millis() / 1000;
+  Logger::info("Uptime: %02u:%02u:%02u", (unsigned)(uptimeSec / 3600),
+                 (unsigned)((uptimeSec / 60) % 60), (unsigned)(uptimeSec % 60));
+
   Logger::info("WiFi SSID: %s (%d dBm / %d%%)", WiFi.SSID().c_str(), WiFi.RSSI(), getWiFiQuality(WiFi.RSSI()));
   if (WiFi.status() == WL_CONNECTED) {
     Logger::info("WiFi   IP: %s", WiFi.localIP().toString().c_str());
@@ -2385,6 +2680,105 @@ void dumpStatus(const String& section) {
 }
 
 void setupSerialCommander() {
+  // Фрагментація важливіша за сам обсяг вільного heap: алокація падає, коли
+  // немає ОДНОГО суцільного блоку потрібного розміру, навіть якщо сумарно
+  // вільно вдесятеро більше. largest/free і є цим показником.
+  commandHandler.registerCommand("heap", "show heap usage and fragmentation", [](const String args) {
+    static TLogger _log{"heap"};
+#if defined(ESP32)
+    // heap_caps_* - ESP-IDF API, на ESP8266 його немає (див. #else).
+    const size_t total   = heap_caps_get_total_size(MALLOC_CAP_8BIT);
+    const size_t freeNow = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const size_t minEver = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+
+    _log.info("total        : %u B", (unsigned)total);
+    _log.info("free         : %u B (%u%% of total)", (unsigned)freeNow,
+              total ? (unsigned)(freeNow * 100 / total) : 0);
+    _log.info("largest block: %u B", (unsigned)largest);
+    _log.info("fragmentation: %u%%  (free minus largest = %u B in holes)",
+              freeNow > 0 ? (unsigned)(100 - (largest * 100) / freeNow) : 0,
+              (unsigned)(freeNow - largest));
+    _log.info("min free ever: %u B  <- worst moment since boot", (unsigned)minEver);
+#else
+    // ESP8266 SDK дає готовий відсоток фрагментації, але не знає ні загального
+    // розміру купи, ні історичного мінімуму.
+    const size_t freeNow = ESP.getFreeHeap();
+    const size_t largest = ESP.getMaxFreeBlockSize();
+    _log.info("free         : %u B", (unsigned)freeNow);
+    _log.info("largest block: %u B", (unsigned)largest);
+    _log.info("fragmentation: %u%%  (free minus largest = %u B in holes)",
+              (unsigned)ESP.getHeapFragmentation(), (unsigned)(freeNow - largest));
+#endif
+    _log.info("uptime       : %lu s", (unsigned long)(millis() / 1000UL));
+  });
+
+#if defined(LITTLEFS_BACKGROUND_IMAGE)
+  // Дамп ПОТОЧНОГО фону (тобто вже з накладеними ефектами: blur/desaturate/
+  // darken із setupBackgroundImage() і команд) у вигляді C-хедера. Сенс саме в
+  // ефектах: data/convert.c робить те саме з ОРИГІНАЛЬНОГО jpeg, тобто без них.
+  //
+  // Готовий хедер підключається через -D BACKGROUND_PROGMEM_HEADER (див.
+  // platformio.ini) і тоді фон живе у Flash, а не в RAM - на 320x172 це
+  // 110 КБ RAM, найбільший одиничний споживач на цій платі.
+  //
+  // Вивід іде напряму в Serial, без Logger: жодних префіксів, щоб файл можна
+  // було зберегти байт-у-байт (див. ./esp bg-save).
+  commandHandler.registerCommand(
+    "bg-dump", "dump current background (with effects) as C header for assets/",
+    [](const String args) {
+      static TLogger _log{"bg"};
+      if (!spaceImage.isLoaded()) {
+        _log.error("background is not loaded");
+        return;
+      }
+      if (spaceImage.colorDepth() != JpegColorDepth::RGB565) {
+        _log.error("background is %d-bit, not RGB565 - rebuild with "
+                   "SPRITE_COLOR_DEPTH=16 to dump full quality",
+                   (int)spaceImage.colorDepth());
+        return;
+      }
+
+      const uint16_t width = spaceImage.width();
+      const uint16_t height = spaceImage.height();
+      const uint16_t* pixels = spaceImage.bufferRGB565();
+      if (pixels == nullptr) {
+        _log.error("no RGB565 buffer");
+        return;
+      }
+
+      // Глушимо логи на весь час дампу: інакше чужий рядок вклиниться ПОСЕРЕДИНІ
+      // рядка з пікселями (MQTT сипле логи щосекунди, а дамп триває ~35 с) -
+      // і фільтр по префіксу в './esp bg-save' такого вже не врятує.
+      const LogLevel savedLevel = LogLevelManager::instance().getDefaultLevel();
+      LogLevelManager::instance().setDefaultLevel(LogLevel::Error);
+
+      Serial.printf("// generated by 'bg-dump' from %s (%ux%u, effects applied)\n",
+                    LITTLEFS_BACKGROUND_IMAGE, (unsigned)width, (unsigned)height);
+      Serial.println("#pragma once");
+      Serial.println("#include <pgmspace.h>");
+      Serial.println("#define HAS_BACKGROUND_PROGMEM_RGB565 1");
+      Serial.printf("#define BACKGROUND_PROGMEM_WIDTH  %u\n", (unsigned)width);
+      Serial.printf("#define BACKGROUND_PROGMEM_HEIGHT %u\n", (unsigned)height);
+      // Розмір масиву - width*height ЕЛЕМЕНТІВ по 2 байти (не width*height*2:
+      // це вдвічі більше, ніж потрібно).
+      Serial.printf("const uint16_t background_progmem_rgb565[%uu * %uu] PROGMEM = {\n",
+                    (unsigned)width, (unsigned)height);
+
+      const uint32_t total = (uint32_t)width * height;
+      for (uint32_t i = 0; i < total; i++) {
+        Serial.printf("0x%04X,", pixels[i]);
+        if ((i + 1) % 16 == 0) { Serial.println(); }
+      }
+      Serial.println();
+      Serial.println("};");
+      Serial.flush();
+
+      LogLevelManager::instance().setDefaultLevel(savedLevel);
+    }
+  );
+#endif
+
   commandHandler.registerCommand("status", "show device status state: status sys|cfg|sd|sd+|flash|flash+|littlefs",
                                  [](const String& args) { dumpStatus(args); });
 
@@ -3037,7 +3431,16 @@ void setupSerialCommander() {
 }
 
 void setupBackgroundImage() {
-#if defined(LITTLEFS_BACKGROUND_IMAGE)
+#if defined(BACKGROUND_PROGMEM_HEADER)
+  // Фон запечений у Flash (див. BackgroundImages.cpp) - декодований буфер у RAM
+  // не потрібен зовсім. Саме тут і економляться 110 КБ на 320x172 RGB565.
+  //
+  // Ціна: ефекти (blur/tint/desaturate) до такого фону не застосувати - він
+  // read-only. Тому запікати треба ВЖЕ з ефектами: зібрати з
+  // LITTLEFS_BACKGROUND_IMAGE і SPRITE_COLOR_DEPTH=16, підібрати вигляд
+  // командами, потім 'bg-dump' (або ./esp bg-save assets/<file>.h).
+  Logger::info("background: baked into flash, RAM buffer skipped");
+#elif defined(LITTLEFS_BACKGROUND_IMAGE)
   spaceImage.loadFromLittleFS(LITTLEFS_BACKGROUND_IMAGE,
                               SPRITE_COLOR_DEPTH > 8 ? JpegColorDepth::RGB565 : JpegColorDepth::RGB332); // 16 | 8
   setBackgroundImage(spaceImage);
@@ -3047,9 +3450,11 @@ void setupBackgroundImage() {
   #endif
 
   #if BOARD_ESP32_C6 || defined(BOARD_ESP32_C6_LCD096)
-  ImageEffects::applyDarken(spaceImage, 0.15);
+  ImageEffects::applyDesaturate(spaceImage, 0.3);
+  // ImageEffects::applyBoxBlur(spaceImage, 2);
+  ImageEffects::applyDarken(spaceImage, 0.20);
   #endif
-  
+
   #if BOARD_ESP32_S3_LCD147
   ImageEffects::applyDesaturate(spaceImage, 0.3);
   // ImageEffects::applyBoxBlur(spaceImage, 2);
@@ -3300,7 +3705,6 @@ void drawSystemInfo() {
 
 void drawTime() {
   static uint32_t lastErrorMs = 0;
-  struct tm timeinfo;
   if (!ntp.isSynced()) {
     const char* msg = "TIME SYNC";
     int x, y;
@@ -3372,17 +3776,16 @@ void drawTime() {
   #endif
 
   int textW = display.textWidth(timeStr);
-  int textH = display.fontHeight();
   int x = (display.width() - textW) / 2;
   #if BOARD_ESP32_C6
-  int y = textH;
+  int y = display.fontHeight();
   #else
   int y = 30;
   #endif
 
   // display.getTextBound();
   // Затираємо попередній текст перед виводом нового
-  // display.fillRect(0, y, display.width(), textH, TFT_BLACK);
+  // display.fillRect(0, y, display.width(), display.fontHeight(), TFT_BLACK);
 
   // display.setTextColor(TFT_DARKGREY);
   display.setTextColor(TFT_CYAN);
@@ -3436,7 +3839,7 @@ void drawTime() {
   display.print(timeStr);
 #elif BOARD_4848S040 || BOARD_ST7789
   int16_t x = 0, y = 8;
-  uint16_t textW, textH;
+  uint16_t textW;
   // display.setTextFont(7); display.setTextSize(1); // великий "цифровий" шрифт (тільки цифри та ":")
   // display.setTextFont(6); display.setTextSize(1); // великий - красивий
   // display.setTextFont(4); display.setTextSize(1); // середній / так собі

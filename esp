@@ -39,6 +39,33 @@ port_for_env() {
     esac
 }
 
+# bg-save <file.h> - зібрати дамп фону з пристрою у файл. Окрема підкоманда, бо
+# дамп великий (320x172 -> ~385 КБ тексту, ~35 с на 115200) і має лягти в файл
+# байт-у-байт, без префіксів логера.
+if [ "${1-}" = "bg-save" ]; then
+    shift
+    OUT="${1-}"
+    [ -n "$OUT" ] || die "use: ./esp bg-save assets/background-02-320x172.h"
+    shift || true
+    # Дамп читаємо довго і зупиняємось на довшій тиші: пристрій паралельно
+    # сипле логи, а сам дамп іде суцільним потоком.
+    ESP_TIMEOUT="${ESP_TIMEOUT-90}" ESP_QUIET="${ESP_QUIET-3}" \
+        "$0" ${1+"$@"} bg-dump > "$OUT.raw" || die "дамп не вдався"
+    # Лишаємо тільки хедер: від '#pragma once' до рядка '};', відкидаючи
+    # рядки логера, що могли вклинитись.
+    # tr -d '\r': Serial.println() виводить CRLF, і через це і фільтр, і
+    # перевірка нижче не матчили '};'. Заразом .h лишається з чистими LF.
+    tr -d '\r' < "$OUT.raw" \
+        | awk '/^#pragma once/{on=1} on && $0 !~ /^\[[IWED]\]/ {print} /^};$/{if(on) exit}' \
+        > "$OUT"
+    rm -f "$OUT.raw"
+    lines=$(wc -l < "$OUT")
+    grep -q '^};$' "$OUT" || die "дамп обірвався (у $OUT немає завершального '};') - збільш ESP_TIMEOUT"
+    printf 'збережено %s (%s рядків, %s)\n' "$OUT" "$lines" "$(du -h "$OUT" | cut -f1)"
+    printf 'тепер розкомментуй -D BACKGROUND_PROGMEM_HEADER у platformio.ini і перепрошийся\n'
+    exit 0
+fi
+
 case "${1-}" in
     -h|--help) sed -n '2,20p' "$0" | sed 's|^# \?||'; exit 0 ;;
     --list)

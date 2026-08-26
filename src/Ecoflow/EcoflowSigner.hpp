@@ -3,12 +3,18 @@
 #include <Arduino.h>
 #include <map>
 
-// Формує підпис (sign) для запитів до EcoFlow Open Platform REST API
-// відповідно до їхньої схеми: HMAC-SHA256(secretKey, canonicalString), hex у нижньому регістрі.
+// Формує підпис (sign) для запитів до EcoFlow Open Platform REST API:
+// HMAC-SHA256(secretKey, canonicalString), hex у нижньому регістрі.
 //
-// canonicalString = [відсортовані "key=value" з extraParams через '&'] +
-//                    "accessKey=...&nonce=...&timestamp=..."
-class EcoFlowSigner {
+// canonicalString = "accessKey=...&nonce=...&timestamp=..."
+//
+// ВАЖЛИВО: query-параметри запиту (напр. ?sn=...) у підпис НЕ входять -
+// перевірено на живому API. Спроби додати їх (перед accessKey, після нього,
+// або відсортувавши все разом) стабільно дають 8521 "signature is wrong",
+// тоді як підпис лише з accessKey/nonce/timestamp приймається і сервер
+// відповідає по суті. extraParams лишено в сигнатурі на випадок, якщо
+// POST-ендпоінти EcoFlow вимагатимуть іншої схеми - для GET його НЕ вживати."
+class EcoflowSigner {
 public:
     // Обчислює HMAC-SHA256(message, key) і повертає результат у вигляді hex-рядка (64 символи).
     static String hmacSha256Hex(const String &secretKey, const String &message);

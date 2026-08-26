@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Перезбирає compile_commands.json для ВКАЗАНОГО env і робить шляхи абсолютними.
+#
+# Env обов'язковий і навмисно без дефолту: індекс містить -D і -I саме тієї
+# плати, для якої згенерований. Взявши "якийсь" env, IDE підсвічувала б код за
+# прапорцями чужої плати - саме так у нас відвалювався EcoFlow-блок (дефайни
+# були лише в esp32-c6) і показувалась не та конфігурація дисплея.
+#
+# Використання:
+#   ./compiledb esp32-c6            # перезібрати індекс для цієї плати
+#   ./compiledb --list              # які env є в platformio.ini
+#   ./compiledb --reset-ide-cache   # скинути знімок проєкту IDE (при закритій IDE)
+#
+set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INI="$ROOT/platformio.ini"
+DB="$ROOT/compile_commands.json"
+PIO="${PIO:-$HOME/.platformio/penv/bin/pio}"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+list_envs() { grep -oP '^\[env:\K[^]]+' "$INI"; }
+
+# Для якої плати індекс зібраний ЗАРАЗ - найчастіша причина "IDE бачить не те".
+current_env() {
+    [ -f "$DB" ] || return 0
+    grep -oP '\.pio/build/\K[^/]+' "$DB" 2>/dev/null | head -1
+}
+
+# Кеш моделі CompDB-проєкту в IntelliJ. Саме він, а не compile_commands.json,
+# вирішує, чи «належить файл до таргета» - і файли, створені після імпорту, у
+# нього не потрапляють без переімпорту.
+ide_cache_dirs() {
+    ls -d "$HOME"/.cache/JetBrains/*/projects/*/external_build_system 2>/dev/null
+}
+
+case "${1-}" in
+    --reset-ide-cache)
+        if pgrep -f "intellij-idea-ultimate.*bin/idea" >/dev/null; then
+            die 'IDE запущена - закрий її: інакше вона перезапише кеш зі своєї памʼяті'
+        fi
+        found=0
+        while read -r dir; do
+            [ -n "$dir" ] || continue
+            # Знімок проєкту (шляхи + прапорці). Видаляємо ЛИШЕ його: modules/
+            # і project/ описують структуру, і IDE відновить їх сама.
+            if [ -f "$dir/project.dat" ]; then
+                rm -f "$dir/project.dat"
+                printf '✓ прибрано знімок: %s\n' "$dir/project.dat"
+                found=$((found + 1))
+            fi
+        done <<< "$(ide_cache_dirs)"
+        [ "$found" -gt 0 ] || printf 'знімків не знайдено - можливо, кеш уже чистий\n'
+        printf '\nтепер відкрий IDE: вона переімпортує проєкт з compile_commands.json\n'
+        exit 0 ;;
+    --list|-l)
+        printf 'доступні env:\n'
+        list_envs | sed 's/^/  /'
+        cur="$(current_env)"
+        [ -n "$cur" ] && printf '\nзараз в індексі: %s\n' "$cur"
+        exit 0 ;;
+    -h|--help)
+        # Друкуємо шапку файлу до першого рядка без '#' - інакше межу
+        # доводиться правити щоразу, коли в довідку додається рядок.
+        awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
+        exit 0 ;;
+esac
+
+ENV_NAME="${1-}"
+if [ -z "$ENV_NAME" ]; then
+    printf 'треба вказати env (навмисно без дефолту - див. ./compiledb --help)\n\n' >&2
+    printf 'доступні:\n' >&2
+    list_envs | sed 's/^/  /' >&2
+    cur="$(current_env)"
+    [ -n "$cur" ] && printf '\nзараз в індексі: %s\n' "$cur" >&2
+    exit 1
+fi
+
+grep -q "^\[env:$ENV_NAME\]$" "$INI" || {
+    printf 'невідомий env: %s\n\nдоступні:\n' "$ENV_NAME" >&2
+    list_envs | sed 's/^/  /' >&2
+    exit 1
+}
+
+[ -x "$PIO" ] || die "не знайдено pio: $PIO (задай через PIO=...)"
+
+previous="$(current_env)"
+printf '→ генерую compile_commands.json для %s' "$ENV_NAME"
+[ -n "$previous" ] && [ "$previous" != "$ENV_NAME" ] && printf ' (було: %s)' "$previous"
+printf '\n'
+
+"$PIO" run -e "$ENV_NAME" -t compiledb >/dev/null 2>&1 || die 'pio run -t compiledb не вдався'
+[ -f "$DB" ] || die "після генерації немає $DB"
+
+# PlatformIO пише шляхи ВІДНОСНИМИ; CompDB-плагін IntelliJ їх не резолвить,
+# і в редакторі відвалюються всі власні бібліотеки з lib/.
+python3 "$ROOT/tools/abs_compiledb.py" "$DB" || die 'абсолютизація шляхів не вдалась'
+
+# Перевірка по суті, а не просто "команда відпрацювала": чи видно наші lib/.
+own="$(grep -c -- "-I$ROOT/lib/" "$DB" || true)"
+[ "${own:-0}" -gt 0 ] || die "у $DB немає жодного -I$ROOT/lib/ - індекс усе ще неповний"
+
+printf '✓ готово: %s записів, проєктних lib-шляхів у main.cpp — %s\n' \
+    "$(python3 -c "import json;print(len(json.load(open('$DB'))))")" \
+    "$(python3 - "$DB" "$ROOT" <<'PY'
+import json, sys
+db, root = json.load(open(sys.argv[1])), sys.argv[2]
+for e in db:
+    if e['file'].endswith('src/main.cpp'):
+        cmd = e.get('command') or ' '.join(e.get('arguments', []))
+        print(sum(1 for t in cmd.split() if t.startswith(f'-I{root}/lib/')))
+        break
+else:
+    print(0)
+PY
+)"
+
+cat <<'HINT'
+
+щоб IDE підхопила зміни (потрібен ПЕРЕІМПОРТ, а не reload файлів):
+  A. закрий IDE  →  ./compiledb --reset-ide-cache  →  відкрий IDE
+  B. або в самій IDE: File → Invalidate Caches… → Invalidate and Restart
+  перевірка: відкрий src/EcoFlow/EcoFlowDeviceRegistry.cpp і клікни на
+  TLogger — має вести в lib/Logger/TLogger.hpp
+
+чому не «правий клік → Reload Compilation Database»: такої дії НЕМА. У
+CompDB-плагіні є лише 'Load Compilation Database Project'
+(action id CompDB.LoadMakefileProject), і вона з'являється тільки для проєкту,
+який ще НЕ завантажений. Плагін Flexible For Arduino дій оновлення індексу теж
+не має - лише Build / Flash / Monitor. Тому єдиний надійний шлях - скинути
+знімок проєкту (варіант A) або всі кеші (варіант B).
+
+симптом, що знімок застарів: свіжий файл показує 'This file does not belong to
+any project target', а символи в ньому червоні, хоча в старих файлах усе
+резолвиться. IDE тримає модель CompDB окремо від самого compile_commands.json -
+у ~/.cache/JetBrains/*/projects/*/external_build_system/project.dat, і файли,
+створені ПІСЛЯ імпорту, туди не потрапляють.
+
+примітка: pio перезаписує compile_commands.json при кожній генерації,
+тому запускай саме ./compiledb, а не `pio run -t compiledb` напряму —
+інакше шляхи знову стануть відносними.
+HINT

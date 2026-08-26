@@ -15,8 +15,7 @@
 // інструментами - без жодного драйвера на боці ESP32:
 //
 //   sudo modprobe nbd
-//   sudo qemu-nbd --read-only --connect=/dev/nbd0 \
-//     'json:{"driver":"raw","file":{"driver":"http","url":"http://<ip>:8080/sd.img"}}'
+//   sudo qemu-nbd --read-only --connect=/dev/nbd0 'json:{"driver":"raw","file":{"driver":"http","url":"http://<ip>:8080/sd.img"}}'
 //   sudo mount -o ro,noload /dev/nbd0p2 /mnt/sd
 //
 // Далі ext4 розбирає ядро Linux, а не ESP32 - тобто список файлів видно без

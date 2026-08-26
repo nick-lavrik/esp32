@@ -1,31 +1,32 @@
-#include "EcoFlowAuthClient.hpp"
+#include "EcoflowAuthClient.hpp"
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
 
-#include "EcoFlowSigner.hpp"
+#include "EcoflowSigner.hpp"
 
-const char *EcoFlowAuthClient::kApiHost = "api-e.ecoflow.com";
-const char *EcoFlowAuthClient::kCertPath = "/iot-open/sign/certification";
-const char *EcoFlowAuthClient::kDevicePath = "/iot-open/sign/device/list";
+const char *EcoflowAuthClient::kApiHost = "api-e.ecoflow.com";
+const char *EcoflowAuthClient::kCertPath = "/iot-open/sign/certification";
+const char *EcoflowAuthClient::kDevicePath = "/iot-open/sign/device/list";
+const char *EcoflowAuthClient::kQuotaAllPath = "/iot-open/sign/device/quota/all";
 
-EcoFlowAuthClient::EcoFlowAuthClient(const String &accessKey, const String &secretKey)
+EcoflowAuthClient::EcoflowAuthClient(const String &accessKey, const String &secretKey)
     : _accessKey(accessKey), _secretKey(secretKey) {}
 
-String EcoFlowAuthClient::generateNonce() const { return String(random(100000, 999999)); }
+String EcoflowAuthClient::generateNonce() const { return String(random(100000, 999999)); }
 
-String EcoFlowAuthClient::generateTimestamp() const {
+String EcoflowAuthClient::generateTimestamp() const {
   // Потребує синхронізованого часу (див. configTime() у main.cpp),
   // інакше timestamp буде некоректним і сервер може відхилити підпис.
   return String((uint64_t)time(nullptr) * 1000ULL);
 }
 
-bool EcoFlowAuthClient::signedGet(const char *path, String &outPayload) {
+bool EcoflowAuthClient::signedGet(const char *path, String &outPayload, const String &query) {
   String nonce = generateNonce();
   String timestamp = generateTimestamp();
-  String sign = EcoFlowSigner::sign(_accessKey, _secretKey, nonce, timestamp);
+  String sign = EcoflowSigner::sign(_accessKey, _secretKey, nonce, timestamp);
 
   WiFiClientSecure tlsClient;
   tlsClient
@@ -33,6 +34,9 @@ bool EcoFlowAuthClient::signedGet(const char *path, String &outPayload) {
 
   HTTPClient https;
   String url = String("https://") + kApiHost + path;
+  if (query.length() > 0) {
+    url += "?" + query;
+  }
 
   if (!https.begin(tlsClient, url)) {
     _lastError = "https.begin() failed";
@@ -57,7 +61,7 @@ bool EcoFlowAuthClient::signedGet(const char *path, String &outPayload) {
   return true;
 }
 
-bool EcoFlowAuthClient::fetchMqttCredentials(EcoFlowMqttCredentials &outCredentials) {
+bool EcoflowAuthClient::fetchMqttCredentials(EcoflowMqttCredentials &outCredentials) {
   String payload;
   if (!signedGet(kCertPath, payload)) {
     return false;
@@ -91,7 +95,35 @@ bool EcoFlowAuthClient::fetchMqttCredentials(EcoFlowMqttCredentials &outCredenti
   return true;
 }
 
-bool EcoFlowAuthClient::fetchDeviceList(std::vector<EcoFlowDevice> &outDevices) {
+bool EcoflowAuthClient::fetchQuotaAll(const String &serialNumber, JsonDocument &outDoc,
+                                     bool &notAllowed) {
+  notAllowed = false;
+
+  String payload;
+  if (!signedGet(kQuotaAllPath, payload, "sn=" + serialNumber)) {
+    return false;
+  }
+
+  DeserializationError err = deserializeJson(outDoc, payload);
+  if (err) {
+    _lastError = "JSON parse error: " + String(err.c_str());
+    return false;
+  }
+
+  const char *code = outDoc["code"] | "";
+  if (String(code) != "0") {
+    const char *message = outDoc["message"] | "unknown error";
+    // 1006 - пристрій не відкритий для REST-читання (DELTA mini, Smart
+    // Generator). Це не збій запиту, а постійна властивість пристрою.
+    notAllowed = (String(code) == "1006");
+    _lastError = "EcoFlow API error: " + String(message);
+    return false;
+  }
+
+  return true;
+}
+
+bool EcoflowAuthClient::fetchDeviceList(std::vector<EcoflowDevice> &outDevices) {
   outDevices.clear();
 
   String payload;
@@ -120,7 +152,7 @@ bool EcoFlowAuthClient::fetchDeviceList(std::vector<EcoFlowDevice> &outDevices) 
   }
 
   for (JsonObjectConst item : data) {
-    EcoFlowDevice device;
+    EcoflowDevice device;
     device.serialNumber = item["sn"] | "";
     device.name = item["deviceName"] | "";
     // "online" приходить числом 1/0.

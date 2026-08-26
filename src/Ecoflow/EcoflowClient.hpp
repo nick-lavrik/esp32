@@ -7,13 +7,14 @@
 #include <string>
 #include <vector>
 
-#include "EcoFlowAuthClient.hpp"
-#include "EcoFlowDevice.hpp"
+#include "EcoflowAuthClient.hpp"
+#include "EcoflowDeviceRegistry.hpp"
+#include "EcoflowDevice.hpp"
 
 // Підключення до хмарного MQTT-брокера EcoFlow Open Platform.
 //
 // Складається з двох незалежних частин:
-//   * REST (EcoFlowAuthClient, accessKey/secretKey) - список пристроїв і, за
+//   * REST (EcoflowAuthClient, accessKey/secretKey) - список пристроїв і, за
 //     потреби, перевипуск MQTT-креденшелів. Виклики БЛОКУЮЧІ (HTTPS ~1-2 с),
 //     тому робляться лише з головного потоку і на вимогу, не в циклі.
 //   * MQTT (MqttClient поверх PicoMQTT + TLS) - постійна підписка на
@@ -23,8 +24,15 @@
 // відповідь GET /iot-open/sign/certification. Вони довгоживучі, тому
 // REST-виклик на кожному старті не потрібен; refreshCredentials() є на випадок,
 // якщо їх відкличуть.
-class EcoFlowClient {
+class EcoflowClient {
 public:
+    // Канал визначається ПРЕФІКСОМ акаунта, а не окремим прапорцем: у
+    // secrets.ini достатньо підмінити ecoflow_mqtt_username, і код сам обере
+    // схему топіків. "open-..." -> Open Platform, "app-..." -> приватний API.
+    enum class Channel : uint8_t { OpenPlatform, AppPrivate };
+    static Channel channelFromAccount(const String &account);
+    static const char *channelName(Channel channel);
+
     struct Config {
         const char *mqttHost = nullptr;
         uint16_t mqttPort = 8883;
@@ -37,12 +45,19 @@ public:
         // Має бути унікальним у межах акаунта: два клієнти з однаковим id
         // брокер вибиває по черзі, утворюючи нескінченний reconnect-цикл.
         const char *clientId = "esp32-ecoflow";
+        // Лише для app-каналу: брокер вимагає clientId у форматі
+        // "ANDROID_<будь-що>_<userId>". Перевірено: без префікса ANDROID_,
+        // з "IOS_" або з чужим userId - Connection Refused: not authorised.
+        const char *userId = nullptr;
+        // Логін застосунку - потрібен лише команді, що перевипускає app-креденшели.
+        const char *email = nullptr;
+        const char *emailPassword = nullptr;
     };
 
     using QuotaCallback = std::function<void(const String &serialNumber, JsonDocument &payload)>;
     using StatusCallback = std::function<void(const String &serialNumber, JsonDocument &payload)>;
 
-    explicit EcoFlowClient(const Config &config);
+    explicit EcoflowClient(const Config &config);
 
     // Піднімає MQTT-підключення (асинхронно, у власному таску) і підписки.
     // ВАЖЛИВО: спершу робить блокуючий REST-запит за списком пристроїв, тому
@@ -61,6 +76,16 @@ public:
     bool isStarted() const { return _started; }
     bool isBusy() const { return _restBusy; }
 
+    // Повністю прибирає з'єднання з памʼяті: рве TLS-сесію і знімає мережевий
+    // таск, звільняючи ~57 КБ heap (mbedTLS тримає по 16 КБ на кожен напрямок).
+    // Підписки й колбеки лишаються - start() підіймає все назад.
+    bool stop();
+    bool start();
+    bool isRunning() const { return _started && !_mqtt.isSuspended(); }
+
+    // Запас стеку мережевого таска (діагностика для підбору taskStackSize).
+    size_t networkStackHeadroom() const { return _mqtt.networkTaskStackHeadroom(); }
+
     // Викликати з головного loop() - розбирає чергу вхідних повідомлень і
     // виконує колбеки в головному потоці.
     void loop();
@@ -77,19 +102,42 @@ public:
     // Якщо MQTT уже піднятий, його TLS-сесія на час запиту рветься і
     // піднімається знову - див. withMqttSuspended().
     bool refreshDevices();
-    const std::vector<EcoFlowDevice> &devices() const { return _devices; }
+    const std::vector<EcoflowDevice> &devices() const { return _devices; }
 
     // Ті самі REST-виклики, але у ВЛАСНОМУ таску: не блокують sketch loop() і,
     // головне, не роблять TLS-хендшейк на стеку головного loopTask (8 КБ) -
     // mbedTLS там на межі, а виклик з колбека serial-команди додає вкладеності.
     // Результат друкується в лог. Повертають false, якщо запит уже виконується.
     bool refreshDevicesAsync();
+
+    // Тягне REST-знімок стану для КОЖНОГО пристрою і згодовує його реєстру.
+    // Закриває головну ваду MQTT-quota: вона приходить дельтами, тому після
+    // старту наявність мережі (inv.acInVol) лишається невідомою, доки реально
+    // не зміниться. Один suspend MQTT на всі запити, не на кожен окремо.
+    bool syncSnapshotsAsync();
+
+    // Перевипускає MQTT-креденшели приватного API (email+password -> JWT ->
+    // certification), друкує їх у лог і зберігає в NVS. Потрібно раз: самі
+    // креденшели стабільні між викликами, на відміну від 30-денного JWT.
+    bool issueAppCredentialsAsync();
+
+    Channel channel() const { return _channel; }
+
+    // Викликається після вдалого issueAppCredentialsAsync() - щоб main.cpp міг
+    // покласти креденшели в NVS, не тягнучи ConfigStorage у цей клас.
+    using AppCredentialsCallback =
+        std::function<void(const EcoflowMqttCredentials &credentials, const String &userId)>;
+    void onAppCredentials(AppCredentialsCallback callback) { _appCredentialsCallback = callback; }
+
+
+    // Реєстр, якому віддавати знімки. Без нього syncSnapshots() безсилий.
+    void setRegistry(EcoflowDeviceRegistry *registry) { _registry = registry; }
     bool refreshCredentialsAsync();
 
     // БЛОКУЮЧИЙ REST-виклик: перевипуск MQTT-креденшелів. Потрібен, лише якщо
     // ті, що в secrets.ini, перестали працювати - результат треба перенести в
     // secrets.ini вручну (у рантаймі перепідключення не робимо).
-    bool refreshCredentials(EcoFlowMqttCredentials &outCredentials);
+    bool refreshCredentials(EcoflowMqttCredentials &outCredentials);
 
     // Телеметрія будь-якого пристрою акаунта.
     void onQuota(QuotaCallback callback) { _quotaCallback = callback; }
@@ -107,12 +155,19 @@ private:
     // ПОРЯДОК ЧЛЕНІВ ЗНАЧУЩИЙ: MqttConfig копіює лише вказівники на рядки, а
     // root-топік будується в рантаймі з account - тому сховище має бути
     // ініціалізоване (і жити) перед _mqtt та довше за нього.
+    // ПОРЯДОК ЧЛЕНІВ ЗНАЧУЩИЙ (продовження): _channel і _clientIdStorage
+    // потрібні для побудови MqttConfig, тому оголошені ДО _mqtt.
+    Channel _channel = Channel::OpenPlatform;
+    // clientId для app-каналу: MqttConfig зберігає лише const char*, тому рядок
+    // має жити весь час роботи клієнта.
+    String _clientIdStorage;
+
     std::string _rootTopicStorage;
 
     MqttClient _mqtt;
-    EcoFlowAuthClient _auth;
+    EcoflowAuthClient _auth;
 
-    std::vector<EcoFlowDevice> _devices;
+    std::vector<EcoflowDevice> _devices;
     uint32_t _messageCount = 0;
     String _lastTopic;
 
@@ -123,7 +178,11 @@ private:
     // об'єкт ще не сконструйований; так виключаємо читання неініціалізованих
     // членів.
     static std::string buildRootTopic(const char *account);
-    static MqttConfig makeMqttConfig(const Config &config, const std::string &rootTopic);
+    static MqttConfig makeMqttConfig(const Config &config, const std::string &rootTopic,
+                                     const String &clientId);
+    // Для app-каналу брокер вимагає "ANDROID_<будь-що>_<userId>"; для
+    // Open Platform лишається config.clientId.
+    static String buildClientId(const Config &config);
 
     // Виконує блокуючий REST-виклик, звільнивши перед цим TLS-сесію MQTT.
     // ESP32-C6 не тягне дві одночасні TLS-сесії: mbedTLS падає з
@@ -138,7 +197,9 @@ private:
     // Один REST-таск за раз: паралельні запити змагались би за suspend().
     volatile bool _restBusy = false;
 
-    enum class RestJob { kDevices, kCredentials, kStart };
+    enum class RestJob { kDevices, kCredentials, kStart, kSnapshots, kAppLogin };
+    EcoflowDeviceRegistry *_registry = nullptr;
+    AppCredentialsCallback _appCredentialsCallback;
     bool startRestTask(RestJob job);
     static void restTaskTrampoline(void *param);
     void runRestJob(RestJob job);

@@ -5,6 +5,16 @@
 
 #include "Display.h"
 
+// Запечений фон під конкретну плату: шлях задає -D BACKGROUND_PROGMEM_HEADER
+// (див. platformio.ini). Хедер приносить із собою HAS_BACKGROUND_PROGMEM_RGB565
+// і власні розміри, тому не привʼязаний до 320x240, як background_XX нижче.
+//
+// Включаємо ТІЛЬКИ тут, а не через -include у build_flags: масив PROGMEM
+// потрапив би в кожен translation unit і роздув би Flash копіями.
+#if defined(BACKGROUND_PROGMEM_HEADER)
+#include BACKGROUND_PROGMEM_HEADER
+#endif
+
 #if BACKGROUND_IMAGES_COUNT >= 1
 #include "../assets/background-01-320x240.h"
 #endif
@@ -55,6 +65,14 @@ const void* getBackgroundImage(uint16_t* width, uint16_t* height, bool* bufferIs
   if (_activeInstance != nullptr) {
     return nullptr;
   }
+
+#if defined(HAS_BACKGROUND_PROGMEM_RGB565)
+  // Фон із Flash: 0 байт RAM. Має пріоритет над background_XX (ті зашиті як
+  // 320x240) і використовується, коли LittleFS-фон не завантажений.
+  *width = BACKGROUND_PROGMEM_WIDTH;
+  *height = BACKGROUND_PROGMEM_HEIGHT;
+  return background_progmem_rgb565;
+#endif
 
 #if BACKGROUND_IMAGES_COUNT == 0
   return nullptr;

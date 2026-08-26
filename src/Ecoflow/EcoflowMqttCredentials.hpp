@@ -3,8 +3,8 @@
 #include <Arduino.h>
 
 // Дані для підключення до MQTT-брокера EcoFlow, отримані через
-// EcoFlowAuthClient::fetchMqttCredentials().
-struct EcoFlowMqttCredentials {
+// EcoflowAuthClient::fetchMqttCredentials().
+struct EcoflowMqttCredentials {
     String certificateAccount;   // використовується як MQTT username
     String certificatePassword;  // використовується як MQTT password
     String url;                  // напр. "mqtt-e.ecoflow.com"
