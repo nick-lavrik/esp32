@@ -144,7 +144,7 @@ int32_t onWrite(uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize
 }
 
 bool onStartStop(uint8_t power_condition, bool start, bool load_eject) {
-  logger.info("хост: start=%d eject=%d (power_condition=%u)", (int)start, (int)load_eject,
+  logger.info("host: start=%d eject=%d (power_condition=%u)", (int)start, (int)load_eject,
               (unsigned)power_condition);
   return true;
 }
@@ -153,12 +153,12 @@ bool onStartStop(uint8_t power_condition, bool start, bool load_eject) {
 
 bool sdMassStorageBegin(SdMscSectorReader reader, uint32_t totalSectors) {
   if (active) {
-    logger.warn("USB MSC уже активний");
+    logger.warn("USB MSC already active");
     return true;
   }
 
   if (!reader || totalSectors == 0) {
-    logger.error("читач секторів або розмір картки не задані");
+    logger.error("sector reader or card size not set");
     return false;
   }
 
@@ -171,8 +171,8 @@ bool sdMassStorageBegin(SdMscSectorReader reader, uint32_t totalSectors) {
     prefetchBuffer = static_cast<uint8_t *>(
         heap_caps_malloc(kPrefetchSectors * kSectorSize, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
   }
-  logger.info("читання наперед: %s (%lu KiB)",
-              prefetchBuffer ? "увімкнено" : "НЕ ВИЙШЛО (мало внутрішньої RAM)",
+  logger.info("read-ahead: %s (%lu KiB)",
+              prefetchBuffer ? "enabled" : "FAILED (not enough internal RAM)",
               (unsigned long)(kPrefetchSectors * kSectorSize / 1024));
   msc.vendorID("ESP32S3");
   msc.productID("SD-RESCUE");
@@ -191,10 +191,10 @@ bool sdMassStorageBegin(SdMscSectorReader reader, uint32_t totalSectors) {
   USB.begin();
   active = true;
 
-  logger.info("USB MSC піднято: %lu секторів по %lu B (%.2f GiB), READ-ONLY",
+  logger.info("USB MSC started: %lu sectors of %lu B (%.2f GiB), READ-ONLY",
               (unsigned long)sectors, (unsigned long)kSectorSize,
               (double)sectors * kSectorSize / (1024.0 * 1024 * 1024));
-  logger.info("на хості картка з'явиться як /dev/sdX (dmesg | tail)");
+  logger.info("on the host the card shows up as /dev/sdX (dmesg | tail)");
   return true;
 }
 
@@ -212,19 +212,19 @@ void sdMassStorageEnd() {
   }
   msc.end();
   active = false;
-  logger.info("USB MSC зупинено (віддано %llu секторів, збоїв %lu)",
+  logger.info("USB MSC stopped (served %llu sectors, failures %lu)",
               (unsigned long long)sectorsServed, (unsigned long)readErrors);
 }
 
 bool sdMassStorageActive() { return active; }
 
 void sdMassStoragePrintStatus() {
-  logger.info("USB MSC     : %s", active ? "активний (read-only)" : "зупинений");
-  logger.info("секторів     : %llu віддано", (unsigned long long)sectorsServed);
-  logger.info("збоїв читання: %lu (останній LBA %lu)", (unsigned long)readErrors,
+  logger.info("USB MSC     : %s", active ? "active (read-only)" : "stopped");
+  logger.info("sectors      : %llu served", (unsigned long long)sectorsServed);
+  logger.info("read errors  : %lu (last LBA %lu)", (unsigned long)readErrors,
               (unsigned long)lastErrorLba);
-  logger.info("спроб запису : %lu (усі відхилені)", (unsigned long)writeAttempts);
-  logger.info("відновлень   : %lu (перемонтування картки)", (unsigned long)cardRecoveries);
+  logger.info("write tries  : %lu (all rejected)", (unsigned long)writeAttempts);
+  logger.info("recoveries   : %lu (card remount)", (unsigned long)cardRecoveries);
 }
 
 #else  // ARDUINO_USB_MODE != 0
@@ -238,13 +238,13 @@ const TLogger logger{"usbmsc"};
 // Заглушки для збірки з апаратним CDC: TinyUSB (а з ним MSC) у цьому режимі
 // недоступний, і краще сказати це прямо, ніж не збиратися.
 bool sdMassStorageBegin(SdMscSectorReader, uint32_t) {
-  logger.error("USB MSC потребує ARDUINO_USB_MODE=0 (OTG); зараз режим CDC");
+  logger.error("USB MSC requires ARDUINO_USB_MODE=0 (OTG); currently in CDC mode");
   return false;
 }
 void sdMassStorageEnd() {}
 bool sdMassStorageActive() { return false; }
 void sdMassStoragePrintStatus() {
-  logger.info("USB MSC: недоступний (потрібен ARDUINO_USB_MODE=0)");
+  logger.info("USB MSC: unavailable (requires ARDUINO_USB_MODE=0)");
 }
 
 #endif  // ARDUINO_USB_MODE

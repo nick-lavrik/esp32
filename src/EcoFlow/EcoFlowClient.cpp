@@ -2,6 +2,7 @@
 
 #include <TLogger.hpp>
 
+#include "EcoFlowDeviceRegistry.hpp"
 #include "EcoFlowMqttTopics.hpp"
 
 namespace {
@@ -86,23 +87,17 @@ void EcoFlowClient::begin() {
   }
 
   if (_account.length() == 0) {
-    _lastError = "не задано mqttUsername (certificateAccount)";
+    _lastError = "mqttUsername (certificateAccount) not set";
     logger.error("%s", _lastError.c_str());
     return;
   }
 
-  // Список пристроїв тягнемо ДО _mqtt.begin(): по-перше, без sn немає на що
-  // підписуватись (ACL EcoFlow не приймає жодного wildcard - див. нижче),
-  // по-друге, поки MQTT-сесії немає, її mbedTLS-буфери не займають heap і
-  // HTTPS-хендшейк проходить без suspend()/resume().
-  if (!refreshDevices()) {
-    logger.error("не вдалось отримати список пристроїв: %s", _lastError.c_str());
-    logger.error("без серійних номерів підписуватись нема на що - MQTT не піднімаємо");
-    return;
-  }
-
-  logger.info("receive %u devices", (unsigned)_devices.size());
-
+  // Серійні номери беремо з ПРОШИТОГО переліку (EcoFlowDeviceRegistry), а не з
+  // REST: підпис REST-запиту містить timestamp, тому на старті (до NTP) він
+  // приречений, а без sn не побудувати жодної підписки. Тепер MQTT піднімається
+  // одразу після WiFi, а REST лишається необов'язковою звіркою з хмарою
+  // ('ecoflow-devices').
+  //
   // ACL EcoFlow приймає ЛИШЕ точні топіки: перевірено, що відхиляються і
   // "/open/{account}/#", і "/open/{account}/+/quota", і навіть
   // "/open/{account}/{sn}/#". Тому підписка - окрема на кожен sn.
@@ -111,10 +106,12 @@ void EcoFlowClient::begin() {
   // безпечно: PicoMQTT реєструє його через SubscribedMessageListener, тобто
   // ЛОКАЛЬНО, як фільтр-диспетчер вхідних повідомлень - брокеру він не
   // надсилається. Брокер бачить лише ті топіки, що йдуть через addListener().
-  for (const auto &device : _devices) {
-    const String quotaTopic = EcoFlowMqttTopics::quota(_account, device.serialNumber);
-    const String statusTopic = EcoFlowMqttTopics::status(_account, device.serialNumber);
-    logger.debug("%-16s [%c] %s", device.serialNumber.c_str(), device.online ? '+' : ' ', device.name.c_str());
+  const EcoFlowDeviceInfo *table = EcoFlowDeviceRegistry::deviceTable();
+  for (size_t i = 0; i < EcoFlowDeviceRegistry::deviceCount(); i++) {
+    const String quotaTopic = EcoFlowMqttTopics::quota(_account, table[i].serialNumber);
+    const String statusTopic = EcoFlowMqttTopics::status(_account, table[i].serialNumber);
+    logger.debug("%-16s %-14s %s", table[i].serialNumber,
+                 ecoFlowDeviceTypeName(table[i].type), table[i].name);
 
     _mqtt.addJsonListener(quotaTopic.c_str(), [this](const char *topic, JsonDocument &doc) {
       _messageCount++;
@@ -135,8 +132,8 @@ void EcoFlowClient::begin() {
 
   _mqtt.begin();
   _started = true;
-  logger.info("%s:%u account=%s, підписок: %u", _config.mqttHost, (unsigned)_config.mqttPort,
-              _account.c_str(), (unsigned)(_devices.size() * 2));
+  logger.info("%s:%u account=%s, subscriptions: %u", _config.mqttHost, (unsigned)_config.mqttPort,
+              _account.c_str(), (unsigned)(EcoFlowDeviceRegistry::deviceCount() * 2));
 }
 
 void EcoFlowClient::loop() { _mqtt.loop(); }
@@ -160,7 +157,7 @@ void EcoFlowClient::restTaskTrampoline(void *param) {
 
   // Скільки стеку лишилось невикористаним - якщо тут близько до нуля,
   // kRestTaskStackSize треба піднімати.
-  logger.debug("rest-таск завершено, запас стеку %u Б",
+  logger.debug("rest task finished, stack headroom %u B",
                (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)));
 
   self->_restBusy = false;
@@ -178,12 +175,12 @@ void EcoFlowClient::runRestJob(RestJob job) {
       logger.error("device list fail: %s", _lastError.c_str());
       return;
     }
-    logger.info("отримано %u пристроїв:", (unsigned)_devices.size());
+    logger.info("fetched %u devices:", (unsigned)_devices.size());
     for (const auto &device : _devices) {
       logger.info("  %s %-20s %s", device.serialNumber.c_str(), device.name.c_str(),
                   device.online ? "online" : "offline");
     }
-    logger.info("нові пристрої додаються лише при старті - потрібен ребут");
+    logger.info("new devices are picked up at startup only - reboot required");
     return;
   }
 
@@ -201,7 +198,7 @@ void EcoFlowClient::runRestJob(RestJob job) {
 
 bool EcoFlowClient::startRestTask(RestJob job) {
   if (_restBusy) {
-    _lastError = "REST-запит уже виконується";
+    _lastError = "a REST request is already running";
     return false;
   }
   _restBusy = true;
@@ -212,7 +209,7 @@ bool EcoFlowClient::startRestTask(RestJob job) {
                   tskIDLE_PRIORITY + 1, nullptr) != pdPASS) {
     delete arg;
     _restBusy = false;
-    _lastError = "не вдалось створити rest-таск (замало пам'яті?)";
+    _lastError = "failed to create rest task (out of memory?)";
     return false;
   }
   return true;
@@ -226,7 +223,7 @@ bool EcoFlowClient::refreshCredentialsAsync() { return startRestTask(RestJob::kC
 
 bool EcoFlowClient::withMqttSuspended(const char *what, const std::function<bool()> &action) {
   if (_config.accessKey == nullptr || _config.secretKey == nullptr) {
-    _lastError = "REST недоступний: не задано accessKey/secretKey";
+    _lastError = "REST unavailable: accessKey/secretKey not set";
     return false;
   }
 
@@ -235,10 +232,10 @@ bool EcoFlowClient::withMqttSuspended(const char *what, const std::function<bool
     if (!_mqtt.suspend()) {
       // Клієнт лишився працювати - REST робити не можна: другої TLS-сесії
       // heap не витримає.
-      _lastError = "не вдалось призупинити MQTT - REST пропущено";
+      _lastError = "failed to suspend MQTT - REST skipped";
       return false;
     }
-    logger.debug("%s: MQTT на паузі, вільно %u Б (найбільший блок %u Б)", what,
+    logger.debug("%s: MQTT suspended, %u B free (largest block %u B)", what,
                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
   }
 

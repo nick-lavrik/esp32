@@ -137,7 +137,7 @@ void ImageEffects::applyOrderedDither(JpegImage &image, float spread) {
 
 bool ImageEffects::applyDitheringRGB332(JpegImage &image) {
   if (image.colorDepth() != JpegColorDepth::RGB332) {
-    _logger.warn("ditheringRGB332: зображення не в RGB332");
+    _logger.warn("ditheringRGB332: image is not RGB332");
     return false;
   }
   if (!image.isLoaded()) {
@@ -151,7 +151,7 @@ bool ImageEffects::applyDitheringRGB332(JpegImage &image) {
 
 bool ImageEffects::applyDitheringRGB565(JpegImage &image) {
   if (image.colorDepth() != JpegColorDepth::RGB565) {
-    _logger.warn("ditheringRGB565: зображення не в RGB565");
+    _logger.warn("ditheringRGB565: image is not RGB565");
     return false;
   }
   if (!image.isLoaded()) {
@@ -165,7 +165,7 @@ bool ImageEffects::applyDitheringRGB565(JpegImage &image) {
 
 bool ImageEffects::applyDitheringRGB888(JpegImage &image) {
   if (image.colorDepth() != JpegColorDepth::RGB888) {
-    _logger.warn("ditheringRGB888: зображення не в RGB888");
+    _logger.warn("ditheringRGB888: image is not RGB888");
     return false;
   }
   if (!image.isLoaded()) {
@@ -186,7 +186,7 @@ bool ImageEffects::applyBoxBlur(JpegImage &image, uint8_t radius, uint8_t passes
     return false;
   }
   if (image.colorDepth() == JpegColorDepth::MONO1) {
-    _logger.warn("blur: MONO1 не підтримується");
+    _logger.warn("blur: MONO1 not supported");
     return false;
   }
   if (!image.isLoaded()) {
@@ -199,7 +199,7 @@ bool ImageEffects::applyBoxBlur(JpegImage &image, uint8_t radius, uint8_t passes
 
   Pixel *lineBuffer = (Pixel *)malloc(maxDim * sizeof(Pixel));
   if (lineBuffer == nullptr) {
-    _logger.error("blur: не вистачило пам'яті на line buffer (%u px)", maxDim);
+    _logger.error("blur: out of memory for line buffer (%u px)", maxDim);
     return false;
   }
 
@@ -253,7 +253,7 @@ bool ImageEffects::applyBoxBlur(JpegImage &image, uint8_t radius, uint8_t passes
 
 bool ImageEffects::applyVignette(JpegImage &image, float strength) {
   if (image.colorDepth() == JpegColorDepth::MONO1) {
-    _logger.warn("vignette: MONO1 не підтримується");
+    _logger.warn("vignette: MONO1 not supported");
     return false;
   }
   if (!image.isLoaded()) {
@@ -291,7 +291,7 @@ bool ImageEffects::applyPixelate(JpegImage &image, uint8_t blockSize) {
     return false;
   }
   if (image.colorDepth() == JpegColorDepth::MONO1) {
-    _logger.warn("pixelate: MONO1 не підтримується");
+    _logger.warn("pixelate: MONO1 not supported");
     return false;
   }
   if (!image.isLoaded()) {
@@ -331,7 +331,7 @@ bool ImageEffects::applyPixelate(JpegImage &image, uint8_t blockSize) {
 
 bool ImageEffects::applyScanlines(JpegImage &image, float darkenFactor) {
   if (image.colorDepth() == JpegColorDepth::MONO1) {
-    _logger.warn("scanlines: MONO1 не підтримується");
+    _logger.warn("scanlines: MONO1 not supported");
     return false;
   }
   if (!image.isLoaded()) {
@@ -357,7 +357,7 @@ bool ImageEffects::applyChromaticAberration(JpegImage &image, uint8_t offsetPx) 
     return false;
   }
   if (image.colorDepth() == JpegColorDepth::MONO1) {
-    _logger.warn("chromaticAberration: MONO1 не підтримується");
+    _logger.warn("chromaticAberration: MONO1 not supported");
     return false;
   }
   if (!image.isLoaded()) {
@@ -369,7 +369,7 @@ bool ImageEffects::applyChromaticAberration(JpegImage &image, uint8_t offsetPx) 
 
   Pixel *lineBuffer = (Pixel *)malloc(w * sizeof(Pixel));
   if (lineBuffer == nullptr) {
-    _logger.error("chromaticAberration: не вистачило пам'яті на line buffer (%u px)", w);
+    _logger.error("chromaticAberration: out of memory for line buffer (%u px)", w);
     return false;
   }
 
@@ -405,7 +405,7 @@ float lumaAtClamped(const Pixel *row, int x, uint16_t w) {
 
 bool ImageEffects::applySobelEdges(JpegImage &image) {
   if (image.colorDepth() == JpegColorDepth::MONO1) {
-    _logger.warn("sobelEdges: MONO1 не підтримується");
+    _logger.warn("sobelEdges: MONO1 not supported");
     return false;
   }
   if (!image.isLoaded()) {
@@ -415,7 +415,7 @@ bool ImageEffects::applySobelEdges(JpegImage &image) {
   uint16_t w = image.width();
   uint16_t h = image.height();
   if (w < 3 || h < 3) {
-    _logger.warn("sobelEdges: потрібно щонайменше 3x3 пікселі");
+    _logger.warn("sobelEdges: at least 3x3 pixels required");
     return false;
   }
 
@@ -423,7 +423,7 @@ bool ImageEffects::applySobelEdges(JpegImage &image) {
   Pixel *curRow = (Pixel *)malloc(w * sizeof(Pixel));
   Pixel *nextRow = (Pixel *)malloc(w * sizeof(Pixel));
   if (prevRow == nullptr || curRow == nullptr || nextRow == nullptr) {
-    _logger.error("sobelEdges: не вистачило пам'яті на 3 рядкові буфери (%u px кожен)", w);
+    _logger.error("sobelEdges: out of memory for 3 line buffers (%u px each)", w);
     free(prevRow);
     free(curRow);
     free(nextRow);
@@ -472,7 +472,7 @@ bool ImageEffects::applySobelEdges(JpegImage &image) {
 
 bool ImageEffects::applyEmboss(JpegImage &image, float strength) {
   if (image.colorDepth() == JpegColorDepth::MONO1) {
-    _logger.warn("emboss: MONO1 не підтримується");
+    _logger.warn("emboss: MONO1 not supported");
     return false;
   }
   if (!image.isLoaded()) {
@@ -482,7 +482,7 @@ bool ImageEffects::applyEmboss(JpegImage &image, float strength) {
   uint16_t w = image.width();
   uint16_t h = image.height();
   if (w < 3 || h < 3) {
-    _logger.warn("emboss: потрібно щонайменше 3x3 пікселі");
+    _logger.warn("emboss: at least 3x3 pixels required");
     return false;
   }
 
@@ -490,7 +490,7 @@ bool ImageEffects::applyEmboss(JpegImage &image, float strength) {
   Pixel *curRow = (Pixel *)malloc(w * sizeof(Pixel));
   Pixel *nextRow = (Pixel *)malloc(w * sizeof(Pixel));
   if (prevRow == nullptr || curRow == nullptr || nextRow == nullptr) {
-    _logger.error("emboss: не вистачило пам'яті на 3 рядкові буфери (%u px кожен)", w);
+    _logger.error("emboss: out of memory for 3 line buffers (%u px each)", w);
     free(prevRow);
     free(curRow);
     free(nextRow);

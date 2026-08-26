@@ -198,7 +198,7 @@ void process_and_log(const uint8_t* payload, unsigned int length) {
 
 void testGuessDataType() {
 
-  Serial.println("--- ТЕСТУВАННЯ ГЕССЕРА ТИПІВ ---");
+  Serial.println("--- TYPE HASHER TESTING ---");
 
   // Тест 1: Короткий рядок кириличних букв (2 символи "ОК")
   uint8_t test1[] = {0xD0, 0x9E, 0xD0, 0x9A}; // "ОК" в UTF-8

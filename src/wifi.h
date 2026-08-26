@@ -25,9 +25,9 @@ void setupWiFi() {
 // ВАЖНО: Выключаем Wi-Fi 6 ДО старта подключения, чтобы избежать краша
     esp_err_t err = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     if (err == ESP_OK) {
-        Serial.println("Успешно принудительно включен Wi-Fi 4 (802.11n)");
+        Serial.println("Wi-Fi 4 (802.11n) forced successfully");
     } else {
-        Serial.printf("Ошибка смены протокола: %d\n", err);
+        Serial.printf("Protocol change error: %d\n", err);
     }
   // esp_wifi_set_ps(WIFI_PS_NONE); 
   #endif

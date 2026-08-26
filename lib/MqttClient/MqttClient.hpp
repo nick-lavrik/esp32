@@ -106,13 +106,13 @@ public:
   // --- Шаблони для POD / Struct (Залишаються без змін) ---
   template <typename T>
   bool publishStruct(const char* topic, const T& value, bool retained = false) {
-    static_assert(std::is_trivially_copyable<T>::value, "T має бути POD (trivially copyable)");
+    static_assert(std::is_trivially_copyable<T>::value, "T must be POD (trivially copyable)");
     return publish(topic, reinterpret_cast<const uint8_t*>(&value), sizeof(T), retained);
   }
 
   template <typename T>
   MqttListenerId addStructListener(const char* topic, std::function<void(const char*, const T&)> callback) {
-    static_assert(std::is_trivially_copyable<T>::value, "T має бути POD (trivially copyable)");
+    static_assert(std::is_trivially_copyable<T>::value, "T must be POD (trivially copyable)");
     return addListener(topic, [callback](const char* topic, const uint8_t* payload, unsigned int length) -> void {
           T value{};
           unsigned int copyLength = length < sizeof(T) ? length : sizeof(T);
@@ -123,7 +123,7 @@ public:
 
   template <typename T>
   bool publishNumber(const char* topic, T value, bool retained = false, uint8_t precision = 2) {
-    static_assert(std::is_arithmetic<T>::value, "T має бути числовим типом");
+    static_assert(std::is_arithmetic<T>::value, "T must be an arithmetic type");
     char buffer[32];
     if constexpr (std::is_floating_point<T>::value) {
       snprintf(buffer, sizeof(buffer), "%.*f", precision, static_cast<double>(value));
@@ -137,7 +137,7 @@ public:
 
   template <typename T>
   MqttListenerId addNumberListener(const char* topic, std::function<void(const char*, T)> callback) {
-    static_assert(std::is_arithmetic<T>::value, "T має бути числовим типом");
+    static_assert(std::is_arithmetic<T>::value, "T must be an arithmetic type");
     return addStringListener(topic, [callback](const char* topic, const char* payload) -> void {
       T value;
       if constexpr (std::is_floating_point<T>::value) { value = static_cast<T>(strtod(payload, nullptr)); }
@@ -154,6 +154,11 @@ public:
 
 private:
   std::atomic<bool> _connected{false};
+
+  // Спільне для всіх платформ, бо isSuspended() публічний: на конфігураціях без
+  // паузи (не-ESP32 / не-PicoMQTT) suspend() - no-op, і прапорець просто завжди
+  // лишається false.
+  bool _suspended = false;
 
   bool connect();
   void resubscribeAll();
@@ -293,7 +298,6 @@ private:
   // таска, перш ніж чіпати _mqttClient з головного потоку (інакше два потоки
   // одночасно писали б у сокет - див. коментар у networkTaskLoop()).
   volatile bool _taskRunning = false;
-  bool _suspended = false;
 
   // Спільна частина begin()/resume(): піднімає мережевий таск.
   void startNetworkTask();

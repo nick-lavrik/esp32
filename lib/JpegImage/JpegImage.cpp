@@ -154,7 +154,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
 
   _buffer = allocPreferPsram(bufferBytes, &_usedPsram);
   if (_buffer == nullptr) {
-    _logger.error("Недостатньо пам'яті для декодованого зображення (%d / %d)", bufferBytes,
+    _logger.error("Not enough memory for the decoded image (%d / %d)", bufferBytes,
                   heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 #if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
     jpegDecoder->~JPEGDEC();
@@ -205,7 +205,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
 #endif
 
   _loaded = true;
-  _logger.info("Loaded %dx%d, depth: %d біт, buffer: %u B, memory: %s", _width,
+  _logger.info("Loaded %dx%d, depth: %d bit, buffer: %u B, memory: %s", _width,
                _height, (int)depth, (unsigned)bufferBytes, _usedPsram ? "PSRAM" : "RAM");
   return true;
 }

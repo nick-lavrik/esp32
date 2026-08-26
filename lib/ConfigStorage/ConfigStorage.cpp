@@ -12,7 +12,7 @@ bool ConfigStorage::isKeyValid(const char* key) {
 }
 
 void ConfigStorage::warnInvalidKey(const char* key, const char* methodName) {
-  Logger::info("[ConfigStorage::%s] Некоректний ключ \"%s\" (довжина %d, максимум %d символів)",
+  Logger::info("[ConfigStorage::%s] Invalid key \"%s\" (length %d, max %d characters)",
                methodName, key ? key : "(nullptr)", key ? strlen(key) : 0,
                static_cast<int>(MAX_KEY_LENGTH));
 }
@@ -213,7 +213,7 @@ bool ConfigStorage::ensureNamespaceDir() const {
 bool ConfigStorage::writeFile(const String& path, const void* data, size_t len) {
   File f = LittleFS.open(path, "w");
   if (!f) {
-    Logger::warn("[ConfigStorage] INFO: не вдалось відкрити \"%s\" на запис", path.c_str());
+    Logger::warn("[ConfigStorage] INFO: failed to open \"%s\" for writing", path.c_str());
     return false;
   }
   size_t written = f.write(reinterpret_cast<const uint8_t*>(data), len);

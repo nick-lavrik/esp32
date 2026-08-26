@@ -22,7 +22,7 @@ void NtpService::begin(long gmtOffsetSec, int daylightOffsetSec, const char* ntp
     // sntp_stop()/sntp_init() всередині, тож повторний виклик безпечний
     // і коректно перенастроює сервери. Попереджаємо лише про те, що це
     // навмисний ре-конфіг, а не помилка ініціалізації.
-    _logger.warn("[NtpService] begin() викликано повторно - перенастроюю сервери");
+    _logger.warn("[NtpService] begin() called again - reconfiguring servers");
   }
   _instance = this;
 
@@ -34,7 +34,7 @@ void NtpService::begin(long gmtOffsetSec, int daylightOffsetSec, const char* ntp
 void NtpService::beginTz(const char* tzString, const char* ntpServer1, const char* ntpServer2,
                          const char* ntpServer3, uint32_t syncIntervalMs) {
   if (_instance != nullptr) {
-    _logger.warn("[NtpService] beginTz() викликано повторно - перенастроюю сервери");
+    _logger.warn("[NtpService] beginTz() called again - reconfiguring servers");
   }
   _instance = this;
 

@@ -53,24 +53,24 @@ void loop() {
     // --- Прогрес/результат blinkHandle ---
     int percent;
     while (blinkHandle.tryGetProgress(percent)) {
-        Serial.printf("[Blink] прогрес: %d%%\n", percent);
+        Serial.printf("[Blink] progress: %d%%\n", percent);
     }
     if (blinkHandle.status() == ProcessStatus::Completed) {
         int total;
         if (blinkHandle.tryGetResult(total)) {
-            Serial.printf("[Blink] завершено, блимань: %d\n", total);
+            Serial.printf("[Blink] finished, blinks: %d\n", total);
         }
     }
 
     // --- Прогрес/результат sensorHandle ---
     float sample;
     while (sensorHandle.tryGetProgress(sample)) {
-        Serial.printf("[Sensor] значення: %.1f\n", sample);
+        Serial.printf("[Sensor] value: %.1f\n", sample);
     }
     if (sensorHandle.status() == ProcessStatus::Completed) {
         float avg;
         if (sensorHandle.tryGetResult(avg)) {
-            Serial.printf("[Sensor] середнє: %.2f\n", avg);
+            Serial.printf("[Sensor] average: %.2f\n", avg);
         }
     }
 
@@ -84,11 +84,11 @@ void loop() {
             }
         }
         if (allDone) {
-            Serial.println("[MultiBlink] всі паралельні процеси завершено:");
+            Serial.println("[MultiBlink] all parallel processes finished:");
             for (size_t i = 0; i < multiBlinkHandles.size(); ++i) {
                 int result = 0;
                 multiBlinkHandles[i].tryGetResult(result);
-                Serial.printf("  задача %u -> %d блимань\n", (unsigned)i, result);
+                Serial.printf("  task %u -> %d blinks\n", (unsigned)i, result);
             }
             multiBlinkReported = true;
         }

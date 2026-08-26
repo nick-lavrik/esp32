@@ -26,7 +26,7 @@ float g_accel[3] = {0.0f, 0.0f, 0.0f};  // X, Y, Z у g
 #ifndef IMU_UP_AXIS
 #define IMU_UP_AXIS 0  // 0=X, 1=Y, 2=Z
 #endif
-static_assert(IMU_UP_AXIS >= 0 && IMU_UP_AXIS <= 2, "IMU_UP_AXIS має бути 0(X), 1(Y) або 2(Z)");
+static_assert(IMU_UP_AXIS >= 0 && IMU_UP_AXIS <= 2, "IMU_UP_AXIS must be 0(X), 1(Y) or 2(Z)");
 
 // Знак впливає ЛИШЕ на те, яке з двох положень зветься TopUp у логах:
 // сам flip реагує на ЗМІНУ орієнтації, а стартове положення береться за
@@ -35,7 +35,7 @@ static_assert(IMU_UP_AXIS >= 0 && IMU_UP_AXIS <= 2, "IMU_UP_AXIS має бути
 #define IMU_UP_AXIS_SIGN (-1)
 #endif
 static_assert(IMU_UP_AXIS_SIGN == 1 || IMU_UP_AXIS_SIGN == -1,
-              "IMU_UP_AXIS_SIGN має бути 1 або -1");
+              "IMU_UP_AXIS_SIGN must be 1 or -1");
 
 // Опитувати частіше немає сенсу: переворот плати рукою - подія масштабу
 // сотень мілісекунд, а кожне читання це I2C-транзакція на шині, спільній
@@ -61,7 +61,7 @@ uint32_t g_lastPollMs = 0;
 
 bool ImuController::setup() {
   if (!imu.begin()) {
-    Logger::warn("[IMU] QMI8658 не знайдено на I2C (перевір: i2cscan)");
+    Logger::warn("[IMU] QMI8658 not found on I2C (check: i2cscan)");
     return false;
   }
 
@@ -78,7 +78,7 @@ bool ImuController::setup() {
     }
     g_candidate = g_orientation;
     g_stableCount = STABLE_SAMPLES;
-    Logger::info("[IMU] QMI8658 готовий: X=%.2f Y=%.2f Z=%.2f g | вісь %s -> %s",
+    Logger::info("[IMU] QMI8658 ready: X=%.2f Y=%.2f Z=%.2f g | axis %s -> %s",
                  x, y, z, upAxisName(), orientationName(g_orientation));
   }
   return true;
@@ -137,8 +137,8 @@ const char* ImuController::upAxisName() {
 
 const char* ImuController::orientationName(Orientation o) {
   switch (o) {
-    case Orientation::TopUp: return "TopUp (верх зверху)";
-    case Orientation::TopDown: return "TopDown (повернуто на 180)";
+    case Orientation::TopUp: return "TopUp (top side up)";
+    case Orientation::TopDown: return "TopDown (rotated 180)";
     default: return "Unknown";
   }
 }

@@ -18,7 +18,7 @@ TouchEvents* TouchController::_events = nullptr;
 
 void TouchController::setup(TouchEvents* events) {
   if (!ts.begin()) {
-    Logger::warn("TouchController::AXS5106L недоступний - тач вимкнено");
+    Logger::warn("TouchController::AXS5106L unavailable - touch disabled");
   } else {
     Logger::info("TouchController::AXS5106L setup done (0x%02X)", ts.address());
   }

@@ -34,7 +34,7 @@ std::string SDCardInspector::partitionTypeToString(uint8_t typeCode) {
     case 0xA5:
       return "FreeBSD";
     case 0xEE:
-      return "GPT protective (реальні розділи в GPT)";
+      return "GPT protective (real partitions live in GPT)";
     case 0xEF:
       return "EFI System";
     default: {

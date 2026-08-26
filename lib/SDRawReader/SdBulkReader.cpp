@@ -151,7 +151,7 @@ SdBulkReader::StabilityStats SdBulkReader::verifyRange(uint32_t firstLba, uint32
   const size_t bufferSize = static_cast<size_t>(chunkSectors) * SDRawReader::kSectorSize;
   uint8_t *buffer = static_cast<uint8_t *>(malloc(bufferSize));
   if (buffer == nullptr) {
-    out.println("немає heap на буфер");
+    out.println("no heap for buffer");
     return stats;
   }
 
@@ -209,7 +209,7 @@ SdBulkReader::StabilityStats SdBulkReader::verifyRange(uint32_t firstLba, uint32
       }
 
       if (detailLines < kMaxDetailLines) {
-        out.printf("НЕСТАБІЛЬНО: LBA %lu +%lu\n", (unsigned long)lba, (unsigned long)chunk);
+        out.printf("UNSTABLE: LBA %lu +%lu\n", (unsigned long)lba, (unsigned long)chunk);
         ++detailLines;
       }
     }
@@ -247,7 +247,7 @@ uint32_t SdBulkReader::scanMap(uint32_t firstLba, uint32_t lastLba, uint32_t poi
   if (first == nullptr || repeat == nullptr) {
     free(first);
     free(repeat);
-    out.println("немає heap на буфери сканування");
+    out.println("no heap for scan buffers");
     return 0;
   }
 

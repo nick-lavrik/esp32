@@ -29,7 +29,7 @@ void showFromLittleFS(const char *path) {
   img.setMonoThreshold(128);  // 0-255, підняти якщо картинка виходить надто темною
 
   if (!img.loadFromLittleFS(path, JpegColorDepth::MONO1)) {
-    Serial.printf("[MonoImageExample] Не вдалось завантажити %s\n", path);
+    Serial.printf("[MonoImageExample] Failed to load %s\n", path);
     return;
   }
 

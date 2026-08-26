@@ -35,7 +35,7 @@ bool EcoFlowAuthClient::signedGet(const char *path, String &outPayload) {
   String url = String("https://") + kApiHost + path;
 
   if (!https.begin(tlsClient, url)) {
-    _lastError = "https.begin() не вдався";
+    _lastError = "https.begin() failed";
     return false;
   }
 
@@ -47,7 +47,7 @@ bool EcoFlowAuthClient::signedGet(const char *path, String &outPayload) {
 
   int httpCode = https.GET();
   if (httpCode != HTTP_CODE_OK) {
-    _lastError = "HTTP GET помилка, код=" + String(httpCode);
+    _lastError = "HTTP GET error, code=" + String(httpCode);
     https.end();
     return false;
   }
@@ -66,14 +66,14 @@ bool EcoFlowAuthClient::fetchMqttCredentials(EcoFlowMqttCredentials &outCredenti
   JsonDocument doc;  // ArduinoJson v7
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    _lastError = "Помилка розбору JSON: " + String(err.c_str());
+    _lastError = "JSON parse error: " + String(err.c_str());
     return false;
   }
 
   const char *code = doc["code"] | "";
   if (String(code) != "0") {
-    const char *message = doc["message"] | "невідома помилка";
-    _lastError = "Помилка EcoFlow API: " + String(message);
+    const char *message = doc["message"] | "unknown error";
+    _lastError = "EcoFlow API error: " + String(message);
     return false;
   }
 
@@ -84,7 +84,7 @@ bool EcoFlowAuthClient::fetchMqttCredentials(EcoFlowMqttCredentials &outCredenti
   outCredentials.protocol = doc["data"]["protocol"] | "mqtts";
 
   if (!outCredentials.isValid()) {
-    _lastError = "Відповідь API не містить коректних MQTT-даних";
+    _lastError = "API response has no valid MQTT data";
     return false;
   }
 
@@ -108,14 +108,14 @@ bool EcoFlowAuthClient::fetchDeviceList(std::vector<EcoFlowDevice> &outDevices) 
 
   const char *code = doc["code"] | "";
   if (String(code) != "0") {
-    const char *message = doc["message"] | "невідома помилка";
+    const char *message = doc["message"] | "unknown error";
     _lastError = "Error EcoFlow API: " + String(message);
     return false;
   }
 
   JsonArrayConst data = doc["data"].as<JsonArrayConst>();
   if (data.isNull()) {
-    _lastError = "Поле 'data' відсутнє або не є масивом";
+    _lastError = "Field 'data' is missing or not an array";
     return false;
   }
 

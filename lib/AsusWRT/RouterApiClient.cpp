@@ -24,7 +24,7 @@ bool RouterApiClient::login() {
 
   String url = String("http://") + _host + "/login.cgi";
   if (!http.begin(client, url)) {
-    _lastError = "http.begin() не вдався (login)";
+    _lastError = "http.begin() failed (login)";
     return false;
   }
 
@@ -42,7 +42,7 @@ bool RouterApiClient::login() {
   int httpCode = http.POST(body);
 
   if (httpCode <= 0) {
-    _lastError = String("POST login.cgi мережева помилка: ") + http.errorToString(httpCode);
+    _lastError = String("POST login.cgi network error: ") + http.errorToString(httpCode);
     http.end();
     return false;
   }
@@ -52,7 +52,7 @@ bool RouterApiClient::login() {
   http.end();
 
   if (setCookie.isEmpty()) {
-    _lastError = "login.cgi не повернув Set-Cookie — перевір login_authorization";
+    _lastError = "login.cgi returned no Set-Cookie - check login_authorization";
     return false;
   }
 
@@ -62,7 +62,7 @@ bool RouterApiClient::login() {
 
 bool RouterApiClient::fetchClientListJson(String& outJson) {
   if (_sessionCookie.isEmpty()) {
-    _lastError = "fetchClientListJson() викликано до успішного login()";
+    _lastError = "fetchClientListJson() called before a successful login()";
     return false;
   }
 
@@ -71,7 +71,7 @@ bool RouterApiClient::fetchClientListJson(String& outJson) {
 
   String url = String("http://") + _host + "/appGet.cgi?hook=get_clientlist()";
   if (!http.begin(client, url)) {
-    _lastError = "http.begin() не вдався (appGet.cgi)";
+    _lastError = "http.begin() failed (appGet.cgi)";
     return false;
   }
 
@@ -81,7 +81,7 @@ bool RouterApiClient::fetchClientListJson(String& outJson) {
 
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
-    _lastError = String("GET appGet.cgi HTTP код=") + httpCode;
+    _lastError = String("GET appGet.cgi HTTP code=") + httpCode;
     http.end();
     return false;
   }

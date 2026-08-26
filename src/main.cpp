@@ -138,6 +138,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 // однаковим і для компілятора, і для IDE-індексатора.
 #if HAS_ECOFLOW_CLIENT
 #include "EcoFlow/EcoFlowClient.hpp"
+#include "EcoFlow/EcoFlowDeviceRegistry.hpp"
 #endif
 
 #include "BackgroundImages.hpp"
@@ -287,6 +288,7 @@ EcoFlowClient::Config makeEcoFlowConfig() {
 }
 
 EcoFlowClient ecoflow(makeEcoFlowConfig());
+EcoFlowDeviceRegistry ecoflowDevices;
 #endif
 
 LittleFsStaticSource littleFsSource(LittleFS);
@@ -340,14 +342,14 @@ void onSwipeUpHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe U
 void onSwipeDownHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe DOWN"); }
 
 void onSwipeFromBottomHandler(TouchPoint start, TouchPoint end) {
-  Logger::debug("Swipe FROM BOTTOM (напр., відкрити меню)");
+  Logger::debug("Swipe FROM BOTTOM (e.g. open menu)");
 }
 void onSwipeFromTopHandler(TouchPoint start, TouchPoint end) {
-  Logger::debug("Swipe FROM TOP (напр., шторка сповіщень)");
+  Logger::debug("Swipe FROM TOP (e.g. notification shade)");
 }
-void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe FROM LEFT (напр., назад)"); }
+void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe FROM LEFT (e.g. back)"); }
 void onSwipeFromRightHandler(TouchPoint start, TouchPoint end) {
-  Logger::debug("Swipe FROM RIGHT (напр., бокова панель)");
+  Logger::debug("Swipe FROM RIGHT (e.g. side panel)");
 }
 
 void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
@@ -525,7 +527,7 @@ void i2cScan() {
   }
 
   Logger::info("------------------------------------------------------------");
-  Logger::info(found ? "Знайдено пристроїв: %d" : "Нічого не знайдено - перевір піни/живлення", found);
+  Logger::info(found ? "Devices found: %d" : "Nothing found - check pins/power", found);
   Logger::info("============================================================");
 #else
   Logger::error("I2C diabled (I2C_SDA / I2C_SCL not defined)");
@@ -565,7 +567,7 @@ void updateImuFlip() {
   if (now == last) return;
 
   last = now;
-  Logger::info("[IMU] орієнтація змінилась: %s (%s=%.2fg) -> flip",
+  Logger::info("[IMU] orientation changed: %s (%s=%.2fg) -> flip",
                ImuController::orientationName(now), ImuController::upAxisName(),
                ImuController::upAxisValue());
 
@@ -641,7 +643,33 @@ bool ecoflowVerbose = false;
 void setupEcoFlow() {
   static TLogger _logger{"ecoflow"};
 
+  // Зміна наявності мережі - головна подія, яку тут відслідковують: разом із
+  // нею друкуємо, СКІЛЬКИ пристрій пробув у попередньому стані.
+  ecoflowDevices.onGridChange([](const EcoFlowDeviceState& state) {
+    if (state.previousGrid == EcoFlowGridState::Unknown) {
+      // Перше визначення після старту - не перехід, тривалості ще немає.
+      _logger.info("%s: %s (initial)", state.info->name, ecoFlowGridStateName(state.grid));
+      return;
+    }
+    _logger.warn("%s: %s -> %s after %s (change #%u)", state.info->name,
+                 ecoFlowGridStateName(state.previousGrid), ecoFlowGridStateName(state.grid),
+                 EcoFlowDeviceRegistry::formatDuration(state.previousGridDurationMs).c_str(),
+                 (unsigned)state.gridChangeCount);
+  });
+
+  ecoflowDevices.onSocChange([](const EcoFlowDeviceState& state, int8_t previousSoc) {
+    if (!ecoflowVerbose) { return; }
+    _logger.info("%s: charge %d%% -> %d%%", state.info->name, (int)previousSoc,
+                 (int)state.socPercent);
+  });
+
+  // Пристрій, від якого давно нічого не чути, вважаємо офлайн: /status
+  // приходить не завжди, а тиша в quota - надійніший сигнал.
+  scheduler.addCronTask(60 * 1000UL, []() { ecoflowDevices.expireStale(); });
+
   ecoflow.onQuota([](const String& serialNumber, JsonDocument& doc) {
+    ecoflowDevices.applyQuota(serialNumber, doc);
+
     if (!ecoflowVerbose) { return; }
 
     // Схема повідомлення: {"id":..,"version":"1.0","timestamp":..,"params":{..}}
@@ -662,36 +690,23 @@ void setupEcoFlow() {
 
   ecoflow.onStatus([](const String& serialNumber, JsonDocument& doc) {
     // {"id":..,"version":"1.0","timestamp":..,"params":{"status":0|1}}
-    int status = doc["params"]["status"] | -1;
-    _logger.info("status %s -> %s", serialNumber.c_str(),
-                 status == 1 ? "online" : (status == 0 ? "offline" : "unknown"));
+    // Лог пише сам реєстр - він знає ім'я пристрою, а не лише sn.
+    ecoflowDevices.applyStatus(serialNumber, doc);
   });
 
-  // Старт ВІДКЛАДЕНИЙ до синхронізації часу. Причина: перед підпискою треба
-  // отримати серійні номери через REST, а підпис EcoFlow містить timestamp -
-  // з незапущеним годинником сервер відхиляє запит (та й TLS-хендшейк на
-  // 9-й секунді після ввімкнення ще падає з connect failed: -1).
-  //
-  // Чому опитування, а не колбек ntp.addCallback(): той викликається з
-  // SNTP-таска, а звідти не можна ні HTTPS (стек), ні EventDispatcher (він у
-  // своєму ж хедері позначений як НЕ потокобезпечний). Будь-який подієвий
-  // варіант однаково звівся б до передачі сигналу в головний потік - а
-  // TaskController уже крутиться саме там, тож перевірка isSynced() раз на
-  // 5 с робить те саме без зайвої машинерії.
-  //
-  // Задача знімає сама себе після вдалого старту; доти повторює спроби -
-  // це заодно покриває тимчасову відсутність мережі.
-  static TaskId ecoflowStartTaskId = 0;
-  ecoflowStartTaskId = scheduler.addCronTask(5000, []() {
-    if (ecoflow.isStarted()) {
-      scheduler.removeTask(ecoflowStartTaskId);
-      return;
-    }
-    if (!ntp.isSynced() || ecoflow.isBusy() || !WiFi.isConnected()) {
-      return;
-    }
-    _logger.info("час синхронізовано - піднімаємо EcoFlow");
-    ecoflow.beginAsync();
+  // Стартуємо ОДРАЗУ: серійні номери прошиті, тому підписка не залежить ні від
+  // REST, ні від синхронізованого часу (раніше старт доводилось відкладати саме
+  // через підпис REST-запиту, що містить timestamp).
+  ecoflow.begin();
+
+  // Одноразова звірка з хмарою, коли зʼявиться час: REST потрібен лише щоб
+  // помітити пристрій, доданий у застосунку, але відсутній у прошитому
+  // переліку. Задача знімає себе після першої вдалої спроби.
+  static TaskId ecoflowAuditTaskId = 0;
+  ecoflowAuditTaskId = scheduler.addCronTask(30 * 1000UL, []() {
+    if (!ntp.isSynced() || !WiFi.isConnected() || ecoflow.isBusy()) { return; }
+    scheduler.removeTask(ecoflowAuditTaskId);
+    ecoflow.refreshDevicesAsync();
   });
 
   commandHandler.registerCommand("ecoflow", "show EcoFlow cloud MQTT status", [](const String args) {
@@ -701,22 +716,29 @@ void setupEcoFlow() {
                  ecoflowVerbose ? "on" : "off");
     // TLS-сесія - найбільший споживач heap у цьому клієнті, тому цифри тут
     // корисніші за загальний 'dump-heap': саме вони кажуть, чи пройде REST.
-    _logger.info("heap = %u Б вільно, найбільший блок = %u Б", (unsigned)ESP.getFreeHeap(),
+    _logger.info("heap = %u B free, largest block = %u B", (unsigned)ESP.getFreeHeap(),
                  (unsigned)ESP.getMaxAllocHeap());
     if (ecoflow.lastError().length() > 0) {
       _logger.warn("last error: %s", ecoflow.lastError().c_str());
     }
 
-    _logger.info("отримано повідомлень = %u, останній топік = %s", ecoflow.messageCount(),
-                 ecoflow.lastTopic().length() > 0 ? ecoflow.lastTopic().c_str() : "(жодного)");
+    _logger.info("messages received = %u, last topic = %s", ecoflow.messageCount(),
+                 ecoflow.lastTopic().length() > 0 ? ecoflow.lastTopic().c_str() : "(none)");
 
-    const auto& devices = ecoflow.devices();
-    if (devices.empty()) {
-      _logger.info("devices: (жодного ще не бачили в топіках)");
-    }
-    for (const auto& device : devices) {
-      _logger.info("  %s %-20s %s", device.serialNumber.c_str(), device.name.c_str(),
-                   device.online ? "online" : "offline");
+    _logger.info("%-16s %-18s %-8s %-6s %-9s %s", "SERIAL", "NAME", "PRESENCE", "CHARGE",
+                 "GRID", "IN THIS STATE FOR");
+    for (const auto& state : ecoflowDevices.devices()) {
+      char charge[8] = "  -";
+      if (state.hasSoc()) { snprintf(charge, sizeof(charge), "%d%%", (int)state.socPercent); }
+
+      String gridFor = "-";
+      if (state.gridSinceMs != 0) {
+        gridFor = EcoFlowDeviceRegistry::formatDuration(millis() - state.gridSinceMs);
+      }
+
+      _logger.info("%-16s %-18s %-8s %-6s %-9s %s", state.info->serialNumber, state.info->name,
+                   state.online ? "online" : "offline", charge,
+                   ecoFlowGridStateName(state.grid), gridFor.c_str());
     }
   });
 
@@ -727,10 +749,10 @@ void setupEcoFlow() {
     "ecoflow-devices", "fetch EcoFlow device list over REST (async, result in log)",
     [](const String args) {
       if (!ecoflow.refreshDevicesAsync()) {
-        _logger.error("не запущено: %s", ecoflow.lastError().c_str());
+        _logger.error("not started: %s", ecoflow.lastError().c_str());
         return;
       }
-      _logger.info("запит пішов, результат буде в лозі (MQTT на паузі ~2-5 с)");
+      _logger.info("request sent, result will appear in the log (MQTT suspended ~2-5 s)");
     }
   );
 
@@ -752,10 +774,10 @@ void setupEcoFlow() {
     "ecoflow-cert", "re-issue EcoFlow MQTT credentials over REST (async, result in log)",
     [](const String args) {
       if (!ecoflow.refreshCredentialsAsync()) {
-        _logger.error("не запущено: %s", ecoflow.lastError().c_str());
+        _logger.error("not started: %s", ecoflow.lastError().c_str());
         return;
       }
-      _logger.info("запит пішов, результат буде в лозі (MQTT на паузі ~2-5 с)");
+      _logger.info("request sent, result will appear in the log (MQTT suspended ~2-5 s)");
     }
   );
 }
@@ -950,7 +972,7 @@ void setupSD() {
   for (uint32_t freq : freqs) {
     for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
       if (SD.begin(SD_CS, SPI, freq)) {
-        Logger::info("SD card init done (%u Hz, спроба %d/%d)", (unsigned)freq, attempt, maxAttempts);
+        Logger::info("SD card init done (%u Hz, attempt %d/%d)", (unsigned)freq, attempt, maxAttempts);
         return;
       }
       delay(100);
@@ -958,7 +980,7 @@ void setupSD() {
     Logger::warn("SD init fail @ %u Hz", (unsigned)freq);
   }
 
-  Logger::error("SD init fail. Перевір: картка вставлена? FAT32/FAT16 (НЕ exFAT, НЕ >32GB)? піни?");
+  Logger::error("SD init fail. Check: card inserted? FAT32/FAT16 (NOT exFAT, NOT >32GB)? pins?");
 #endif
 #else
   Logger::warn("SD disabled.");
@@ -1103,11 +1125,11 @@ void dumpConfigStorage() {
 #endif
  
 void dumpSDlistDir(const char* dirname, uint8_t levels) {
-  Logger::info("Вміст директорії: %s", dirname);
+  Logger::info("Directory contents: %s", dirname);
  
   File root = ACTIVE_SD.open(dirname);
   if (!root || !root.isDirectory()) {
-    Logger::info("  (не вдалось відкрити директорію)");
+    Logger::info("  (failed to open directory)");
     return;
   }
  
@@ -1151,7 +1173,7 @@ void dumpSDInfo() {
  
   // Виводимо тип для деталізації
   if (cardType == CARD_MMC)
-    Logger::info("ТCard type: %s", "MMC");
+    Logger::info("Card type: %s", "MMC");
   else if (cardType == CARD_SD)
     Logger::info("Card type: %s", "SDSC");
   else if (cardType == CARD_SDHC)
@@ -1246,7 +1268,7 @@ void remountCardIfMscAsked() {
   }
 
   YIELD_DISPLAY_BUS();
-  Logger::warn("серія помилок читання - перемонтовую картку");
+  Logger::warn("a run of read errors - remounting the card");
 
   ACTIVE_SD.end();
   delay(200);
@@ -1255,7 +1277,7 @@ void remountCardIfMscAsked() {
   mscBulkReader.begin(activeCardSectors());
   sdMassStorageInvalidatePrefetch();
 
-  Logger::info("картку перемонтовано, cardType=%d", (int)ACTIVE_SD.cardType());
+  Logger::info("card remounted, cardType=%d", (int)ACTIVE_SD.cardType());
 }
 #endif
 
@@ -1274,12 +1296,12 @@ void dumpSdMsc(const String& args) {
     YIELD_DISPLAY_BUS();
 
     if (ACTIVE_SD.cardType() == CARD_NONE) {
-      logger.error("SD не змонтована - віддавати хосту нічого");
+      logger.error("SD not mounted - nothing to serve to the host");
       return;
     }
 
     if (!mscBulkReader.isReady() && !mscBulkReader.begin(activeCardSectors())) {
-      logger.error("bulk-читач картки не піднявся");
+      logger.error("card bulk reader failed to start");
       return;
     }
 
@@ -1308,7 +1330,7 @@ void dumpSdRaw(const String& args) {
   YIELD_DISPLAY_BUS();
 
   if (ACTIVE_SD.cardType() == CARD_NONE) {
-    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    logger.warn("SD not mounted - nothing to read (details: status sd+).");
     return;
   }
 
@@ -1319,7 +1341,7 @@ void dumpSdRaw(const String& args) {
   char* lbaToken = strtok_r(buffer, " ", &countToken);
 
   if (lbaToken == nullptr || *lbaToken == '\0') {
-    logger.warn("use: sdraw <lba> [count]   (напр. sdraw 0, sdraw 1056768 2)");
+    logger.warn("use: sdraw <lba> [count]   (e.g. sdraw 0, sdraw 1056768 2)");
     return;
   }
 
@@ -1330,7 +1352,7 @@ void dumpSdRaw(const String& args) {
     count = 1;
   }
   if (count > kSdRawMaxSectors) {
-    logger.warn("count=%lu завеликий, обрізано до %lu", (unsigned long)count,
+    logger.warn("count=%lu too large, clamped to %lu", (unsigned long)count,
                 (unsigned long)kSdRawMaxSectors);
     count = kSdRawMaxSectors;
   }
@@ -1349,7 +1371,7 @@ void dumpSdExt4(const String& args) {
   YIELD_DISPLAY_BUS();
 
   if (ACTIVE_SD.cardType() == CARD_NONE) {
-    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    logger.warn("SD not mounted - nothing to read (details: status sd+).");
     return;
   }
 
@@ -1360,19 +1382,19 @@ void dumpSdExt4(const String& args) {
   char* partToken = strtok_r(buffer, " ", &sbLbaToken);
 
   if (partToken == nullptr || *partToken == '\0') {
-    logger.warn("use: sdext4 <partition 1..4> [sb_lba]   (напр. sdext4 2)");
+    logger.warn("use: sdext4 <partition 1..4> [sb_lba]   (e.g. sdext4 2)");
     return;
   }
 
   const uint32_t partitionIndex = strtoul(partToken, nullptr, 0);
   if (partitionIndex < 1 || partitionIndex > 4) {
-    logger.warn("номер розділу має бути 1..4 (див. status sd)");
+    logger.warn("partition number must be 1..4 (see status sd)");
     return;
   }
 
   const uint32_t partitionFirstLba = sdPartitionFirstLba((uint8_t)partitionIndex);
   if (partitionFirstLba == 0) {
-    logger.warn("розділ %lu не знайдено в MBR (див. status sd)", (unsigned long)partitionIndex);
+    logger.warn("partition %lu not found in MBR (see status sd)", (unsigned long)partitionIndex);
     return;
   }
 
@@ -1383,9 +1405,9 @@ void dumpSdExt4(const String& args) {
       hasExplicitLba ? strtoul(sbLbaToken, nullptr, 0)
                      : partitionFirstLba + Ext4SuperblockInspector::kSuperblockSectorOffset;
 
-  logger.info("розділ %lu: first LBA %lu, суперблок з LBA %lu%s", (unsigned long)partitionIndex,
+  logger.info("partition %lu: first LBA %lu, superblock at LBA %lu%s", (unsigned long)partitionIndex,
               (unsigned long)partitionFirstLba, (unsigned long)superblockLba,
-              hasExplicitLba ? " (задано вручну)" : "");
+              hasExplicitLba ? " (set manually)" : "");
 
   // 1024 байти суперблока = два послідовних сектори. Читаємо їх окремими
   // викликами readRAW() (його API - рівно один сектор за раз).
@@ -1395,7 +1417,7 @@ void dumpSdExt4(const String& args) {
     uint8_t* target = superblock + i * SDRawReader::kSectorSize;
 
     if (!SDRawReader::readSector(ACTIVE_SD, superblockLba + i, target)) {
-      logger.error("не вдалось прочитати LBA %lu (сектор биті або поза межами)",
+      logger.error("failed to read LBA %lu (bad sector or out of range)",
                    (unsigned long)(superblockLba + i));
       return;
     }
@@ -1416,7 +1438,7 @@ void dumpSdBench(const String& args) {
   YIELD_DISPLAY_BUS();
 
   if (ACTIVE_SD.cardType() == CARD_NONE) {
-    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    logger.warn("SD not mounted - nothing to read (details: status sd+).");
     return;
   }
 
@@ -1436,7 +1458,7 @@ void dumpSdBench(const String& args) {
     sectors = 2048;  // 1 MiB - достатньо, щоб усереднити накладні витрати
   }
 
-  logger.info("читаю %lu секторів (%lu KiB) з LBA %lu, пачками по %lu...", (unsigned long)sectors,
+  logger.info("reading %lu sectors (%lu KiB) from LBA %lu, in batches of %lu...", (unsigned long)sectors,
               (unsigned long)(sectors / 2), (unsigned long)lba, (unsigned long)chunk);
 
   RawReadStats stats;
@@ -1445,14 +1467,14 @@ void dumpSdBench(const String& args) {
     static ActiveBulkReader bulkReader;
 
     if (!bulkReader.isReady() && !bulkReader.begin(activeCardSectors())) {
-      logger.error("не вдалось ініціалізувати bulk-читач картки");
+      logger.error("failed to initialise the card bulk reader");
       return;
     }
 
     // Буфер під пачку виділяється в heap: при великому chunk впертись у
     // найбільший ВІЛЬНИЙ блок легко (LCD-буфери фрагментують купу), тому
     // друкуємо його поруч - інакше невдалий malloc виглядав би як "0 ok / 0 fail".
-    logger.info("bulk-режим: потрібно %lu B, найбільший вільний блок %lu B",
+    logger.info("bulk mode: %lu B needed, largest free block %lu B",
                 (unsigned long)(chunk * 512), (unsigned long)ESP.getMaxAllocHeap());
 #if !defined(SD_USE_SDMMC)
     // pdrv є лише у SPI-реалізації: там він визначається перебором і його
@@ -1463,22 +1485,22 @@ void dumpSdBench(const String& args) {
     stats = bulkReader.measureRead(lba, sectors, chunk);
 
     if (stats.sectorsOk == 0 && stats.sectorsFailed == 0) {
-      logger.error("нічого не прочитано - найімовірніше не вистачило heap на буфер");
+      logger.error("nothing was read - most likely not enough heap for the buffer");
       return;
     }
   } else {
     stats = SDRawReader::measureRead(ACTIVE_SD, lba, sectors);
   }
 
-  logger.info("прочитано  : %lu ok / %lu fail", (unsigned long)stats.sectorsOk,
+  logger.info("read       : %lu ok / %lu fail", (unsigned long)stats.sectorsOk,
               (unsigned long)stats.sectorsFailed);
 
   if (stats.sectorsFailed > 0) {
-    logger.warn("перший збійний LBA: %lu", (unsigned long)stats.firstFailedLba);
+    logger.warn("first failed LBA: %lu", (unsigned long)stats.firstFailedLba);
   }
 
   if (stats.elapsedMs == 0 || stats.sectorsOk == 0) {
-    logger.warn("немає що міряти (нуль часу або нуль успішних секторів)");
+    logger.warn("nothing to measure (zero time or zero successful sectors)");
     return;
   }
 
@@ -1488,10 +1510,10 @@ void dumpSdBench(const String& args) {
   const double bytesPerSecond = bytes * 1000.0 / (double)stats.elapsedMs;
   const double minutesPerGiB = (1024.0 * 1024.0 * 1024.0) / bytesPerSecond / 60.0;
 
-  logger.info("час        : %lu ms", (unsigned long)stats.elapsedMs);
-  logger.info("швидкість  : %.1f KiB/s (%.2f MiB/s)", bytesPerSecond / 1024.0,
+  logger.info("time       : %lu ms", (unsigned long)stats.elapsedMs);
+  logger.info("speed      : %.1f KiB/s (%.2f MiB/s)", bytesPerSecond / 1024.0,
               bytesPerSecond / (1024.0 * 1024.0));
-  logger.info("прогноз    : %.1f хв на 1 GiB (%.1f год на 50 GiB)", minutesPerGiB,
+  logger.info("estimate   : %.1f min per 1 GiB (%.1f h per 50 GiB)", minutesPerGiB,
               minutesPerGiB * 50.0 / 60.0);
 }
 
@@ -1508,7 +1530,7 @@ void dumpSdCrc(const String& args) {
   YIELD_DISPLAY_BUS();
 
   if (ACTIVE_SD.cardType() == CARD_NONE) {
-    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    logger.warn("SD not mounted - nothing to read (details: status sd+).");
     return;
   }
 
@@ -1521,7 +1543,7 @@ void dumpSdCrc(const String& args) {
   char* chunkToken = strtok_r(nullptr, " ", &rest);
 
   if (lbaToken == nullptr || *lbaToken == '\0') {
-    logger.warn("use: sdcrc <lba> <count> [chunk]   (напр. sdcrc 1056768 1024 64)");
+    logger.warn("use: sdcrc <lba> <count> [chunk]   (e.g. sdcrc 1056768 1024 64)");
     return;
   }
 
@@ -1536,7 +1558,7 @@ void dumpSdCrc(const String& args) {
   static ActiveBulkReader crcReader;
 
   if (!crcReader.isReady() && !crcReader.begin(activeCardSectors())) {
-    logger.error("не вдалось визначити pdrv картки");
+    logger.error("failed to determine the card pdrv");
     return;
   }
 
@@ -1553,7 +1575,7 @@ void dumpSdCrc(const String& args) {
 
     uint8_t* buffer = (uint8_t*)malloc(chunkSectors * SDRawReader::kSectorSize);
     if (buffer == nullptr) {
-      logger.error("немає heap на буфер %lu B", (unsigned long)(chunkSectors * 512));
+      logger.error("no heap for a %lu B buffer", (unsigned long)(chunkSectors * 512));
       return;
     }
 
@@ -1581,13 +1603,13 @@ void dumpSdCrc(const String& args) {
     crcVoted ^= 0xFFFFFFFF;
     free(buffer);
 
-    logger.info("LBA %lu +%lu, голосування %lu проходів -> CRC32 %08lX (%lu ms)",
+    logger.info("LBA %lu +%lu, majority vote over %lu passes -> CRC32 %08lX (%lu ms)",
                 (unsigned long)lba, (unsigned long)count, (unsigned long)passes,
                 (unsigned long)crcVoted, (unsigned long)(millis() - startMs));
-    logger.info("  сектори: %lu стабільних / %lu відновлених / %lu невпевнених / %lu не читались",
+    logger.info("  sectors: %lu stable / %lu recovered / %lu uncertain / %lu unreadable",
                 (unsigned long)total.sectorsStable, (unsigned long)total.sectorsRecovered,
                 (unsigned long)total.sectorsUncertain, (unsigned long)total.sectorsFailed);
-    logger.info("  біти   : %lu виправлено, з них %lu без надійної більшості",
+    logger.info("  bits   : %lu fixed, %lu of them without a reliable majority",
                 (unsigned long)total.bitsFixed, (unsigned long)total.bitsUncertain);
     return;
   }
@@ -1614,7 +1636,7 @@ void dumpSdVerify(const String& args) {
   YIELD_DISPLAY_BUS();
 
   if (ACTIVE_SD.cardType() == CARD_NONE) {
-    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    logger.warn("SD not mounted - nothing to read (details: status sd+).");
     return;
   }
 
@@ -1642,24 +1664,24 @@ void dumpSdVerify(const String& args) {
   static ActiveBulkReader verifyReader;
 
   if (!verifyReader.isReady() && !verifyReader.begin(activeCardSectors())) {
-    logger.error("не вдалось визначити pdrv картки");
+    logger.error("failed to determine the card pdrv");
     return;
   }
 
-  logger.info("перевіряю LBA %lu +%lu, chunk %lu, проходів %lu, пауза %lu ms",
+  logger.info("checking LBA %lu +%lu, chunk %lu, %lu passes, %lu ms pause",
               (unsigned long)lba, (unsigned long)sectors, (unsigned long)chunk,
               (unsigned long)passes, (unsigned long)delayMs);
 
   const auto stats = verifyReader.verifyRange(lba, sectors, chunk, (uint8_t)passes, delayMs, logger);
 
-  logger.info("чанків     : %lu (стабільних %lu / нестабільних %lu)",
+  logger.info("chunks     : %lu (stable %lu / unstable %lu)",
               (unsigned long)stats.chunksTotal, (unsigned long)stats.chunksStable,
               (unsigned long)stats.chunksUnstable);
-  logger.info("не читались: %lu секторів", (unsigned long)stats.sectorsFailed);
-  logger.info("час        : %lu ms", (unsigned long)stats.elapsedMs);
+  logger.info("unreadable: %lu sectors", (unsigned long)stats.sectorsFailed);
+  logger.info("time       : %lu ms", (unsigned long)stats.elapsedMs);
 
   if (stats.chunksUnstable > 0) {
-    logger.warn("перший нестабільний LBA: %lu", (unsigned long)stats.firstUnstableLba);
+    logger.warn("first unstable LBA: %lu", (unsigned long)stats.firstUnstableLba);
   }
 }
 
@@ -1675,7 +1697,7 @@ void dumpSdMap(const String& args) {
   YIELD_DISPLAY_BUS();
 
   if (ACTIVE_SD.cardType() == CARD_NONE) {
-    logger.warn("SD не змонтована - читати нічого (деталі: status sd+).");
+    logger.warn("SD not mounted - nothing to read (details: status sd+).");
     return;
   }
 
@@ -1701,20 +1723,20 @@ void dumpSdMap(const String& args) {
   static ActiveBulkReader mapReader;
 
   if (!mapReader.isReady() && !mapReader.begin(totalSectors)) {
-    logger.error("не вдалось визначити pdrv картки");
+    logger.error("failed to determine the card pdrv");
     return;
   }
 
-  logger.info("карта LBA %lu..%lu, точок %lu по %lu секторів, проходів %lu",
+  logger.info("map LBA %lu..%lu, %lu points of %lu sectors, %lu passes",
               (unsigned long)firstLba, (unsigned long)lastLba, (unsigned long)points,
               (unsigned long)sectors, (unsigned long)passes);
-  logger.info("'.' повторюване читання, 'x' мерехтить, 'E' не читається");
+  logger.info("'.' repeatable read, 'x' flickers, 'E' unreadable");
 
   const uint32_t startMs = millis();
   const uint32_t unstable =
       mapReader.scanMap(firstLba, lastLba, points, sectors, (uint8_t)passes, logger);
 
-  logger.info("нестабільних точок: %lu з %lu (%.1f%%), %lu ms", (unsigned long)unstable,
+  logger.info("unstable points: %lu of %lu (%.1f%%), %lu ms", (unsigned long)unstable,
               (unsigned long)points, points > 0 ? (100.0 * unstable / points) : 0.0,
               (unsigned long)(millis() - startMs));
 }
@@ -1730,7 +1752,7 @@ void dumpSdMap(const String& args) {
 // шина повністю належить картці, а порядок доступу гарантований тим, що
 // і читання, і віддача в сокет ідуть з одного потоку (див. loop()).
 //
-// Побічний ефект: поки режим активний, екран показує останній кадр -
+// Побічний ефект: поки режим active, екран показує останній кадр -
 // статичну заставку з адресою сервера, яку малюємо один раз при вмиканні.
 // ---------------------------------------------------------------------------
 
@@ -1761,21 +1783,21 @@ void dumpSdImage(const String& args) {
 
   if (action.equalsIgnoreCase("on")) {
     if (sdImageServer.isActive()) {
-      logger.warn("сервер уже піднятий");
+      logger.warn("server is already running");
       return;
     }
 
     YIELD_DISPLAY_BUS();
 
     if (ACTIVE_SD.cardType() == CARD_NONE) {
-      logger.error("SD не змонтована - віддавати нічого (деталі: status sd+).");
+      logger.error("SD not mounted - nothing to serve (details: status sd+).");
       return;
     }
 
     const size_t totalSectors = activeCardSectors();
 
     if (!sdImageBulkReader.isReady() && !sdImageBulkReader.begin(totalSectors)) {
-      logger.error("не вдалось визначити pdrv картки - образ віддавати не можу");
+      logger.error("failed to determine the card pdrv - cannot serve the image");
       return;
     }
 
@@ -1799,14 +1821,14 @@ void dumpSdImage(const String& args) {
     // проти 1.35 MiB/s, які дає сама картка. Для передачі десятків GiB
     // сон радіо неприйнятний; повертаємо його у "sdimg off".
     WiFi.setSleep(false);
-    logger.info("WiFi power save вимкнено (RSSI %d dBm)", WiFi.RSSI());
+    logger.info("WiFi power save disabled (RSSI %d dBm)", WiFi.RSSI());
 
     // Заставку малюємо ПІСЛЯ успішного підняття сервера: інакше при відмові
     // екран залишився б замороженим ні для чого.
     drawSdImageSplash();
 
-    logger.info("дисплей заморожено, шина віддана картці");
-    logger.info("на хості: sudo qemu-nbd --read-only --connect=/dev/nbd0 \\");
+    logger.info("display frozen, bus handed over to the card");
+    logger.info("on the host: sudo qemu-nbd --read-only --connect=/dev/nbd0 \\");
     logger.info("  'json:{\"driver\":\"raw\",\"file\":{\"driver\":\"http\",\"url\":\"http://%s:8080/sd.img\"}}'",
                 WiFi.localIP().toString().c_str());
     return;
@@ -1814,7 +1836,7 @@ void dumpSdImage(const String& args) {
 
   if (action.equalsIgnoreCase("off")) {
     if (!sdImageServer.isActive()) {
-      logger.warn("сервер і так не піднятий");
+      logger.warn("server is not running anyway");
       return;
     }
 
@@ -1823,22 +1845,22 @@ void dumpSdImage(const String& args) {
     // Повертаємо енергозбереження радіо: у звичайному режимі плата не
     // ганяє гігабайти, а WIFI_PS_NONE тримає приймач увімкненим постійно.
     WiFi.setSleep(true);
-    logger.info("дисплей розморожено, WiFi power save повернено");
+    logger.info("display unfrozen, WiFi power save restored");
     return;
   }
 
   // status
-  logger.info("сервер     : %s", sdImageServer.isActive() ? "активний" : "зупинений");
+  logger.info("server     : %s", sdImageServer.isActive() ? "active" : "stopped");
 
   if (sdImageServer.isActive()) {
     logger.info("адреса     : http://%s:8080/sd.img", WiFi.localIP().toString().c_str());
   }
 
-  logger.info("образ      : %llu байт", (unsigned long long)sdImageServer.totalBytes());
-  logger.info("віддано    : %llu байт (запитів %lu)",
+  logger.info("image      : %llu bytes", (unsigned long long)sdImageServer.totalBytes());
+  logger.info("served     : %llu bytes (requests %lu)",
               (unsigned long long)sdImageServer.bytesServed(),
               (unsigned long)sdImageServer.requestsServed());
-  logger.info("збійних    : %lu секторів (останній LBA %lu)",
+  logger.info("failed     : %lu sectors (last LBA %lu)",
               (unsigned long)sdImageServer.badSectors(),
               (unsigned long)sdImageServer.lastBadLba());
 }
@@ -1912,13 +1934,13 @@ void sdProbe(bool force) {
   YIELD_DISPLAY_BUS();
 
   Logger::info("========= SD probe (raw SPI) ===============================");
-  Logger::info("Піни: CS=%d SCK=%d MOSI=%d MISO=%d", SD_CS, SD_SCK, SD_MOSI, SD_MISO);
+  Logger::info("Pins: CS=%d SCK=%d MOSI=%d MISO=%d", SD_CS, SD_SCK, SD_MOSI, SD_MISO);
 
   if (SD.cardType() != CARD_NONE && !force) {
-    Logger::info("Картка вже змонтована - сира проба не потрібна і не безпечна.");
-    Logger::info("  Деталі по картці: status sd");
-    Logger::info("  Якщо проба потрібна саме зараз: sdprobe force");
-    Logger::info("  (це демонтує картку остаточно, до reboot).");
+    Logger::info("The card is already mounted - a raw probe is unnecessary and unsafe.");
+    Logger::info("  Card details: status sd");
+    Logger::info("  If you need the probe right now: sdprobe force");
+    Logger::info("  (this unmounts the card for good, until reboot).");
     Logger::info("============================================================");
     return;
   }
@@ -1927,7 +1949,7 @@ void sdProbe(bool force) {
   // дисплей - інакше ST7735 їстиме наші такти як свої команди.
   const bool wasMounted = (SD.cardType() != CARD_NONE);
   if (wasMounted) {
-    Logger::warn("force: демонтую картку, після проби знадобиться reboot");
+    Logger::warn("force: unmounting the card, a reboot will be needed after the probe");
     SD.end();
     // sdcard_uninit() шле картці GO_IDLE_STATE - їй треба час відпустити DO.
     delay(50);
@@ -1956,9 +1978,9 @@ void sdProbe(bool force) {
   const bool pulledExternally = digitalRead(SD_MISO);
   pinMode(SD_MISO, INPUT_PULLUP);
   delay(2);
-  Logger::info("MISO=%d: зовнішній підтяг %s", SD_MISO,
-               pulledExternally ? "Є (картка/резистор на лінії)"
-                                : "ВІДСУТНІЙ - на цьому піні найімовірніше нічого немає");
+  Logger::info("MISO=%d: external pull-up %s", SD_MISO,
+               pulledExternally ? "PRESENT (card/resistor on the line)"
+                                : "MISSING - most likely nothing is on this pin");
 
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
@@ -1969,11 +1991,11 @@ void sdProbe(bool force) {
   digitalWrite(SD_CS, LOW);
   uint8_t r1 = sdProbeCmd(0, 0x00000000, 0x95);  // CMD0 GO_IDLE_STATE
   Logger::info("CMD0 (GO_IDLE_STATE) -> R1=0x%02X %s", r1,
-               r1 == 0x01   ? "OK (картка в idle)"
-               : r1 == 0xFF ? "НЕМАЄ ВІДПОВІДІ - картка/піни/живлення"
-               : r1 == 0xFE ? "лінія DO постійно в LOW (не підключена або картка зайнята)"
-               : r1 == 0x00 ? "відповіла, але не в idle"
-                            : "несподівано");
+               r1 == 0x01   ? "OK (card is idle)"
+               : r1 == 0xFF ? "NO RESPONSE - card/pins/power"
+               : r1 == 0xFE ? "the DO line stays LOW (not connected or the card is busy)"
+               : r1 == 0x00 ? "answered, but not idle"
+                            : "unexpected");
 
   // CMD8 має сенс за будь-якої валідної R1 (біт 7 скинутий), не лише 0x01.
   if (!(r1 & 0x80)) {
@@ -1983,8 +2005,8 @@ void sdProbe(bool force) {
     Logger::info("CMD8 (SEND_IF_COND) -> R1=0x%02X echo=%02X %02X %02X %02X %s", r8, echo[0], echo[1],
                  echo[2], echo[3],
                  (r8 == 0x01 && echo[3] == 0xAA) ? "OK (SDHC/SDXC v2)"
-                 : (r8 & 0x04)                   ? "illegal command (стара SDSC v1)"
-                                                 : "несподівано");
+                 : (r8 & 0x04)                   ? "illegal command (old SDSC v1)"
+                                                 : "unexpected");
   }
 
   digitalWrite(SD_CS, HIGH);
@@ -1993,22 +2015,22 @@ void sdProbe(bool force) {
 
   Logger::info("------------------------------------------------------------");
   if (r1 == 0xFF) {
-    Logger::info("ВИСНОВОК: картка не відповідає взагалі - шукати причину в");
-    Logger::info("  пінах (SD_CS/SD_SCK/SD_MOSI/SD_MISO у platformio.ini),");
-    Logger::info("  контакті слота або живленні 3V3.");
+    Logger::info("VERDICT: the card does not respond at all - look for the cause in");
+    Logger::info("  the pins (SD_CS/SD_SCK/SD_MOSI/SD_MISO in platformio.ini),");
+    Logger::info("  the slot contacts or the 3V3 supply.");
   } else if (r1 == 0xFE) {
-    Logger::info("ВИСНОВОК: лінія DO постійно читається як 0. Два варіанти:");
-    Logger::info("  a) SD_MISO не той пін / картки на ньому немає - якщо рядок");
-    Logger::info("     про зовнішній підтяг вище каже ВІДСУТНІЙ, то саме це;");
-    Logger::info("  b) залишковий busy після демонтування - тоді поможе reboot.");
-    Logger::info("  Підібрати піни автоматично: sdscan");
+    Logger::info("VERDICT: the DO line always reads as 0. Two options:");
+    Logger::info("  a) SD_MISO is the wrong pin / no card on it - if the line");
+    Logger::info("     about the external pull-up above says MISSING, that is it;");
+    Logger::info("  b) leftover busy after unmounting - a reboot helps then.");
+    Logger::info("  Pick the pins automatically: sdscan");
   } else {
-    Logger::info("ВИСНОВОК: шина і картка справні. Якщо SD.begin() все одно");
-    Logger::info("  падає - справа у файловій системі: потрібен FAT32/FAT16");
-    Logger::info("  (exFAT і картки >32GB Arduino-бібліотека SD не монтує).");
+    Logger::info("VERDICT: bus and card are fine. If SD.begin() still");
+    Logger::info("  fails, it is the filesystem: FAT32/FAT16 is required");
+    Logger::info("  (the Arduino SD library mounts neither exFAT nor cards >32GB).");
   }
   if (wasMounted) {
-    Logger::warn("Картку демонтовано пробою - виконай reboot, щоб повернути SD.");
+    Logger::warn("The probe unmounted the card - run reboot to get SD back.");
   }
   Logger::info("============================================================");
 }
@@ -2073,13 +2095,13 @@ void sdScan() {
   Logger::info("========= SD pin scan ======================================");
 
   if (SD.cardType() != CARD_NONE) {
-    Logger::info("Картка вже змонтована на CS=%d MISO=%d - скан не потрібен.", SD_CS, SD_MISO);
+    Logger::info("The card is already mounted on CS=%d MISO=%d - no scan needed.", SD_CS, SD_MISO);
     Logger::info("============================================================");
     return;
   }
 
-  Logger::info("Фіксовані (спільні з дисплеєм, тому вже підтверджені): SCK=%d MOSI=%d", SD_SCK, SD_MOSI);
-  Logger::info("Поточні (перевіряються): CS=%d MISO=%d", SD_CS, SD_MISO);
+  Logger::info("Fixed (shared with the display, hence already confirmed): SCK=%d MOSI=%d", SD_SCK, SD_MOSI);
+  Logger::info("Current (being tested): CS=%d MISO=%d", SD_CS, SD_MISO);
 
   // Дисплей на тій самій шині - тримаємо його CS у HIGH на весь скан.
 #if defined(TFT_CS) && (TFT_CS >= 0)
@@ -2104,10 +2126,10 @@ void sdScan() {
 
       if (r1 == 0x01) {
         ++found;
-        Logger::info("✅ ЗНАЙДЕНО: CS=%d MISO=%d -> CMD0 R1=0x01", cs, miso);
+        Logger::info("✅ FOUND: CS=%d MISO=%d -> CMD0 R1=0x01", cs, miso);
       } else if (!(r1 & 0x80)) {
         // Відповідь є, але не idle - теж вартий уваги кандидат.
-        Logger::info("?  CS=%d MISO=%d -> CMD0 R1=0x%02X (відповідь є, але не idle)", cs, miso, r1);
+        Logger::info("?  CS=%d MISO=%d -> CMD0 R1=0x%02X (answered, but not idle)", cs, miso, r1);
       }
     }
   }
@@ -2120,13 +2142,13 @@ void sdScan() {
   digitalWrite(SD_CS, HIGH);
 
   Logger::info("------------------------------------------------------------");
-  Logger::info("Перебрано комбінацій: %d, знайдено: %d", tried, found);
+  Logger::info("Combinations tried: %d, found: %d", tried, found);
   if (found) {
-    Logger::info("Пропиши знайдену пару в platformio.ini (SD_CS/SD_MISO) і перепрошийся.");
+    Logger::info("Put the found pair into platformio.ini (SD_CS/SD_MISO) and reflash.");
   } else {
-    Logger::info("Жодна пара не відповіла. Найімовірніше картка не вставлена,");
-    Logger::info("  слот без живлення, або SD_SCK/SD_MOSI на цій платі інші,");
-    Logger::info("  ніж піни дисплея (тоді скан із фіксованими SCK/MOSI безсилий).");
+    Logger::info("No pair responded. Most likely the card is not inserted,");
+    Logger::info("  the slot is unpowered, or SD_SCK/SD_MOSI differ on this board,");
+    Logger::info("  from the display pins (then a scan with fixed SCK/MOSI is useless).");
   }
   Logger::info("============================================================");
 }
@@ -2172,11 +2194,11 @@ void sdBitBang() {
   YIELD_DISPLAY_BUS();
 
   Logger::info("========= SD bit-bang probe ================================");
-  Logger::info("Піни: CS=%d SCK=%d MOSI=%d MISO=%d (без SPI-периферії)", SD_CS, SD_SCK, SD_MOSI, SD_MISO);
+  Logger::info("Pins: CS=%d SCK=%d MOSI=%d MISO=%d (no SPI peripheral)", SD_CS, SD_SCK, SD_MOSI, SD_MISO);
 
   const bool wasMounted = (SD.cardType() != CARD_NONE);
   if (wasMounted) {
-    Logger::warn("Картка змонтована - демонтую; після проби знадобиться reboot");
+    Logger::warn("The card is mounted - unmounting; a reboot will be needed after the probe");
     SD.end();
     delay(50);
   }
@@ -2204,7 +2226,7 @@ void sdBitBang() {
   // 1. Лінія в спокої: CS=HIGH, женемо такти. Картка не вибрана, тому має
   //    віддавати суцільні 0xFF (лінія підтягнута).
   for (int i = 0; i < 10; ++i) buf[i] = sdBitBangTransfer(0xFF);
-  sdBitBangDump("CS=HIGH, 80 тактів:", buf, 10);
+  sdBitBangDump("CS=HIGH, 80 clocks:", buf, 10);
 
   // 2. CMD0 при CS=LOW.
   digitalWrite(SD_CS, LOW);
@@ -2217,7 +2239,7 @@ void sdBitBang() {
   sdBitBangTransfer(0x00);
   sdBitBangTransfer(0x95);  // CRC для CMD0
   for (int i = 0; i < 10; ++i) buf[i] = sdBitBangTransfer(0xFF);
-  sdBitBangDump("CMD0 відповідь:", buf, 10);
+  sdBitBangDump("CMD0 response:", buf, 10);
   digitalWrite(SD_CS, HIGH);
   sdBitBangTransfer(0xFF);
 
@@ -2232,8 +2254,8 @@ void sdBitBang() {
     digitalWrite(pin, HIGH);
     delayMicroseconds(50);
     const bool high = digitalRead(pin);
-    Logger::info("  %-5s (GPIO%-2d) керується: %s", name, pin,
-                 (!low && high) ? "ТАК" : "НІ - пін не піддається!");
+    Logger::info("  %-5s (GPIO%-2d) drivable: %s", name, pin,
+                 (!low && high) ? "YES" : "NO - the pin cannot be driven!");
   };
   checkDrive("SCK", SD_SCK);
   checkDrive("MOSI", SD_MOSI);
@@ -2249,23 +2271,23 @@ void sdBitBang() {
 
   Logger::info("------------------------------------------------------------");
   if (sawR1 && wasMounted) {
-    Logger::info("ВИСНОВОК: картка ВІДПОВІЛА на bit-bang, і апаратний SPI до цього");
-    Logger::info("  вже змонтував її. Тобто справні і залізо, і піни, і SPI -");
-    Logger::info("  ця проба тут нічого не діагностує, лише демонтувала картку.");
+    Logger::info("VERDICT: the card ANSWERED bit-bang, and hardware SPI had already");
+    Logger::info("  mounted it. So hardware, pins and SPI are all fine -");
+    Logger::info("  this probe diagnoses nothing here, it only unmounted the card.");
   } else if (sawR1) {
-    Logger::info("ВИСНОВОК: картка ВІДПОВІЛА на bit-bang, але апаратний SPI її не");
-    Logger::info("  підняв. Залізо і піни справні - причину шукати в SPI");
-    Logger::info("  (частота, спільна з дисплеєм шина, стан CS).");
+    Logger::info("VERDICT: the card ANSWERED bit-bang, but hardware SPI did not");
+    Logger::info("  bring it up. Hardware and pins are fine - look into SPI");
+    Logger::info("  (clock rate, bus shared with the display, CS state).");
   } else if (allFF) {
-    Logger::info("ВИСНОВОК: суцільні FF - лінія підтягнута, але картка мовчить.");
-    Logger::info("  Це поведінка порожнього слота або картки без живлення:");
-    Logger::info("  перевір посадку картки в слоті та 3V3 на слоті.");
+    Logger::info("VERDICT: all FF - the line is pulled up, but the card is silent.");
+    Logger::info("  This is how an empty slot or an unpowered card behaves:");
+    Logger::info("  check that the card is seated properly and 3V3 is on the slot.");
   } else if (allZero) {
-    Logger::info("ВИСНОВОК: суцільні 00 - лінію тримає в нулі. Якщо при цьому");
-    Logger::info("  MOSI/SCK/CS керуються, то MISO або не той пін, або закорочений.");
+    Logger::info("VERDICT: all 00 - something holds the line low. If MOSI/SCK/CS");
+    Logger::info("  can be driven, then MISO is either the wrong pin or shorted.");
   } else {
-    Logger::info("ВИСНОВОК: на лінії є активність, але це не R1. Найімовірніше");
-    Logger::info("  збій синхронізації - але картка фізично присутня.");
+    Logger::info("VERDICT: there is activity on the line, but it is not R1. Most likely");
+    Logger::info("  a sync glitch - but the card is physically present.");
   }
 
   // Повертаємо шину апаратному SPI, інакше дисплей залишиться без неї.
@@ -2274,7 +2296,7 @@ void sdBitBang() {
   digitalWrite(SD_CS, HIGH);
 
   if (wasMounted) {
-    Logger::warn("Картку демонтовано пробою - виконай reboot, щоб повернути SD.");
+    Logger::warn("The probe unmounted the card - run reboot to get SD back.");
   }
   Logger::info("============================================================");
 }
@@ -2343,13 +2365,13 @@ void dumpStatus(const String& section) {
     // Саме так "status sd" на незмонтованій картці перезавантажував пристрій.
     #if defined(SD_USE_SDMMC)
     if (SD_MMC.cardType() == CARD_NONE) {
-      Logger::warn("SD не змонтована - читати нічого (деталі: status sd+).");
+      Logger::warn("SD not mounted - nothing to read (details: status sd+).");
     } else {
       SDCardInspector::printAll(SD_MMC, logger);
     }
     #else
     if (SD.cardType() == CARD_NONE) {
-      Logger::warn("SD не змонтована - читати нічого (деталі: status sd+).");
+      Logger::warn("SD not mounted - nothing to read (details: status sd+).");
     } else {
       SDCardInspector::printAll(SD, logger);
     }
@@ -2399,7 +2421,7 @@ void setupSerialCommander() {
         // Цей регістр - той самий шлях, яким користується сам ROM: прапорець
         // примусового download-boot зберігається в RTC-домені, тому переживає
         // перезапуск ядра.
-        Logger::warn("перезавантажуюсь у режим завантажувача (download mode)");
+        Logger::warn("rebooting into bootloader (download mode)");
         Serial.flush();
         delay(100);
         REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
@@ -2415,7 +2437,7 @@ void setupSerialCommander() {
         const size_t n = tail.count();
 
         if (n == 0) {
-          Logger::info("history: буфер порожній");
+          Logger::info("history: buffer is empty");
           return;
         }
 
@@ -2509,7 +2531,7 @@ void setupSerialCommander() {
 #if BOARD_HAS_IMU
   commandHandler.registerCommand("imu", "show IMU orientation and raw Z acceleration",
                                  [](const String& args) {
-                                   Logger::info("IMU: %s | X=%.2f Y=%.2f Z=%.2f g | вісь %s=%.2fg",
+                                   Logger::info("IMU: %s | X=%.2f Y=%.2f Z=%.2f g | axis %s=%.2fg",
                                                 ImuController::orientationName(ImuController::orientation()),
                                                 ImuController::accelX(), ImuController::accelY(),
                                                 ImuController::accelZ(), ImuController::upAxisName(),
@@ -3519,7 +3541,7 @@ void setupBlinkLED() {
     scheduler.pause(blinkLedTaskId);
   }
 
-  commandHandler.registerCommand("blink", "Керування LED: blink on|off", [blinkLedTaskId](const String& args) {
+  commandHandler.registerCommand("blink", "LED control: blink on|off", [blinkLedTaskId](const String& args) {
     if (args.equalsIgnoreCase("on")) {
       scheduler.resume(blinkLedTaskId);
       configStorage.setBool(CFG_BLINK_LED, true);
@@ -3529,7 +3551,7 @@ void setupBlinkLED() {
       configStorage.setBool(CFG_BLINK_LED, false);
       Logger::info("blink OFF");
     } else {
-      Logger::info("Керування LED: blink on|off");
+      Logger::info("LED control: blink on|off");
     }
   });
 #endif

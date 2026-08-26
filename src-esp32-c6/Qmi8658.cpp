@@ -44,7 +44,7 @@ bool Qmi8658::begin(TwoWire& wire) {
 
   uint8_t rev = 0;
   readRegs(REG_REVISION, &rev, 1);
-  Logger::info("[QMI8658] знайдено на 0x%02X (revision 0x%02X)", _addr, rev);
+  Logger::info("[QMI8658] found at 0x%02X (revision 0x%02X)", _addr, rev);
 
   // CTRL1 = 0x40: ADDR_AI (bit6) - автоінкремент адреси при блоковому читанні.
   // Без нього шість байтів XYZ довелось би читати по одному регістру.

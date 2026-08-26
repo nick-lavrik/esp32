@@ -124,17 +124,17 @@ bool SDImageServer::begin() {
   }
 
   if (!_reader) {
-    logger.error("читач секторів не заданий");
+    logger.error("sector reader not set");
     return false;
   }
 
   if (_totalSectors == 0) {
-    logger.error("розмір картки не заданий (0 секторів)");
+    logger.error("card size not set (0 sectors)");
     return false;
   }
 
   if (!WiFi.isConnected()) {
-    logger.error("немає WiFi - сервер підняти нема куди");
+    logger.error("no WiFi - nowhere to start the server");
     return false;
   }
 
@@ -144,7 +144,7 @@ bool SDImageServer::begin() {
 
   logger.info("сервер піднято: http://%s:%u/sd.img", WiFi.localIP().toString().c_str(),
               (unsigned)_config.port);
-  logger.info("розмір образу: %llu байт (%llu секторів)",
+  logger.info("image size: %llu bytes (%llu sectors)",
               (unsigned long long)totalBytes(), (unsigned long long)_totalSectors);
 
   return true;
@@ -164,7 +164,7 @@ void SDImageServer::end() {
   _server.end();
   _isActive = false;
 
-  logger.info("сервер зупинено (віддано %llu байт, запитів %lu, збійних секторів %lu)",
+  logger.info("server stopped (served %llu bytes, requests %lu, bad sectors %lu)",
               (unsigned long long)_bytesServed, (unsigned long)_requestsServed,
               (unsigned long)_badSectors);
 }
@@ -194,7 +194,7 @@ void SDImageServer::handleClient() {
     }
 
     incoming.setNoDelay(true);
-    logger.info("клієнт %s підключився", incoming.remoteIP().toString().c_str());
+    logger.info("client %s connected", incoming.remoteIP().toString().c_str());
     slot = incoming;
   }
 
@@ -440,7 +440,7 @@ void SDImageServer::serveImage(WiFiClient &client, const Request &request) {
 
   uint8_t *buffer = static_cast<uint8_t *>(malloc(_config.chunkSectors * kSectorSize));
   if (buffer == nullptr) {
-    logger.error("немає heap на буфер %lu B - з'єднання рву",
+    logger.error("no heap for %lu B buffer - dropping connection",
                  (unsigned long)(_config.chunkSectors * kSectorSize));
     client.stop();
     return;
@@ -453,7 +453,7 @@ void SDImageServer::serveImage(WiFiClient &client, const Request &request) {
   // рядків у логі неможливо відрізнити повільну роботу від зависання.
   // Логувати кожен запит не можна - сам Serial став би вузьким місцем.
   if ((_requestsServed % 64) == 0) {
-    logger.info("запит #%lu: offset %llu, всього віддано %llu B, збоїв %lu",
+    logger.info("request #%lu: offset %llu, total served %llu B, failures %lu",
                 (unsigned long)_requestsServed, (unsigned long long)firstByte,
                 (unsigned long long)_bytesServed, (unsigned long)_badSectors);
   }
@@ -496,7 +496,7 @@ bool SDImageServer::sendRange(WiFiClient &client, uint64_t firstByte, uint64_t l
           memset(target, 0, kSectorSize);
           ++_badSectors;
           _lastBadLba = lba + i;
-          logger.warn("збійний сектор LBA %lu -> віддаю нулі", (unsigned long)(lba + i));
+          logger.warn("bad sector LBA %lu -> serving zeros", (unsigned long)(lba + i));
         }
       }
     }

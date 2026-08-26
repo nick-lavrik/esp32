@@ -367,7 +367,7 @@ bool MqttClient::suspend() {
     // Аномалія: таск завис глибше, ніж дозволяє socket_timeout. Відкочуємось -
     // хай працює далі, ніж ризикувати гонкою на сокеті.
     _taskShouldRun = true;
-    Logger::error("[MQTT] %s: мережевий таск не зупинився за %u мс - suspend скасовано",
+    Logger::error("[MQTT] %s: network task did not stop within %u ms - suspend aborted",
                   _config.taskName != nullptr ? _config.taskName : "mqtt",
                   (unsigned)kSuspendTimeoutMs);
     return false;
@@ -492,7 +492,11 @@ bool MqttClient::connect() {
 // true - "паузити нічого": постійної TLS-сесії у власному таску тут немає.
 bool MqttClient::suspend() { return true; }
 void MqttClient::resume() {}
+#if defined(ESP32)
+// Оголошений лише в ESP32-секції .hpp (на ESP8266 мережевого таска взагалі
+// немає), тож і заглушка потрібна тільки тут.
 void MqttClient::startNetworkTask() {}
+#endif
 #endif
 
 bool MqttClient::flushOutgoing(uint32_t timeoutMs) {
@@ -530,13 +534,13 @@ void MqttClient::reportDroppedMessages() {
   uint32_t incoming = _droppedIncoming.exchange(0, std::memory_order_relaxed);
   uint32_t outgoing = _droppedOutgoing.exchange(0, std::memory_order_relaxed);
   if (incoming > 0 || outgoing > 0) {
-    Logger::warn("[MQTT] черга переповнена, відкинуто: %u вхідних, %u вихідних",
+    Logger::warn("[MQTT] queue overflow, dropped: %u incoming, %u outgoing",
                  (unsigned)incoming, (unsigned)outgoing);
   }
 
   uint32_t denied = _subscribeDenied.exchange(0, std::memory_order_relaxed);
   if (denied > 0) {
-    Logger::warn("[MQTT] %s: брокер відхилив %u підписок (SUBACK=0x80) - перевір права акаунта",
+    Logger::warn("[MQTT] %s: broker denied %u subscriptions (SUBACK=0x80) - check account permissions",
                  _config.taskName != nullptr ? _config.taskName : "mqtt", (unsigned)denied);
   }
 #endif

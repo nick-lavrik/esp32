@@ -56,12 +56,12 @@ bool Axs5106lTouch::begin() {
 
   if (!probe(ADDR_PRIMARY) && !probe(ADDR_SECONDARY)) {
     _addr = 0;
-    Logger::warn("[AXS5106L] не відгукнувся ні на 0x%02X, ні на 0x%02X (перевір: i2cscan)",
+    Logger::warn("[AXS5106L] no response at 0x%02X or 0x%02X (check: i2cscan)",
                  ADDR_PRIMARY, ADDR_SECONDARY);
     return false;
   }
 
-  Logger::info("[AXS5106L] знайдено на 0x%02X", _addr);
+  Logger::info("[AXS5106L] found at 0x%02X", _addr);
   return true;
 }
 

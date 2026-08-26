@@ -29,8 +29,8 @@ extern "C" {
 template <typename T>
 class ProcessResultQueue {
   static_assert(std::is_trivially_copyable<T>::value,
-                "ProcessResultQueue<T>: T має бути trivially copyable "
-                "(для важких типів використовуйте T = вказівник, див. коментар у файлі)");
+                "ProcessResultQueue<T>: T must be trivially copyable "
+                "(for heavy types use T = pointer, see the comment in this file)");
 
 public:
   explicit ProcessResultQueue(UBaseType_t capacity = 8)

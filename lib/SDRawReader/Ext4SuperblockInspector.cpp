@@ -141,8 +141,8 @@ void Ext4SuperblockInspector::printFeatures(const uint8_t *superblock, Print &ou
   // розділ у режимі read-only можна ЛИШЕ з опцією noload, інакше ядро
   // спробує відновити журнал і піде на запис у картку, що вмирає.
   if ((incompat & kIncompatRecover) != 0) {
-    out.println("УВАГА: needs_recovery - журнал НЕ доіграний.");
-    out.println("       Монтувати тільки як: mount -o ro,noload");
+    out.println("WARNING: needs_recovery - the journal was NOT replayed.");
+    out.println("       Mount only as: mount -o ro,noload");
   }
 }
 
@@ -150,16 +150,16 @@ void Ext4SuperblockInspector::printAll(const uint8_t *superblock, Print &out) {
   out.println(F("=== ext2/3/4 Superblock ==="));
 
   if (superblock == nullptr) {
-    out.println("буфер не переданий (nullptr)");
+    out.println("buffer not provided (nullptr)");
     return;
   }
 
   if (!hasMagic(superblock)) {
-    out.printf("magic       : 0x%04X (очікувалось 0x%04X) - це НЕ ext2/3/4\n",
+    out.printf("magic       : 0x%04X (expected 0x%04X) - this is NOT ext2/3/4\n",
                static_cast<unsigned int>(readLE16(superblock + kSMagic)),
                static_cast<unsigned int>(kMagic));
-    out.println("Або зміщення розділу не те, або суперблок пошкоджений.");
-    out.println("Резервні копії шукати на початку груп блоків (типово блок 32768).");
+    out.println("Either the partition offset is wrong, or the superblock is damaged.");
+    out.println("Look for backups at the start of block groups (typically block 32768).");
     return;
   }
 
@@ -190,8 +190,8 @@ void Ext4SuperblockInspector::printAll(const uint8_t *superblock, Print &out) {
   copyFixedString(superblock + kSLastMounted, 64, lastMounted, sizeof(lastMounted));
 
   out.printf("magic       : 0x%04X (OK)\n", static_cast<unsigned int>(kMagic));
-  out.printf("label       : %s\n", (label[0] != '\0') ? label : "(порожня)");
-  out.printf("last mounted: %s\n", (lastMounted[0] != '\0') ? lastMounted : "(невідомо)");
+  out.printf("label       : %s\n", (label[0] != '\0') ? label : "(empty)");
+  out.printf("last mounted: %s\n", (lastMounted[0] != '\0') ? lastMounted : "(unknown)");
 
   const uint8_t *uuid = superblock + kSUuid;
   out.printf("UUID        : %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X\n",
@@ -212,7 +212,7 @@ void Ext4SuperblockInspector::printAll(const uint8_t *superblock, Print &out) {
   out.printf("size        : %s total\n", totalStr);
   // Головна цифра для планування порятунку: копіювати треба саме used, а не
   // весь розділ (e2image -ra / partclone.ext4 читають лише зайняті блоки).
-  out.printf("USED        : %s  <- стільки реальних даних\n", usedStr);
+  out.printf("USED        : %s  <- this much real data\n", usedStr);
   out.printf("free        : %s\n", freeStr);
 
   out.printf("inodes      : %lu total / %lu free\n",

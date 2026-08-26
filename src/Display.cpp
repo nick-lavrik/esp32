@@ -62,8 +62,8 @@ void Display::initSprite() {
   void* buf = sprite_.createSprite(width_, height_ / DISPLAY_SPLIT_COUNT);
   _logger.info("initSprite(%d, %d, depth=%d)", width_, height_ / DISPLAY_SPLIT_COUNT, SPRITE_COLOR_DEPTH);
   if (buf == nullptr) {
-    _logger.error("ПОМИЛКА: createSprite() не зміг виділити пам'ять!");
-    _logger.error("Потрібно: %d байт, вільно (heap): %u байт", width_ * height_ * 2,
+    _logger.error("ERROR: createSprite() could not allocate memory!");
+    _logger.error("Required: %d bytes, free (heap): %u bytes", width_ * height_ * 2,
                   ESP.getFreeHeap());
   }
 
@@ -121,7 +121,7 @@ void Display::pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const ui
     rowBufferPx_ = (rowBuffer_ != nullptr) ? w : 0;
   }
   if (rowBuffer_ == nullptr) {
-    _logger.error("pushImage8bpp: не вдалось виділити рядковий буфер (%d px)", (int)w);
+    _logger.error("pushImage8bpp: failed to allocate line buffer (%d px)", (int)w);
     return;
   }
   for (int32_t row = 0; row < h; row++) {
@@ -142,7 +142,7 @@ void Display::pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const ui
   // LGFX (4848s040), SSD1306-шим (esp8266) не мають сумісного 8bpp pushImage -
   // на цих платах SPRITE_COLOR_DEPTH=8 для фонових зображень не використовується
   // (див. platformio.ini, JpegColorDepth у main.cpp).
-  _logger.error("pushImage8bpp() не підтримується на цій платі");
+  _logger.error("pushImage8bpp() not supported on this board");
 #endif
 }
 
