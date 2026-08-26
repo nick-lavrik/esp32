@@ -48,6 +48,21 @@ pio run -e $ENV --upload-port $PORT -t uploadfs
 pio device monitor -p $PORT -b 115200
 ```
 
+**Одноразові команди — через `./esp`, а не монітор.** Він відкриває порт БЕЗ дотику до
+DTR/RTS, тому плата **не ресетиться** і стан у RAM зберігається; `pio device monitor`
+ресетить навіть із `monitor_dtr=0`/`monitor_rts=0`.
+
+```bash
+./esp ecoflow                  # порт визначається сам
+./esp $ENV heap                # або за іменем env
+./esp /dev/ttyACM0 status sd   # або за явним портом
+ESP_TIMEOUT=30 ./esp status sd+   # для довгих відповідей
+```
+
+Індекс для IDE — `./compiledb <env>` (env обов'язковий: індекс містить прапорці саме тієї
+плати). Деталі обох скриптів — `docs/architecture.md`, розділ «Інструменти в корені
+репозиторію».
+
 `uploadfs` обов'язковий для плат із `LITTLEFS_BACKGROUND_IMAGE` (4848s040, s3-lcd147, c6,
 c6-lcd096) і для тесту `dump-asuswrt` (читає `/asus-get_clientlist.json`).
 
@@ -82,6 +97,8 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
 | **V** — IMU / орієнтація | — | — | — | — | ✅ | — | — |
 | **L** — light sensor | — | — | ✅ | — | — | — | — |
 | **B** — кнопка / LED | — | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| **E** — EcoFlow (телеметрія) | — | — | — | — | ✅ | ✅ | — |
+| **H** — heap і фрагментація | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ інші лічильники |
 | **R** — регресії код-рев'ю | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
@@ -252,6 +269,38 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
 
 ---
 
+## 12а. E — EcoFlow (лише плати з `HAS_ECOFLOW_CLIENT`)
+
+Передумова: у `secrets.ini` заповнені `ecoflow_mqtt_*`. Для app-каналу додатково
+`ecoflow_user_id`. Деталі — `docs/ecoflow.md`.
+
+| # | Крок | Очікуваний результат | Плати |
+| :--- | :--- | :--- | :--- |
+| E1 | `ecoflow` | Таблиця з колонками `# SERIAL NAME PRESENCE CHARGE GRID TIME SPAN`; `connected = yes`; рядок каналу (`open` або `app`) | c6, c6-lcd096 |
+| E2 | Почекати 60–90 с після старту | `PRESENCE` переходить з `unknown` в `online` принаймні для активних станцій; `CHARGE` заповнений | c6, c6-lcd096 |
+| E3 | Звірити `CHARGE` із застосунком EcoFlow | Збігається. **Для станції з extra battery** має показуватись СИСТЕМНИЙ заряд (EMS), а не заряд основної батареї | c6, c6-lcd096 |
+| E4 | `ecoflow-params <index>` | Список захоплених параметрів, ключі **нормалізовані** (`inv_ac_in_vol`, не `inv.acInVol`), відсортовані — однакові префікси йдуть разом | c6, c6-lcd096 |
+| E5 | `ecoflow-params <index> "*_in_*"` | Фільтр по glob працює; у підсумку `N of M params match` | c6, c6-lcd096 |
+| E6 | `ecoflow-capture on <index>` → почекати 40 с → `ecoflow-params <index>` | Кількість полів помітно зросла; `ecoflow-capture off` повертає heap (звірити `heap`) | c6, c6-lcd096 |
+| E7 | `ecoflow-sync` | `snapshots: N applied, M skipped`; пристрої з `1006` позначаються як MQTT-only і більше не смикаються | c6, c6-lcd096 |
+| E8 | `ecoflow-stop` → `heap` → `ecoflow-start` | Після `stop` вільного heap **+~57 КБ**; після `start` клієнт піднімається сам (`running = yes`) | c6, c6-lcd096 |
+| E9 | Вимкнути живлення станції з розетки (або зімітувати зникнення мережі) | У консолі `NAME: on-grid -> off-grid after <тривалість> (change #N)`; у таблиці `GRID` змінився | c6, c6-lcd096 |
+| E10 | `ecoflow-auto off` → `reboot` | Після ребуту `running = no`, у лозі `autoconnect is off`; `ecoflow-start` піднімає вручну. **Повернути `ecoflow-auto on`** | c6, c6-lcd096 |
+| E11 | `ecoflow-app-login` (якщо задані `ecoflow_login`/`ecoflow_password`) | Друкує `account`/`password`/`user id`, зберігає в NVS; MQTT після паузи піднімається назад | c6, c6-lcd096 |
+
+---
+
+## 12б. H — Heap і фрагментація
+
+| # | Крок | Очікуваний результат | Плати |
+| :--- | :--- | :--- | :--- |
+| H1 | `heap` | Друкує total / free / largest block / fragmentation / min free ever / uptime | усі |
+| H2 | `heap` тричі з інтервалом ~60 с | `largest block` **стабільний**; якщо він монотонно спадає — фрагментація прогресує, це регресія | усі |
+| H3 | На `esp32-c6`: `heap` після старту | `largest block` ≥ 100 КБ (фон запечений у Flash). Помітно менше — ознака, що `BACKGROUND_PROGMEM_HEADER` вимкнено й фон знову в RAM | c6 |
+| H4 | `ecoflow-stop` → `heap` → `ecoflow-start` → `heap` | Різниця ~57 КБ в обидва боки (TLS-сесія) | c6, c6-lcd096 |
+
+---
+
 ## 13. R — Регресії після код-рев'ю
 
 Мапінг «виправлення → як перевірити». Детальні кроки — у блоках вище.
@@ -274,6 +323,12 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
 | R18 | `endTransmission(false)` замість STOP → `ESP_ERR_INVALID_STATE` на I²C | T9, V1 | **c6** |
 | R19 | `aFS` у `CTRL2` не відповідав `ACCEL_LSB_PER_G` → показання акселерометра вдвічі занижені | V3 | **c6** |
 | R20 | Подвійне обрізання рядка в `SerialLogger` (текст + префікс по 160 байт) і розріз UTF-8 посеред символу → `�` у консолі | S9 | **усі** (видно на логах з кирилицею) |
+| R21 | `HAS_FORCE_DOWNLOAD_BOOT` вмикався за наявністю заголовка `soc/rtc_cntl_reg.h`, хоча на класичному ESP32 у ньому немає `RTC_CNTL_OPTION1_REG` → збірка падала | S1 (сама збірка) | **st7789, ttgo-t1** |
+| R22 | `MqttClient::suspend()` чекав виходу мережевого таска 2 с — менше за `socket_timeout` (5 с), тож повертався при ЖИВОМУ таску, і два потоки писали в один сокет | E8 (кількаразово поспіль) | **c6, c6-lcd096** |
+| R23 | Відхилені брокером підписки (`SUBACK=0x80`) ковталися мовчки: клієнт виглядав справним і просто нічого не отримував | E1 (лог при чужому/протухлому акаунті) | **c6, c6-lcd096** |
+| R24 | Пріоритет полів застосовувався до ОКРЕМОГО повідомлення, а не до накопиченого стану → дельта з `bms_bmsStatus.soc` затирала системний `bms_emsStatus.lcdShowSoc` (61 % замість 72 %) | E3 | **c6, c6-lcd096** |
+| R25 | REST-знімок заповнював заряд і час, але не присутність → пристрій показувався `offline` зі свіжими даними (тепер третій стан `unknown`) | E2 | **c6, c6-lcd096** |
+| R26 | Маркер «невизначено» в `remainTime` відсікався лише на `5999`, хоча EcoFlow віддає ще й `5940`/`5939` → у колонці `TIME` світилось `99h00m` | E1 | **c6, c6-lcd096** |
 
 ### Виправлення, які в поточній конфігурації перевірити НЕ можна
 
