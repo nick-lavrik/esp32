@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Надсилає команду SerialCommander на плату і показує відповідь.
+#
+# ГОЛОВНЕ: порт відкривається БЕЗ дотику до DTR/RTS - саме зміна цих ліній
+# ресетить ESP32-C6 (перевірено: лічильник повідомлень наскрізь зростає між
+# запусками, boot-логу немає). Тому НЕ додавати сюди dtr/rts, stty чи
+# --raw-налаштування швидкості: плата переживає виклик і не втрачає стан.
+#
+# Використання:
+#   ./esp ecoflow                    # порт визначається сам
+#   ./esp brightness 50              # команда з кількох слів
+#   ./esp /dev/ttyACM0 ecoflow       # явний порт
+#   ./esp esp32-c6 ecoflow           # за іменем env з platformio.ini
+#   ./esp                            # без команди - просто читати потік (Ctrl-C)
+#   ./esp --list                     # показати знайдені порти
+#
+# Змінні оточення: ESP_PORT, ESP_BAUD (115200), ESP_TIMEOUT (6), ESP_QUIET (0.4)
+
+set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INI="$ROOT/platformio.ini"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+list_ports() { ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null; }
+
+# Чи є така секція [env:NAME] у platformio.ini
+is_env() { [ -f "$INI" ] && grep -q "^\[env:$1\]$" "$INI"; }
+
+# Плати на C6/S3/H2 мають вбудований USB-Serial/JTAG -> /dev/ttyACM*;
+# решта сидить на зовнішньому USB-UART мості -> /dev/ttyUSB*.
+port_for_env() {
+    local board
+    board="$(awk -v e="[env:$1]" '$0==e{f=1;next} /^\[env:/{f=0} f&&/^board *=/{print $3; exit}' "$INI")"
+    case "$board" in
+        *c6*|*s3*|*h2*) list_ports | grep '^/dev/ttyACM' | head -1 ;;
+        ?*)             list_ports | grep '^/dev/ttyUSB' | head -1 ;;
+        *)              echo "" ;;
+    esac
+}
+
+case "${1-}" in
+    -h|--help) sed -n '2,20p' "$0" | sed 's|^# \?||'; exit 0 ;;
+    --list)
+        found="$(list_ports)"
+        [ -n "$found" ] || die "портів не знайдено"
+        for p in $found; do printf '%s  %s\n' "$p" "$(udevadm info -q property -n "$p" 2>/dev/null | sed -n 's/^ID_MODEL=//p')"; done
+        exit 0 ;;
+esac
+
+PORT="${ESP_PORT-}"
+
+# Перший аргумент може бути портом, іменем env або вже початком команди.
+if [ $# -gt 0 ]; then
+    case "$1" in
+        /dev/*)  PORT="$1"; shift ;;
+        *)       if is_env "$1"; then
+                     PORT="$(port_for_env "$1")"
+                     [ -n "$PORT" ] || die "для env '$1' не знайдено відповідного порту (спробуй ./esp --list)"
+                     shift
+                 fi ;;
+    esac
+fi
+
+if [ -z "$PORT" ]; then
+    mapfile -t candidates < <(list_ports)
+    case "${#candidates[@]}" in
+        0) die "порт не знайдено: підключи плату або задай ESP_PORT" ;;
+        1) PORT="${candidates[0]}" ;;
+        *) die "знайдено кілька портів - уточни явно: ${candidates[*]}" ;;
+    esac
+fi
+
+[ -e "$PORT" ] || die "порт $PORT не існує"
+
+if busy="$(fuser "$PORT" 2>/dev/null)" && [ -n "$busy" ]; then
+    die "порт $PORT зайнятий (PID:$busy) - закрий монітор в IDE"
+fi
+
+CMD="${CMD-$*}"
+
+ESP_PORT="$PORT" ESP_CMD="$CMD" \
+ESP_BAUD="${ESP_BAUD-115200}" ESP_TIMEOUT="${ESP_TIMEOUT-6}" ESP_QUIET="${ESP_QUIET-0.4}" \
+python3 - <<'PY'
+import os, sys, time
+try:
+    import serial
+except ImportError:
+    sys.exit("потрібен pyserial: pip3 install --user pyserial")
+
+port    = os.environ["ESP_PORT"]
+command = os.environ["ESP_CMD"]
+baud    = int(os.environ["ESP_BAUD"])
+timeout = float(os.environ["ESP_TIMEOUT"])
+quiet   = float(os.environ["ESP_QUIET"])
+
+# ВАЖЛИВО: жодних dtr/rts - див. коментар на початку скрипта.
+try:
+    link = serial.Serial(port, baud, timeout=0.1)
+except serial.SerialException as exc:
+    sys.exit(f"не вдалось відкрити {port}: {exc}")
+
+def stream():
+    """Режим монітора: читати, доки не перервуть."""
+    try:
+        while True:
+            data = link.read(4096)
+            if data:
+                sys.stdout.write(data.decode("utf-8", "replace")); sys.stdout.flush()
+    except KeyboardInterrupt:
+        pass
+
+if not command:
+    stream(); link.close(); sys.exit(0)
+
+link.reset_input_buffer()
+link.write((command + "\n").encode())
+link.flush()
+
+# Читаємо, доки плата не замовкне на ESP_QUIET - інакше довгі відповіді
+# (status sd, ecoflow) обрізалися б на першому ж пакеті. Загальна межа -
+# ESP_TIMEOUT: пристрій паралельно сипле власні логи й сам ніколи не "замовкає"
+# надовго.
+deadline = time.time() + timeout
+last     = None
+while time.time() < deadline:
+    data = link.read(4096)
+    if data:
+        sys.stdout.write(data.decode("utf-8", "replace")); sys.stdout.flush()
+        last = time.time()
+    elif last is not None and time.time() - last >= quiet:
+        break
+
+link.close()
+PY

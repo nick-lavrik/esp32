@@ -110,8 +110,7 @@ void EcoFlowClient::begin() {
   for (size_t i = 0; i < EcoFlowDeviceRegistry::deviceCount(); i++) {
     const String quotaTopic = EcoFlowMqttTopics::quota(_account, table[i].serialNumber);
     const String statusTopic = EcoFlowMqttTopics::status(_account, table[i].serialNumber);
-    logger.debug("%-16s %-14s %s", table[i].serialNumber,
-                 ecoFlowDeviceTypeName(table[i].type), table[i].name);
+    logger.debug("%-16s %s", table[i].serialNumber, table[i].name);
 
     _mqtt.addJsonListener(quotaTopic.c_str(), [this](const char *topic, JsonDocument &doc) {
       _messageCount++;
