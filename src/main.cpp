@@ -173,7 +173,7 @@ const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 const char* CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix";
 // runtime-override для ECOFLOW_AUTOCONNECT: "1"/"0"; порожнє -> build-time дефолт
 const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
-// Останні випущені app-креденшели (команда 'ecoflow-app-login'). Зберігаються
+// Останні випущені app-креденшели (команда 'ecoflow-login'). Зберігаються
 // як резервна копія й журнал: застосувати їх з NVS на льоту не можна - MqttConfig
 // копіює вказівники в конструкторі глобального EcoflowClient, тобто до setup().
 const char* CFG_ECOFLOW_APP_ACCOUNT = "ecoflow.acc";
@@ -291,7 +291,7 @@ MqttKeyGenerator mqttTopicPrefixOverride;
 #endif
 
 #if HAS_ECOFLOW_CLIENT
-EcoflowClient::Config makeEcoFlowConfig() {
+EcoflowClient::Config makeEcoflowConfig() {
   EcoflowClient::Config config;
   config.mqttHost = ECOFLOW_MQTT_HOST;
   config.mqttPort = ECOFLOW_MQTT_PORT;
@@ -304,7 +304,7 @@ EcoflowClient::Config makeEcoFlowConfig() {
   config.userId = ECOFLOW_USER_ID;
 #endif
 #if defined(ECOFLOW_LOGIN) && defined(ECOFLOW_PASSWORD)
-  // Лише для 'ecoflow-app-login': перевипуск app-креденшелів.
+  // Лише для 'ecoflow-login': перевипуск app-креденшелів.
   config.email = ECOFLOW_LOGIN;
   config.emailPassword = ECOFLOW_PASSWORD;
 #endif
@@ -314,7 +314,7 @@ EcoflowClient::Config makeEcoFlowConfig() {
   return config;
 }
 
-EcoflowClient ecoflow(makeEcoFlowConfig());
+EcoflowClient ecoflow(makeEcoflowConfig());
 EcoflowDeviceRegistry ecoflowDevices;
 #endif
 
@@ -700,7 +700,7 @@ static String ecoflowSerialFromKey(const String& key) {
   return String();
 }
 
-void setupEcoFlow() {
+void setupEcoflow() {
   static TLogger _logger{"ecoflow"};
 
   // Зміна наявності мережі - головна подія, яку тут відслідковують: разом із
@@ -870,7 +870,7 @@ void setupEcoFlow() {
   );
 
   commandHandler.registerCommand(
-    "ecoflow-app-login", "issue private-API MQTT credentials (email+password -> account/password)",
+    "ecoflow-login", "issue private-API MQTT credentials (email+password -> account/password)",
     [](const String args) {
       if (!ecoflow.issueAppCredentialsAsync()) {
         _logger.error("not started: %s", ecoflow.lastError().c_str());
@@ -4050,7 +4050,7 @@ void setup() {
 #if HAS_ECOFLOW_CLIENT
   // Після setupNtpService(): REST-підпис EcoFlow використовує timestamp, а
   // MQTT-хендшейк - перевірку строку дії сертифіката.
-  setupEcoFlow();
+  setupEcoflow();
 #endif
   setupFlipButton();
   setupWiFiIcon();

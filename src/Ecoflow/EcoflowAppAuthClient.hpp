@@ -23,7 +23,7 @@
 //
 // JWT живе 30 днів, але потрібен лише щоб ОТРИМАТИ MQTT-креденшели; самі
 // креденшели стабільні між викликами, тому їх достатньо випустити раз і
-// зберегти (див. команду 'ecoflow-app-login').
+// зберегти (див. команду 'ecoflow-login').
 class EcoflowAppAuthClient {
 public:
     EcoflowAppAuthClient(const String &email, const String &password);

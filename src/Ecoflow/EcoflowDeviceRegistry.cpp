@@ -393,7 +393,13 @@ bool EcoflowDeviceRegistry::applyQuota(const String &serialNumber, JsonDocument 
     return false;
   }
 
-  state->lastMessageMs = millis();
+  const uint32_t now = millis();
+  if (state->lastMessageMs > 0 && !state->online) {
+    logger.debug("%s (%s) woke up after %s silence", state->info->serialNumber,
+                state->info->name, formatDuration(now - state->lastMessageMs).c_str());
+  }
+
+  state->lastMessageMs = now;
   state->lastMessageEpoch = time(nullptr);
   state->messageCount++;
   state->online = true;
