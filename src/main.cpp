@@ -1445,7 +1445,7 @@ void dumpSDlistDir(const char* dirname, uint8_t levels) {
     Logger::info("  ...");
   }
 }
- 
+
 void dumpSDInfo() {
   // 1. Деактивируем выбор других устройств на шине
   // digitalWrite(15, HIGH); // Отключаем TFT_CS
