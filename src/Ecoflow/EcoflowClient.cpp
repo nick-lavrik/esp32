@@ -95,7 +95,8 @@ EcoflowClient::EcoflowClient(const Config &config)
       _rootTopicStorage(buildRootTopic(config.mqttUsername)),
       _mqtt(makeMqttConfig(config, _rootTopicStorage, _clientIdStorage)),
       _auth(config.accessKey != nullptr ? config.accessKey : "",
-            config.secretKey != nullptr ? config.secretKey : "") {}
+            config.secretKey != nullptr ? config.secretKey : "") {
+}
 
 String EcoflowClient::serialFromTopic(const char *topic) {
   // Приватний канал: "/app/device/property/{sn}" - sn останній сегмент.
@@ -160,22 +161,23 @@ void EcoflowClient::begin() {
     };
 
     if (_channel == Channel::AppPrivate) {
-      // Приватний канал: один топік на пристрій, і в ньому вже все. Окремого
-      // /status немає - онлайн визначається тишею (EcoflowDeviceRegistry::
-      // expireStale), як і для пристроїв, що /status не шлють.
+      // Приватний канал: один топік на пристрій, і в ньому вже все. Окремого /status немає - онлайн
+      // визначається тишею (EcoflowDeviceRegistry::expireStale), як і для пристроїв, що /status не шлють.
       _mqtt.addJsonListener(EcoflowMqttTopics::appProperty(serial).c_str(), quotaHandler);
       continue;
     }
 
     _mqtt.addJsonListener(EcoflowMqttTopics::quota(_account, serial).c_str(), quotaHandler);
-    _mqtt.addJsonListener(EcoflowMqttTopics::status(_account, serial).c_str(),
-                          [this](const char *topic, JsonDocument &doc) {
-                            _messageCount++;
-                            _lastTopic = topic;
-                            if (_statusCallback) {
-                              _statusCallback(serialFromTopic(topic), doc);
-                            }
-                          });
+    _mqtt.addJsonListener(
+      EcoflowMqttTopics::status(_account, serial).c_str(),
+      [this](const char *topic, JsonDocument &doc) {
+        _messageCount++;
+        _lastTopic = topic;
+        if (_statusCallback) {
+          _statusCallback(serialFromTopic(topic), doc);
+        }
+      }
+    );
   }
 
   _mqtt.begin();
@@ -290,7 +292,7 @@ void EcoflowClient::runRestJob(RestJob job) {
     }
     logger.info("fetched %u devices:", (unsigned)_devices.size());
     for (const auto &device : _devices) {
-      logger.info("  %s %-20s %s", device.serialNumber.c_str(), device.name.c_str(),
+      logger.info("  %s %-22s %s", device.serialNumber.c_str(), device.name.c_str(),
                   device.online ? "online" : "offline");
     }
     logger.info("new devices are picked up at startup only - reboot required");

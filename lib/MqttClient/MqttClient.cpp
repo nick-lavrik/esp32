@@ -277,7 +277,10 @@ void MqttClient::begin() {
 
   _mqttClient.connected_callback = [this]() {
     _connected.store(true, std::memory_order_relaxed);
-    Serial.printf("[%s:%d] Connected to broker successfully!\n", _mqttClient.host.c_str(), _mqttClient.port);
+    if (_connected_callback) {
+      _connected_callback(_mqttClient);
+    }
+    // Serial.printf("[%s:%d] Connected to broker successfully!\n", _mqttClient.host.c_str(), _mqttClient.port);
     this->resubscribeAll();
 
     bool hasOnlineMessage = _config.lwtOnlineMessage != nullptr && _config.lwtOnlineMessage[0] != '\0';
@@ -289,12 +292,18 @@ void MqttClient::begin() {
 
   _mqttClient.disconnected_callback = [this]() {
     _connected.store(false, std::memory_order_relaxed);
-    Serial.printf("[%s:%d] Disconnected from broker\n", _mqttClient.host.c_str(), _mqttClient.port);
+    if (_disconnected_callback) {
+      _disconnected_callback(_mqttClient);
+    }
+    // Serial.printf("[%s:%d] Disconnected from broker\n", _mqttClient.host.c_str(), _mqttClient.port);
   };
 
   _mqttClient.connection_failure_callback = [this]() {
     _connected.store(false, std::memory_order_relaxed);
-    Serial.printf("[%s:%d] Connect fail.\n", _mqttClient.host.c_str(), _mqttClient.port);
+    if (_connection_failure_callback) {
+      _connection_failure_callback(_mqttClient);
+    }
+    // Serial.printf("[%s:%d] Connect fail.\n", _mqttClient.host.c_str(), _mqttClient.port);
   };
 
   // TODO: коли буде підключено per-topic message dispatch для PicoMQTT
@@ -306,11 +315,14 @@ void MqttClient::begin() {
   // Root-підписка: один топік, далі роздача по addListener()-фільтрах.
   // Для стороннього брокера це НЕ "#" (див. MqttConfig::rootSubscribeTopic).
   const char* rootTopic = _config.rootSubscribeTopic != nullptr ? _config.rootSubscribeTopic : "#";
-  _mqttClient.SubscribedMessageListener::subscribe(resolveTopic(rootTopic).c_str(), [this](const char *t, const void* m, const size_t s) {
-    this->enqueueIncoming(t, (const uint8_t*)m, s);
+  _mqttClient.SubscribedMessageListener::subscribe(
+    resolveTopic(rootTopic).c_str(),
+    [this](const char *t, const void* m, const size_t s) {
+      this->enqueueIncoming(t, static_cast<const uint8_t*>(m), s);
     // this->dispatchMessage(t, (const uint8_t*)m, s);
-  }, _config.rootSubscribeBufferSize);
-
+    },
+    _config.rootSubscribeBufferSize
+  );
 
   _mqttClient.begin();
 
@@ -796,6 +808,7 @@ void MqttClient::resubscribeAll() {
     bool accepted = _mqttClient.PicoMQTT::BasicClient::subscribe(topic.c_str(), 0, &qosGranted);
     if (!accepted || qosGranted == 0x80) {
       _subscribeDenied.fetch_add(1, std::memory_order_relaxed);
+      Logger::error("subscribe %s denied", topic.c_str());
     }
 #endif
   }

@@ -92,7 +92,7 @@ const char *const kBlacklistParams[] = {
 // Вище цього EcoFlow віддає «невизначено», а не прогноз: у логах траплялись
 // 5999, 5940 і 5939 (тобто ~99 годин). Реальний прогноз такої довжини все одно
 // неінформативний, тому відсікаємо все, що більше.
-constexpr int32_t kRemainTimeUnknownFrom = 5900;
+constexpr int32_t kRemainTimeUnknownFrom = 6000; // 5900;
 
 // Стеля на пристрій. 353 поля DELTA 2 у std::map - це десятки кілобайт, а heap
 // на цій платі ми виборювали окремо (див. команду 'heap').
@@ -307,13 +307,13 @@ String EcoflowDeviceRegistry::formatDuration(uint32_t milliseconds) {
 
   char buffer[32];
   if (days > 0) {
-    snprintf(buffer, sizeof(buffer), "%lud %02luh %02lum", (unsigned long)days,
+    snprintf(buffer, sizeof(buffer), "%lud%02luh%02lum", (unsigned long)days,
              (unsigned long)hours, (unsigned long)minutes);
   } else if (hours > 0) {
-    snprintf(buffer, sizeof(buffer), "%luh %02lum %02lus", (unsigned long)hours,
+    snprintf(buffer, sizeof(buffer), "%luh%02lum%02lus", (unsigned long)hours,
              (unsigned long)minutes, (unsigned long)seconds);
   } else if (minutes > 0) {
-    snprintf(buffer, sizeof(buffer), "%lum %02lus", (unsigned long)minutes,
+    snprintf(buffer, sizeof(buffer), "%lum%02lus", (unsigned long)minutes,
              (unsigned long)seconds);
   } else {
     snprintf(buffer, sizeof(buffer), "%lus", (unsigned long)seconds);
@@ -476,14 +476,17 @@ bool EcoflowDeviceRegistry::applyParams(EcoflowDeviceState &stateRef, JsonObject
   }
   // Максимум по всіх батареях з НАКОПИЧЕНОГО стану: з extra battery кожна має
   // власний прогноз, а система готова лише коли закінчить остання.
+  // TODO: ems_chg_remain_time / pd_remain_time - якщо "заряджається" (світло є)
+  // TODO: ems_dsg_remain_time / pd_remain_time - якщо "розряджається" (світла нема)
   {
     float best = -1;
     for (const auto &kv : state->trackedParams) {
-      if (!wildcardMatch("*remain_time", kv.first.c_str())) { continue; }
-      if (kv.second < 0 || kv.second >= kRemainTimeUnknownFrom) { continue; }
-      if (kv.second > best) { best = kv.second; }
+      // if (!wildcardMatch("*remain_time", kv.first.c_str())) { continue; }
+      if (!wildcardMatch("pd_remain_time", kv.first.c_str())) { continue; }
+      // if (kv.second < 0 || kv.second >= kRemainTimeUnknownFrom) { continue; }
+      if (abs(kv.second) > best) { best = abs(kv.second); }
     }
-    if (best >= 0) { state->remainTimeMinutes = (int32_t)best; }
+    if (best >= 0) { state->remainTimeMinutes = static_cast<int32_t>(best); }
   }
 
   // Наявність напруги на AC-вході = мережа є. Розрахунок за потужністю тут

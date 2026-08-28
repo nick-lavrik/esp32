@@ -92,6 +92,10 @@ public:
 
     bool isConnected() const { return _mqtt.isConnected(); }
 
+    void onMqttConnect(const MqttClientConnectionCallback callback) { _mqtt.onConnect(callback); }
+    void onMqttDisconnect(const MqttClientConnectionCallback callback) { _mqtt.onDisconnect(callback); }
+    void onMqttConnectionFail(const MqttClientConnectionCallback callback) { _mqtt.onConnectionFail(callback); }
+
     // Скільки повідомлень прийшло з брокера і який топік був останнім.
     // Потрібно, щоб відрізнити "підключились, але пристрій мовчить" від
     // "дані йдуть, просто вимкнено verbose".

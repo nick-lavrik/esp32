@@ -686,7 +686,7 @@ static String ecoflowSerialFromKey(const String& key) {
   if (numeric) {
     const size_t index = (size_t)value.toInt();
     if (index >= ecoflowDevices.devices().size()) {
-      _logger.error("index out of range (0..%u)",
+      _logger.error("index %u out of range (0..%u)", index,
                     (unsigned)(ecoflowDevices.devices().size() - 1));
       return String();
     }
@@ -702,6 +702,20 @@ static String ecoflowSerialFromKey(const String& key) {
 
 void setupEcoflow() {
   static TLogger _logger{"ecoflow"};
+
+  #if defined(ESP32)
+  ecoflow.onMqttConnect([](const MqttTransportClient& client) {
+    _logger.info("MQTT connected       [%s:%d]", client.host.c_str(), client.port);
+  });
+
+  ecoflow.onMqttDisconnect([](const MqttTransportClient& client) {
+    _logger.info("MQTT disconnected    [%s:%d]", client.host.c_str(), client.port);
+  });
+
+  ecoflow.onMqttConnectionFail([](const MqttTransportClient& client) {
+    _logger.info("MQTT connect fail    [%s:%d]", client.host.c_str(), client.port);
+  });
+  #endif
 
   // Зміна наявності мережі - головна подія, яку тут відслідковують: разом із
   // нею друкуємо, СКІЛЬКИ пристрій пробув у попередньому стані.
@@ -798,7 +812,11 @@ void setupEcoflow() {
     ecoflow.syncSnapshotsAsync();
   });
 
+  scheduler.addCronTask(60 * 1000UL, []() { commandHandler.execute("ecoflow"); });
+
+  // command: ecoflow
   commandHandler.registerCommand("ecoflow", "show EcoFlow cloud MQTT status", [](const String args) {
+    _logger.info("=== ECOFLOW ===");
     _logger.info("connected = %s, account = %s", ecoflow.isConnected() ? "yes" : "no",
                  ecoflow.account().c_str());
     _logger.info("broker = %s:%d, channel = %s, verbose = %s", ECOFLOW_MQTT_HOST,
@@ -818,23 +836,15 @@ void setupEcoflow() {
     _logger.info("messages received = %u, last topic = %s", ecoflow.messageCount(),
                  ecoflow.lastTopic().length() > 0 ? ecoflow.lastTopic().c_str() : "(none)");
 
+    const char* separator = "-------------------------------";
+
     _logger.info("");
-    _logger.info("%-1s %-16s %-18s %-7s %6s %-9s %7s %s", "#", "SERIAL", "NAME", "STATUS",
-                 "CHARGE", "GRID", "TIME", "SPAN");
+    _logger.info("%-1s %-16s %-18s %-7s %6s %-9s %7s %9s", "#", "SERIAL", "NAME", "STATUS",
+                 "CHARGE", "GRID", "LEFT", "AGE");
+    _logger.info("%.1s %.16s %.18s %.7s %.6s %.9s %.7s %.9s", separator, separator, separator, separator,
+                 separator, separator, separator, separator);
     size_t deviceIndex = 0;
     for (const auto& state : ecoflowDevices.devices()) {
-      // Без ведучих пробілів: колонку вирівнює сам printf ("%6s").
-      char charge[8] = "-";
-      if (state.hasSoc()) { snprintf(charge, sizeof(charge), "%d%%", (int)state.socPercent); }
-
-      String gridFor = "-";
-      if (state.gridSinceMs != 0) {
-        gridFor = EcoflowDeviceRegistry::formatDuration(millis() - state.gridSinceMs);
-      }
-
-      // TIME стоїть ПІСЛЯ GRID: EcoFlow віддає одне поле remainTime і на заряд,
-      // і на розряд, тому саме сусідство з GRID і пояснює, що воно означає.
-      const String remaining = EcoflowDeviceRegistry::formatRemainTime(state.remainTimeMinutes);
 
       // Той самий індекс, що приймають 'ecoflow-params' і 'ecoflow-capture'.
       // CHARGE і TIME вирівняні вправо, щоб числа читались колонкою.
@@ -844,11 +854,28 @@ void setupEcoflow() {
       const char* presence = state.lastMessageMs == 0 ? "unknown"
                                                       : (state.online ? "online" : "offline");
 
-      _logger.info("%-1u %-16s %-18s %-7s %6s %-9s %7s %s", (unsigned)deviceIndex++,
+      // Без ведучих пробілів: колонку вирівнює сам printf ("%6s").
+      char charge[8] = "-";
+      if (state.hasSoc()) { snprintf(charge, sizeof(charge), "%d%%", (int)state.socPercent); }
+
+      // TIME стоїть ПІСЛЯ GRID: EcoFlow віддає одне поле remainTime і на заряд,
+      // і на розряд, тому саме сусідство з GRID і пояснює, що воно означає.
+      const String remaining = EcoflowDeviceRegistry::formatRemainTime(state.remainTimeMinutes);
+
+      String gridFor = "-";
+      if (state.gridSinceMs != 0) {
+        gridFor = EcoflowDeviceRegistry::formatDuration(millis() - state.gridSinceMs);
+      }
+
+      _logger.info("%-1u %-16s %-18s %-7s %6s %-9s %7s %9s",
+                   (unsigned) deviceIndex++,
                    state.info->serialNumber,
-                   state.info->name, presence, charge,
-                   state.gridInferred ? (String(ecoflowGridStateName(state.grid)) + "*").c_str()
-                                      : ecoflowGridStateName(state.grid),
+                   state.info->name,
+                   presence,
+                   charge,
+                   state.gridInferred
+                    ? (String(ecoflowGridStateName(state.grid)) + "*").c_str()
+                    : ecoflowGridStateName(state.grid),
                    remaining.c_str(),
                    gridFor.c_str());
     }
@@ -858,6 +885,7 @@ void setupEcoflow() {
   // Обидві REST-команди йдуть у власний таск: TLS-хендшейк не вміщується
   // комфортно в стек головного loopTask, а пауза MQTT на час запиту заблокувала
   // б sketch loop() на кілька секунд (дисплей/тач завмирали б).
+  // command: ecoflow-devices
   commandHandler.registerCommand(
     "ecoflow-devices", "fetch EcoFlow device list over REST (async, result in log)",
     [](const String args) {
@@ -869,6 +897,7 @@ void setupEcoflow() {
     }
   );
 
+  // command: ecoflow-login
   commandHandler.registerCommand(
     "ecoflow-login", "issue private-API MQTT credentials (email+password -> account/password)",
     [](const String args) {
@@ -880,6 +909,7 @@ void setupEcoflow() {
     }
   );
 
+  // command: ecoflow-capture
   commandHandler.registerCommand(
     "ecoflow-capture", "capture ALL params: ecoflow-capture <on|off> [sn|index|all]",
     [](const String args) {
@@ -915,6 +945,7 @@ void setupEcoflow() {
     }
   );
 
+  // command: ecoflow-params
   commandHandler.registerCommand(
     "ecoflow-params", "show captured params: ecoflow-params <sn|index> [pattern, e.g. *_in_*]",
     [](const String args) {
@@ -997,6 +1028,7 @@ void setupEcoflow() {
     }
   );
 
+  // command: ecoflow-sync
   commandHandler.registerCommand(
     "ecoflow-sync", "pull full state snapshot for every device over REST",
     [](const String args) {
@@ -1008,6 +1040,7 @@ void setupEcoflow() {
     }
   );
 
+  // // command: ecoflow-start
   commandHandler.registerCommand(
     "ecoflow-start", "connect EcoFlow cloud MQTT (frees nothing, costs ~57 KB heap)",
     [](const String args) {
@@ -1019,6 +1052,7 @@ void setupEcoflow() {
     }
   );
 
+  // command: ecoflow-stop
   commandHandler.registerCommand(
     "ecoflow-stop", "drop EcoFlow cloud MQTT and free its TLS session (~57 KB)",
     [](const String args) {
@@ -1028,6 +1062,7 @@ void setupEcoflow() {
     }
   );
 
+  // command: ecoflow-auto
   commandHandler.registerCommand(
     "ecoflow-auto", "connect EcoFlow on boot: ecoflow-auto [on|off]",
     [](const String args) {
@@ -1047,6 +1082,7 @@ void setupEcoflow() {
     }
   );
 
+  // command: ecoflow-verbose
   commandHandler.registerCommand(
     "ecoflow-verbose", "toggle EcoFlow telemetry dump: ecoflow-verbose [on|off]",
     [](const String args) {
@@ -1061,6 +1097,7 @@ void setupEcoflow() {
     }
   );
 
+  // command: ecoflow-cert
   commandHandler.registerCommand(
     "ecoflow-cert", "re-issue EcoFlow MQTT credentials over REST (async, result in log)",
     [](const String args) {
@@ -1085,6 +1122,20 @@ void setupMqttClient() {
     mqttTopicPrefixOverride.setPrefix(storedPrefix.c_str());
     mqtt.setKeyGenerator(&mqttTopicPrefixOverride);  // ДО begin()
   }
+
+  #if !ESP8266
+  mqtt.onConnect([](const MqttTransportClient& client) {
+    _logger.info("MQTT connected       [%s:%d]", client.host.c_str(), client.port);
+  });
+
+  mqtt.onDisconnect([](const MqttTransportClient& client) {
+    _logger.info("MQTT disconnected    [%s:%d]", client.host.c_str(), client.port);
+  });
+
+  mqtt.onConnectionFail([](const MqttTransportClient& client) {
+    _logger.info("MQTT connect fail    [%s:%d]", client.host.c_str(), client.port);
+  });
+  #endif
 
   mqtt.begin();
   _logger.info("topic prefix = '%s'", mqtt.keyGenerator().prefix().c_str());
@@ -1481,7 +1532,7 @@ void dumpSDInfo() {
   Logger::info("------------------------------------------------------------");
  
   // Виводимо розмір картки
-  uint64_t cardSize = ACTIVE_SD.cardSize() / (1024 * 1024);
+  // uint64_t cardSize = ACTIVE_SD.cardSize() / (1024 * 1024);
   // Serial.printf(F("Розмір картки: %llu MB\n"), cardSize);
   Logger::info("Card size: %s", SizeFormatter::format(ACTIVE_SD.cardSize()));
   Logger::info("Used: %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.usedBytes()),
@@ -3671,9 +3722,9 @@ void drawSystemInfo() {
   display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
   display.println("------------------------------------");
   #if BOARD_TTGO_T1 || BOARD_ST7789
-  int skip = 11; // hide logvele and tag
+  int skip = 11; // hide loglevel and tag
   #elif BOARD_ESP32_S3_LCD147
-  int skip = 11; // hideloglevel only!
+  int skip = 11; // hide loglevel only!
   #else
   int skip = 0;
   #endif
@@ -3707,12 +3758,11 @@ void drawTime() {
   static uint32_t lastErrorMs = 0;
   if (!ntp.isSynced()) {
     const char* msg = "TIME SYNC";
-    int x, y;
     display.setTextSize(2);
     display.setTextColor(TFT_RED);
     display.setCursor(
-      x = max(0, (int) (display.width() - display.textWidth(msg)) / 2),
-      y = max(0, (int) (display.height() - display.fontHeight()) / 2)
+      max(0, (int) (display.width() - display.textWidth(msg)) / 2),
+      max(0, (int) (display.height() - display.fontHeight()) / 2)
     );
     // 128x64.108
     // (128-108)/2 = 10
@@ -3764,7 +3814,7 @@ void drawTime() {
 
   #endif
 
-#elif BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147 || BOARD_ESP32_C6 || BOARD_ESP32_C6_LCD096
+#elif BOARD_TTGO_T1 || BOARD_ESP32_S3_LCD147
   // time
   #if BOARD_ESP32_C6
   display.setTextSize(5);
@@ -4095,38 +4145,19 @@ void loop() {
   drawBackgroundImage();
   drawSystemInfo();
 
-  /* if (WiFi.status() != WL_CONNECTED) {
-    return;
-  } */
-
-  /* #if ESP32
-  // if (WiFi.status() == WL_CONNECTED) {
-  if (wifi_state == 0 && WiFi.isConnected()) {
-    Logger::info("WIFI connected");
-    wifi_state = 1;
-
-    // Вимикаємо Modem Sleep (WiFi.setSleep(WIFI_PS_NONE) для Arduino)
-    esp_wifi_set_ps(WIFI_PS_NONE); 
-    // Обмежуємо протокол до B/G/N (іноді AX/WiFi 6 викликає лаги на C6)
-    esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-
-  } else if (wifi_state == 1 && !WiFi.isConnected()) {
-    Logger::info("WIFI disconnected!");
-    wifi_state = 0;
-  }
-  #endif */
-
   #if HAS_MQTT_CLIENT
   if (WiFi.isConnected()) {
     uint32_t t0 = millis();
     mqtt.loop();
     // testRawTcpConnect();   // <-- тимчасово замість mqtt.loop();
     uint32_t dt = millis() - t0;
-    if (dt > 200) Logger::warn("mqtt.loop() took %ums", dt);
+    if (dt > 200) {
+      Logger::warn("mqtt.loop() took %ums", dt);
+    }
     // --- В loop(), замість (або поруч з) mqtt.loop() на час тесту: ---
-#if HAS_ECOFLOW_CLIENT
+    #if HAS_ECOFLOW_CLIENT
     ecoflow.loop();
-#endif
+    #endif
   }
   #endif
 

@@ -175,9 +175,9 @@ const char* NtpService::_formatTime(const char* format, char* buffer, size_t max
 }
 
 const char* NtpService::ftime(const char* format, char* buffer, size_t max,
-                              const struct timeval* tv) {
+                              const timeval* tv) {
   if (tv == nullptr) {
-    struct timeval _tv;
+    timeval _tv;
     gettimeofday(&_tv, nullptr);
     return _formatTime(format, buffer, max, _tv.tv_sec, _tv.tv_usec, /*applyTimeZone=*/true);
   }

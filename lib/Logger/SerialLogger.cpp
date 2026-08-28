@@ -82,7 +82,7 @@ void SerialLogger::log(LogLevel level, const char* fmt, va_list args) const {
   // був не BUF_SIZE, а BUF_SIZE мінус довжина префікса, і друге обрізання
   // затирало кінець першого. Обидва рази — по сирому байту, без огляду на
   // межі UTF-8.
-  const int prefixLen = snprintf(line, sizeof(line), "[%s][%-5s] ", levelName(level), _tag);
+  const int prefixLen = snprintf(line, sizeof(line), "[%s][%-7s] ", levelName(level), _tag);
   if (prefixLen < 0 || static_cast<size_t>(prefixLen) >= sizeof(line) - 2) {
     return;  // префікс не влазить — писати нічого (не має статись)
   }
