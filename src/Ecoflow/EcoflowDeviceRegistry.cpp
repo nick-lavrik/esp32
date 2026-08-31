@@ -307,16 +307,16 @@ String EcoflowDeviceRegistry::formatDuration(uint32_t milliseconds) {
 
   char buffer[32];
   if (days > 0) {
-    snprintf(buffer, sizeof(buffer), "%lud%02luh%02lum", (unsigned long)days,
-             (unsigned long)hours, (unsigned long)minutes);
+    snprintf(buffer, sizeof(buffer), "%lud%02luh%02lum", static_cast<unsigned long>(days),
+             static_cast<unsigned long>(hours), static_cast<unsigned long>(minutes));
   } else if (hours > 0) {
-    snprintf(buffer, sizeof(buffer), "%luh%02lum%02lus", (unsigned long)hours,
-             (unsigned long)minutes, (unsigned long)seconds);
+    snprintf(buffer, sizeof(buffer), "%luh%02lum%02lus", static_cast<unsigned long>(hours),
+             static_cast<unsigned long>(minutes), static_cast<unsigned long>(seconds));
   } else if (minutes > 0) {
-    snprintf(buffer, sizeof(buffer), "%lum%02lus", (unsigned long)minutes,
-             (unsigned long)seconds);
+    snprintf(buffer, sizeof(buffer), "%lum%02lus", static_cast<unsigned long>(minutes),
+             static_cast<unsigned long>(seconds));
   } else {
-    snprintf(buffer, sizeof(buffer), "%lus", (unsigned long)seconds);
+    snprintf(buffer, sizeof(buffer), "%lus", static_cast<unsigned long>(seconds));
   }
   return String(buffer);
 }

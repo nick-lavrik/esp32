@@ -704,8 +704,22 @@ void setupEcoflow() {
   static TLogger _logger{"ecoflow"};
 
   #if defined(ESP32)
-  ecoflow.onMqttConnect([](const MqttTransportClient& client) {
+  ecoflow.onMqttConnect([](MqttTransportClient& client) {
     _logger.info("MQTT connected       [%s:%d]", client.host.c_str(), client.port);
+
+    // Крок 1: Запит на миттєве оновлення (запуск потоку)
+    // const char* payload = "{\"id\": 123456789, \"version\": \"1.0\", \"cmdFunc\": 254, \"cmdId\": 1, \"params\": {\"operateType\": \"latestQuotas\"}}";
+    const char* payload = "{\"id\": 123456789, \"version\": \"1.0\", \"cmdCode\": \"latestQuotas\", \"params\": {}}";
+
+    const size_t size = strlen(payload)+1;
+    const auto ok = client.publish(
+      "/app/device/property/R331ZEB4ZEBW0026",
+      static_cast<const void*>(payload),
+      size
+    );
+    if (!ok) {
+      _logger.error("DELTA2 trigger fail!");
+    }
   });
 
   ecoflow.onMqttDisconnect([](const MqttTransportClient& client) {
@@ -733,8 +747,8 @@ void setupEcoflow() {
 
   ecoflowDevices.onSocChange([](const EcoflowDeviceState& state, int8_t previousSoc) {
     if (!ecoflowVerbose) { return; }
-    _logger.info("%s: charge %d%% -> %d%%", state.info->name, (int)previousSoc,
-                 (int)state.socPercent);
+    _logger.info("%s: charge %d%% -> %d%%", state.info->name, static_cast<int>(previousSoc),
+                 static_cast<int>(state.socPercent));
   });
 
   // Пристрій, від якого давно нічого не чути, вважаємо офлайн: /status
@@ -750,8 +764,8 @@ void setupEcoflow() {
     // Набір ключів у params залежить від моделі, тому нічого не інтерпретуємо -
     // лише показуємо, що саме прийшло.
     JsonObjectConst params = doc["params"].as<JsonObjectConst>();
-    size_t count = params.isNull() ? 0 : params.size();
-    _logger.info("quota %s params:%u", serialNumber.c_str(), (unsigned)count);
+    const size_t count = params.isNull() ? 0 : params.size();
+    _logger.info("quota %s params:%u", serialNumber.c_str(), static_cast<unsigned>(count));
 
     if (!ecoflowVerbose) { return; }
 
@@ -762,6 +776,7 @@ void setupEcoflow() {
     }
   });
 
+  // online/offline status update
   ecoflow.onStatus([](const String& serialNumber, JsonDocument& doc) {
     // {"id":..,"version":"1.0","timestamp":..,"params":{"status":0|1}}
     // Лог пише сам реєстр - він знає ім'я пристрою, а не лише sn.
@@ -772,7 +787,7 @@ void setupEcoflow() {
   // REST, ні від синхронізованого часу (раніше старт доводилось відкладати саме
   // через підпис REST-запиту, що містить timestamp).
   //
-  // ...але лише якщо autoconnect увімкнено: TLS-сесія коштує ~57 КБ heap, і на
+  // ...але лише якщо auto-connect увімкнено: TLS-сесія коштує ~57 КБ heap, і на
   // платі без PSRAM це може бути дорожче за саму телеметрію.
   String autoConnectStored = configStorage.getString(CFG_ECOFLOW_AUTOCONNECT, "");
   const bool autoConnect = autoConnectStored.length() > 0 ? (autoConnectStored.toInt() != 0)
@@ -816,7 +831,7 @@ void setupEcoflow() {
 
   // command: ecoflow
   commandHandler.registerCommand("ecoflow", "show EcoFlow cloud MQTT status", [](const String args) {
-    _logger.info("=== ECOFLOW ===");
+    _logger.info("========== ECOFLOW ==========");
     _logger.info("connected = %s, account = %s", ecoflow.isConnected() ? "yes" : "no",
                  ecoflow.account().c_str());
     _logger.info("broker = %s:%d, channel = %s, verbose = %s", ECOFLOW_MQTT_HOST,
@@ -866,11 +881,11 @@ void setupEcoflow() {
       if (state.gridSinceMs != 0) {
         gridFor = EcoflowDeviceRegistry::formatDuration(millis() - state.gridSinceMs);
       }
-
+      //                1    2     3     4    5   6    7   8
       _logger.info("%-1u %-16s %-18s %-7s %6s %-9s %7s %9s",
-                   (unsigned) deviceIndex++,
-                   state.info->serialNumber,
-                   state.info->name,
+                   (unsigned) deviceIndex++, // 1
+                   state.info->serialNumber, // 2
+                   state.info->name,         // 3
                    presence,
                    charge,
                    state.gridInferred

@@ -39,7 +39,7 @@ struct MqttIncomingMessage {
   std::vector<uint8_t> payload;
 };
 
-using MqttClientConnectionCallback = std::function<void(const MqttTransportClient&)>;
+using MqttClientConnectionCallback = std::function<void(MqttTransportClient&)>;
 
 // Вихідна команда з головного потоку в чергу для виконання мережевим таском
 // (тільки PicoMQTT-гілка - мережевий таск лишається ЄДИНИМ власником
@@ -72,9 +72,9 @@ public:
   void loop();
   void disconnect(const char* customOfflineMessage = nullptr);
 
-  void onConnect(const MqttClientConnectionCallback callback) { _connected_callback = callback; }
-  void onDisconnect(const MqttClientConnectionCallback callback) { _disconnected_callback = callback; }
-  void onConnectionFail(const MqttClientConnectionCallback callback) { _connection_failure_callback = callback; }
+  void onConnect(MqttClientConnectionCallback callback) { _connected_callback = callback; }
+  void onDisconnect(MqttClientConnectionCallback callback) { _disconnected_callback = callback; }
+  void onConnectionFail(MqttClientConnectionCallback callback) { _connection_failure_callback = callback; }
 
   // Чекає (з викликаючого потоку), доки мережевий таск не вижене чергу
   // вихідних команд, але не довше timeoutMs. true - черга порожня.
