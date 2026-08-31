@@ -9,8 +9,15 @@
 //   env:esp8266           -> build_flags: -DBOARD_ESP8266
 //   env:esp32-c6           -> build_flags: -DBOARD_ESP32_C6
 //   env:esp32-c6-lcd096    -> build_flags: -DBOARD_ESP32_C6_LCD096
+//   env:esp32-c3           -> build_flags: -DBOARD_HAS_DISPLAY=0 (дисплея немає)
+//
+// BOARD_HAS_DISPLAY=0 перевіряється ПЕРШИМ і перекриває будь-який BOARD_*:
+// на такій платі підключається заглушка, і жодна графічна бібліотека
+// (TFT_eSPI / Arduino_GFX / LovyanGFX) у lib_deps не потрібна взагалі.
 
-#if defined(BOARD_4848S040)
+#if defined(BOARD_HAS_DISPLAY) && !BOARD_HAS_DISPLAY
+#include "Setup_Headless.h"  // no-op заглушка з API TFT_eSPI (плата без дисплея)
+#elif defined(BOARD_4848S040)
 #include "Setup_ST7701_4848S040.h"  // визначає клас LGFX + alias TFT_eSPI
 #elif defined(BOARD_ESP8266)
 #include "Setup_SSD1306_NodeMCU.h"  // TFT_eSPI/TFT_eSprite-сумісна обгортка над Adafruit_SSD1306
@@ -29,5 +36,6 @@
  * @see file://./../src-esp8266/TftInstance.cpp
  * @see file://./../src-esp32-c6/TftInstance.cpp
  * @see file://./../src-esp32-c6-lcd096/TftInstance.cpp
+ * @see file://./../src-esp32-c3/TftInstance.cpp
  */
 extern TFT_eSPI tft;

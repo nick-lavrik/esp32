@@ -17,8 +17,12 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 
 ## Плати (PlatformIO environments)
 
-Сім середовищ. Ідентичність плати в коді — build flag `BOARD_*` (третя колонка), саме за ним
+Вісім середовищ. Ідентичність плати в коді — build flag `BOARD_*` (третя колонка), саме за ним
 розгалужується `src/main.cpp` і `src/Display.*`.
+
+Сьома колонка таблиці нижче — єдина плата **без екрана** (`esp32-c3`). Вона перевіряється
+не за `BOARD_*`, а за `BOARD_HAS_DISPLAY=0`, і ця перевірка стоїть **першою** в
+`src/TftInstance.h`, тобто перекриває будь-який `BOARD_*`.
 
 | env | MCU / плата | `BOARD_*` flag | Дисплей (контролер, графічна бібліотека) | Flash / PSRAM |
 | :--- | :--- | :--- | :--- | :--- |
@@ -28,6 +32,7 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 | `ttgo-t1` | **ESP32**, LilyGO T-Display | `BOARD_TTGO_T1` | 135×240 RGB565, ST7789, `bodmer/TFT_eSPI@^2.5.43` | 16 MB / — |
 | `esp32-c6` | **ESP32-C6** (RISC-V), Waveshare ESP32-C6-LCD-1.47 | `BOARD_ESP32_C6` | 172×320 RGB565, JD9853 (командно ST7789-сумісний), `moononournation/Arduino_GFX@^1.6.0` | 8 MB / — |
 | `esp32-c6-lcd096` | **ESP32-C6** (RISC-V), "ESP32-C6-LCD-0.96" | `BOARD_ESP32_C6_LCD096` | 160×80 RGB565, **ST7735S** (не ST7789, попри опис товару), `moononournation/Arduino_GFX@^1.6.0` | 4 MB / — |
+| `esp32-c3` | **ESP32-C3** (RISC-V, QFN32 v0.4), TENSTAR ROBOT ESP32-C3 SuperMini | `BOARD_ESP32_C3` | **немає** (`BOARD_HAS_DISPLAY=0`) — заглушка `include/Setup_Headless.h`, жодної графічної бібліотеки | 4 MB / — |
 | `esp8266` | **ESP8266**, NodeMCU v2 + SSD1306 OLED (I2C) | `BOARD_ESP8266` | 128×64 монохром (1 bit), SSD1306, `adafruit/Adafruit SSD1306@^2.5.13` | 4 MB / — |
 
 Усі environments — `framework = arduino`. ESP-IDF v5.5.4 / Arduino Core 3.3.9 під капотом
@@ -41,27 +46,28 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 
 Джерело — `build_flags`/`lib_deps` кожного env; порожня клітинка == фіча вимкнена/відсутня.
 
-| Фіча (як вмикається) | 4848s040 | s3-lcd147 | st7789 | ttgo-t1 | c6 | c6-lcd096 | esp8266 |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `TFT_ROTATION` | 2 | 3 | 3 | 3 | 3 | 1 | 2 |
-| `DISPLAY_SPLIT_COUNT` (смуг на кадр) | 1 | 2 | 6 | 1 | 4 | 4 | 1 |
-| `SPRITE_COLOR_DEPTH` | 16 | 16 | 16 | 16 | 16 | 16 | 1 |
-| SD (`BOARD_HAS_SD`) | SPI | SD_MMC 4-bit | SPI | — | SPI ¹ | SPI ² | — |
-| Touch (`BOARD_HAS_TOUCHSCREEN`) | GT911 | — | XPT2046 | — | **AXS5106L** ⁴ | — | — |
-| IMU (`BOARD_HAS_IMU`) | — | — | — | — | **QMI8658A** ⁵ | — | — |
-| I²C (`I2C_SDA`/`I2C_SCL`) | 19 / 45 | — | — | — | **18 / 19** | — | — |
-| Light sensor (`LIGHT_SENSOR_PIN`) | — | — | GPIO34 | — | — | — | — |
-| Кнопка (`FLIP_BUTTON_PIN`) | — | GPIO0 | GPIO0 | GPIO0 | — ⁶ | **GPIO9** | GPIO0 |
-| LED (`BLINK_LED_PIN`) | — | — | — | — | — | — | GPIO2 |
-| MQTT-бекенд | PubSubClient | PubSubClient | PubSubClient | PubSubClient | **PicoMQTT** | **PicoMQTT** | PubSubClient |
-| EcoFlow (`HAS_ECOFLOW_CLIENT`) ⁸ | — | — | — | — | ✅ | ✅ | — |
-| Фон, запечений у Flash (`BACKGROUND_PROGMEM_HEADER`) ⁹ | — | — | — | — | ✅ | — | — |
-| Ping (`ESPping` в `lib_deps`) | ✅ | ✅ | ✅ | ✅ | — | — | — |
-| Gmail (`ESP Mail Client`) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ |
-| JPEG-декодер | TJpg_Decoder | TJpg_Decoder | TJpg_Decoder | TJpg_Decoder | **JPEGDEC** ³ | **JPEGDEC** ³ | TJpg_Decoder |
-| Фон із LittleFS (`LITTLEFS_BACKGROUND_IMAGE`) | `/background-02-480x480.jpg` | `/background-01-320x172.jpg` | — | — | `/background-02-320x172.jpg` | `/background-01-160x80.jpg` | — |
-| Вбудовані фони (`BACKGROUND_IMAGES_COUNT`) | 0 | 0 | **1** | 0 | 0 | 0 | 0 |
-| Хвіст логів на екран (`SCREEN_LOG_TAIL_LINES`) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Фіча (як вмикається) | 4848s040 | s3-lcd147 | st7789 | ttgo-t1 | c6 | c6-lcd096 | c3 | esp8266 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Дисплей (`BOARD_HAS_DISPLAY`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | **—** ¹⁰ | ✅ |
+| `TFT_ROTATION` | 2 | 3 | 3 | 3 | 3 | 1 | 0 | 2 |
+| `DISPLAY_SPLIT_COUNT` (смуг на кадр) | 1 | 2 | 6 | 1 | 4 | 4 | 0 | 1 |
+| `SPRITE_COLOR_DEPTH` | 16 | 16 | 16 | 16 | 16 | 16 | 16 | 1 |
+| SD (`BOARD_HAS_SD`) | SPI | SD_MMC 4-bit | SPI | — | SPI ¹ | SPI ² | — | — |
+| Touch (`BOARD_HAS_TOUCHSCREEN`) | GT911 | — | XPT2046 | — | **AXS5106L** ⁴ | — | — | — |
+| IMU (`BOARD_HAS_IMU`) | — | — | — | — | **QMI8658A** ⁵ | — | — | — |
+| I²C (`I2C_SDA`/`I2C_SCL`) | 19 / 45 | — | — | — | **18 / 19** | — | — | — |
+| Light sensor (`LIGHT_SENSOR_PIN`) | — | — | GPIO34 | — | — | — | — | — |
+| Кнопка (`FLIP_BUTTON_PIN`) | — | GPIO0 | GPIO0 | GPIO0 | — ⁶ | **GPIO9** | — ¹⁰ | GPIO0 |
+| LED (`BLINK_LED_PIN`) | — | — | — | — | — | — | **GPIO8** | GPIO2 |
+| MQTT-бекенд | PubSubClient | PubSubClient | PubSubClient | PubSubClient | **PicoMQTT** | **PicoMQTT** | **PicoMQTT** | PubSubClient |
+| EcoFlow (`HAS_ECOFLOW_CLIENT`) ⁸ | — | — | — | — | ✅ | ✅ | ✅ | — |
+| Фон, запечений у Flash (`BACKGROUND_PROGMEM_HEADER`) ⁹ | — | — | — | — | ✅ | — | — | — |
+| Ping (`ESPping` в `lib_deps`) | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
+| Gmail (`ESP Mail Client`) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ |
+| JPEG-декодер | TJpg_Decoder | TJpg_Decoder | TJpg_Decoder | TJpg_Decoder | **JPEGDEC** ³ | **JPEGDEC** ³ | **JPEGDEC** ³ | TJpg_Decoder |
+| Фон із LittleFS (`LITTLEFS_BACKGROUND_IMAGE`) | `/background-02-480x480.jpg` | `/background-01-320x172.jpg` | — | — | `/background-02-320x172.jpg` | `/background-01-160x80.jpg` | — | — |
+| Вбудовані фони (`BACKGROUND_IMAGES_COUNT`) | 0 | 0 | **1** | 0 | 0 | 0 | 0 | 0 |
+| Хвіст логів на екран (`SCREEN_LOG_TAIL_LINES`) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ¹ `esp32-c6`: SD увімкнено (`BOARD_HAS_SD=1`) і **перевірено на залізі** — `status sd` показує
   таблицю розділів, `status sd+` читає файли. Піни підтверджені офіційною документацією
@@ -135,6 +141,28 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
   Альтернатива RGB332 (`SPRITE_COLOR_DEPTH=8`) економить ту саму пам'ять, але фон помітно
   бруднішає — градації 3-3-2 біт не рятують ні blur, ні desaturate.
   Ефект (free / largest block): **51/16 КБ → 159/123 КБ**, фрагментація 69 % → 14 %.
+
+¹⁰ `esp32-c3` (SuperMini) — **єдина плата проєкту без екрана**. `BOARD_HAS_DISPLAY=0` перемикає
+  `src/TftInstance.h` на заглушку `include/Setup_Headless.h`: клас із API `TFT_eSPI`, у якого всі
+  методи порожні й inline. Прикладний код (`src/main.cpp`, `src/Display.*`, `src/ntp.h`,
+  `src/setup.h`) лишається спільним з рештою плат — обвішувати `#if BOARD_HAS_DISPLAY` кілька
+  сотень викликів `display.*` у файлі на 4000+ рядків означало б тримати дві гілки одного файлу.
+  Замість цього компілятор викидає ці виклики цілком: у прошивці немає ні графічної бібліотеки,
+  ні буферів кадру (`display` — 180 байт, майже все з них — `TLogger`; `tft` — 12 байт).
+
+  Разом із дисплеєм вимкнено все, що від нього залежить: `DISPLAY_SPLIT_COUNT=0` (без спрайта),
+  `BACKGROUND_IMAGES_COUNT=0` і жодного `LITTLEFS_BACKGROUND_IMAGE`/`BACKGROUND_PROGMEM_HEADER`,
+  `SCREEN_LOG_TAIL_LINES=0`, `DISPLAY_BUS_YIELD` не заданий (шини дисплея немає), `CLOCK_*`/`DATE_*`
+  не задані (блоки годинника й дати стоять під `#if CLOCK_TEXT_FONT && …`, а незаданий макрос у
+  `#if` дає 0), `LOAD_FONT*`/`U8G2_FONT_SUPPORT` не задані. `TFT_CS`/`TFT_DC`/`TFT_RST`/`TFT_BL`
+  теж НЕ визначені — `main.cpp` і `Display.cpp` перевіряють їх через `#if defined(…)`, тож робота
+  з пінами дисплея зникає зі збірки сама. `FLIP_BUTTON_PIN` не заданий навмисно: уся логіка тієї
+  кнопки суто дисплейна (flip, яскравість підсвітки, показ годинника) — на безекранній платі це
+  була б cron-задача, що щотика читає GPIO заради no-op. Індикація лишається одна — вбудований
+  LED на GPIO8 (інверсна логіка, `BLINK_LED_PIN=8`).
+
+  `TFT_WIDTH`/`TFT_HEIGHT` при цьому визначені як **0**, а не викинуті: `main.cpp` друкує їх у
+  діагностиці (`Display: %dx%d`) поза будь-якими `#if`.
 
 #### `readRAW()` на незмонтованій картці = reset (стосується ВСІХ SD-плат)
 
@@ -236,6 +264,7 @@ swap стояв після, і це працювало лише на квадр�
 | `ttgo-t1` | `partitions_ttgo_t1.csv` | 3 MB | 960 KB | 11.9 MB |
 | `esp32-c6` | `partitions_c6.csv` | 2 MB | 960 KB | 4.9 MB |
 | `esp32-c6-lcd096` | `partitions_c6_lcd096.csv` | 2 MB | 384 KB | 1.5 MB |
+| `esp32-c3` | `partitions_c3.csv` | 2 MB | 384 KB | 1.5 MB |
 | `esp8266` | — (`board_build.filesystem = littlefs`) | — | — | — |
 
 ### Платформо-специфічні теки
@@ -245,8 +274,8 @@ swap стояв після, і це працювало лише на квадр�
 (`TftInstance.cpp`) і реалізації touch-контролерів:
 
 `src-4848s040/` (+ GT911Touch, TouchController) · `src-esp32-s3-lcd147/` · `src-st7789/`
-(+ TouchController) · `src-ttgo-t1/` · `src-esp32-c6/` · `src-esp32-c6-lcd096/` · `src-esp8266/`
-(+ MonoImageExample)
+(+ TouchController) · `src-ttgo-t1/` · `src-esp32-c6/` · `src-esp32-c6-lcd096/` · `src-esp32-c3/`
+· `src-esp8266/` (+ MonoImageExample)
 
 ### Шрифти на платах з Arduino_GFX (обидві C6)
 
@@ -291,6 +320,7 @@ Arduino_GFX під нашою сумісною обгорткою), тому с�
 
    | `BOARD_*` | Заголовок | Що всередині |
    | :--- | :--- | :--- |
+   | `BOARD_HAS_DISPLAY=0` (перевіряється **першим**) | `include/Setup_Headless.h` | заглушка: усі методи порожні й inline |
    | `BOARD_4848S040` | `include/Setup_ST7701_4848S040.h` | клас LGFX + alias `TFT_eSPI` |
    | `BOARD_ESP8266` | `include/Setup_SSD1306_NodeMCU.h` | фасад над `Adafruit_SSD1306` |
    | `BOARD_ESP32_C6` | `include/Setup_JD9853_C6.h` | фасад над `Arduino_GFX` (JD9853) |
@@ -312,13 +342,13 @@ Arduino_GFX під нашою сумісною обгорткою), тому с�
 | `bodmer/TFT_eSPI` | рендеринг для `esp32-st7789`, `ttgo-t1`, `esp32-s3-lcd147` (SPI TFT) |
 | `moononournation/GFX Library for Arduino` | рендеринг для обох C6-плат (JD9853, ST7735S) |
 | `adafruit/Adafruit SSD1306` + `Adafruit GFX` | рендеринг для `esp8266` (I2C OLED) |
-| `bodmer/TJpg_Decoder` | декодування JPEG (усі плати, крім C6) |
-| `bitbank2/JPEGDEC` | декодування JPEG на C6 (RISC-V, unaligned access — див. виноску ³ вище) |
+| `bodmer/TJpg_Decoder` | декодування JPEG на Xtensa-платах (ESP32/ESP32-S3/ESP8266) |
+| `bitbank2/JPEGDEC` | декодування JPEG на RISC-V (C6, C3 — unaligned access, див. виноску ³ вище) |
 | `bblanchon/ArduinoJson` | серіалізація/конфіги |
 | `tamctec/TAMC_GT911` | touch-контролер для 4848S040 |
 | `PaulStoffregen/XPT2046_Touchscreen` | touch-контролер для ST7789-плати |
 | `knolleary/PubSubClient` | MQTT-клієнт (5 плат) |
-| `mlesniew/PicoMQTT` | MQTT-клієнт для обох C6-плат |
+| `mlesniew/PicoMQTT` | MQTT-клієнт для обох C6-плат і для `esp32-c3` |
 | `mathieucarbou/AsyncTCP` + `ESPAsyncWebServer` | вбудований HTTP-сервер (`lib/HttpServer`) |
 | `mobizt/ESP Mail Client` | відправка email (`lib/GmailSender`) |
 | `dvarrel/ESPping` | ping-діагностика мережі |
@@ -408,7 +438,7 @@ ESP32-C6 — і `dtr=False`/`rts=False` теж є зміною, тобто «з�
 лінії явно.
 
 Перший аргумент розбирається за трьома правилами: починається з `/dev/` — порт; збігається
-з секцією `[env:…]` — env (порт вибирається за `board`: C6/S3/H2 → `ttyACM*`, решта →
+з секцією `[env:…]` — env (порт вибирається за `board`: C3/C6/S3/H2 → `ttyACM*`, решта →
 `ttyUSB*`); інакше це вже початок команди. Читає до тиші `ESP_QUIET` (0.4 с) з межею
 `ESP_TIMEOUT` (6 с) — плата паралельно сипле власні логи й сама ніколи не «замовкає»
 надовго.
@@ -551,6 +581,22 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-08-31 — додано восьмий env **`esp32-c3`** (TENSTAR ROBOT ESP32-C3 SuperMini, 4 MB,
+  RISC-V) — **перша плата проєкту без екрана**. Замість того щоб розсипати
+  `#if BOARD_HAS_DISPLAY` по всьому `src/main.cpp`, додано заглушку
+  `include/Setup_Headless.h` (клас з API `TFT_eSPI`, усі методи порожні й inline) і одну
+  нову гілку в `src/TftInstance.h` — вона перевіряється **першою** і перекриває будь-який
+  `BOARD_*`. Прикладний код лишився спільним, а в прошивку не потрапляє ні графічна
+  бібліотека, ні буфери кадру (див. виноску ¹⁰). Решта функціоналу — як у решти плат:
+  WiFi, NTP, HTTP-сервер, SMTP, MQTT (PicoMQTT) і EcoFlow. Супутні зміни:
+  (а) `Display display` і `displayConfig` у `src/main.cpp` тепер визначаються безумовно —
+  раніше вони стояли під `#if BOARD_HAS_DISPLAY`, який жоден env не вимикав, тобто гілка
+  «без дисплея» ніколи не збиралась;
+  (б) `lib/JpegImage` перемикається на `JPEGDEC` і для C3 — unaligned access у tjpgd
+  ламає RISC-V однаково на C6 і на C3;
+  (в) `setupSerial()` кличе `Serial.setTxTimeoutMs(0)` і на C3 (той самий USB-Serial/JTAG,
+  той самий баг із зависанням у `Serial.print()`);
+  (г) `./esp` тепер шукає `ttyACM*` і для C3-плат (раніше маска знала лише C6/S3/H2).
 - 2026-08-26 — **інтеграція з EcoFlow** (`src/Ecoflow/`, обидві C6-плати): читання
   телеметрії павербанків через хмарний MQTT, два канали (Open Platform і приватний API
   застосунку) з вибором за префіксом акаунта, прошитий реєстр пристроїв із накопиченим

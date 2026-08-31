@@ -4,12 +4,13 @@
 
 #include <LittleFS.h>
 
-// RISC-V (ESP32-C6) не толерантний до unaligned memory access, на відміну від
-// Xtensa (ESP32/ESP32-S3). tjpgd (движок під TJpg_Decoder) в парсингу заголовка
-// читає multi-byte поля без гарантії вирівнювання - на C6 це давало биті/нульові
-// значення (спостерігалось: getJpgSize() повертав width>0, height=0). Тому на C6
-// декодуємо через JPEGDEC (bitbank2), яка коректно працює на RISC-V.
-#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
+// RISC-V (ESP32-C6, ESP32-C3) не толерантний до unaligned memory access, на
+// відміну від Xtensa (ESP32/ESP32-S3). tjpgd (движок під TJpg_Decoder) в
+// парсингу заголовка читає multi-byte поля без гарантії вирівнювання - на C6
+// це давало биті/нульові значення (спостерігалось: getJpgSize() повертав
+// width>0, height=0). Тому на всіх RISC-V-платах проєкту декодуємо через
+// JPEGDEC (bitbank2), яка коректно працює на цій архітектурі.
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_C3)
 #include <JPEGDEC.h>
 #else
 #include <TJpg_Decoder.h>
@@ -105,7 +106,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   uint16_t jpegWidth = 0;
   uint16_t jpegHeight = 0;
 
-#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_C3)
   // JPEGDEC::_jpeg (JPEGIMAGE) - це ~17.5 KB вбудованої структури (буфери
   // Huffman-таблиць, MCU, пікселів), НЕ вказівник. Локальна змінна на стеку
   // переповнює loopTask stack (типово 8 KB) -> "Stack protection fault".
@@ -156,7 +157,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   if (_buffer == nullptr) {
     _logger.error("Not enough memory for the decoded image (%d / %d)", bufferBytes,
                   heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_C3)
     jpegDecoder->~JPEGDEC();
     heap_caps_free(jpegDecoder);
 #endif
@@ -169,7 +170,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
 
   _activeInstance = this;
 
-#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_C3)
   jpegDecoder->setPixelType(RGB565_LITTLE_ENDIAN);
   int decodeResult = jpegDecoder->decode(0, 0, 0);
   int jpegDecError = jpegDecoder->getLastError();
@@ -261,7 +262,7 @@ void JpegImage::blitBlock(int x, int y, int w, int h, int stride, const uint16_t
   }
 }
 
-#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
+#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_C3)
 int JpegImage::jpegDrawCallback(JPEGDRAW *pDraw) {
   JpegImage *self = _activeInstance;
   if (self == nullptr) {

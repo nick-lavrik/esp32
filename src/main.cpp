@@ -327,10 +327,15 @@ HttpServer httpServer(HttpServerConfig{});
 // тут, у файлі під git, попри те що механізм для секретів уже існував.
 RouterApiClient routerApi(ROUTER_HOST, ROUTER_LOGIN_AUTHORIZATION);
 
-#if BOARD_HAS_DISPLAY
+// Обидва об'єкти визначені БЕЗУМОВНО, навіть коли BOARD_HAS_DISPLAY=0
+// (env:esp32-c3). Причина: display.* і displayConfig зустрічаються в цьому
+// файлі в сотнях місць, і обвішувати кожне "#if BOARD_HAS_DISPLAY" означало
+// б розділити на дві гілки файл на 4000+ рядків. Замість цього на платі без
+// дисплея сам Display стає порожнім: TFT_eSPI там - заглушка з
+// include/Setup_Headless.h, усі методи inline й no-op, тому компілятор
+// прибирає ці виклики цілком (у прошивці не лишається ні коду, ні буферів).
 Display display;
 TouchScreenConfig displayConfig = makeTouchScreenConfig();
-#endif
 
 #if BOARD_HAS_TOUCHSCREEN
 TouchPointMapper mapper(displayConfig);

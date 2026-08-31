@@ -27,14 +27,14 @@ list_ports() { ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null; }
 # Чи є така секція [env:NAME] у platformio.ini
 is_env() { [ -f "$INI" ] && grep -q "^\[env:$1\]$" "$INI"; }
 
-# Плати на C6/S3/H2 мають вбудований USB-Serial/JTAG -> /dev/ttyACM*;
+# Плати на C3/C6/S3/H2 мають вбудований USB-Serial/JTAG -> /dev/ttyACM*;
 # решта сидить на зовнішньому USB-UART мості -> /dev/ttyUSB*.
 port_for_env() {
     local board
     board="$(awk -v e="[env:$1]" '$0==e{f=1;next} /^\[env:/{f=0} f&&/^board *=/{print $3; exit}' "$INI")"
     case "$board" in
-        *c6*|*s3*|*h2*) list_ports | grep '^/dev/ttyACM' | head -1 ;;
-        ?*)             list_ports | grep '^/dev/ttyUSB' | head -1 ;;
+        *c3*|*c6*|*s3*|*h2*) list_ports | grep '^/dev/ttyACM' | head -1 ;;
+        ?*)                  list_ports | grep '^/dev/ttyUSB' | head -1 ;;
         *)              echo "" ;;
     esac
 }
