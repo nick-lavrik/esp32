@@ -10,8 +10,14 @@
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
-#if ESP32 || defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
-#include <esp_wifi.h> // Обов'язково додайте цей системний заголовок
+// УВАГА: тут НЕ "#if ESP32". arduino-esp32 визначає цей макрос самопосилально
+// (-DESP32=ESP32, див. pioarduino-build.py), а такий ідентифікатор у #if
+// розкривається сам у себе й дає 0. Тобто "#if ESP32" тут завжди БУВ false,
+// і весь блок нижче працював лише завдяки явним defined(BOARD_ESP32_C6*) -
+// на решті ESP32-плат він мовчки не існував. Перевірка на ESP8266 - єдина
+// правильна: esp_wifi.h є в усій родині ESP32.
+#if !defined(BOARD_ESP8266)
+#include <esp_wifi.h>
 #endif
 
 void setupWiFi() {
@@ -21,15 +27,31 @@ void setupWiFi() {
   // WiFi.setBufferSize(2048, 2048);
   // WiFi.setNoDelay(true);
   WiFi.mode(WIFI_STA);
-  #if ESP32 || defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
-// ВАЖНО: Выключаем Wi-Fi 6 ДО старта подключения, чтобы избежать краша
+  #if !defined(BOARD_ESP8266)
+  // Обмежуємо станцію 802.11b/g/n ДО старту конекту: на чипах з Wi-Fi 6
+  // (C6) асоціація з AX-точкою валила стек. На чипах без AX (класичний
+  // ESP32, S3, C3) це фактично no-op - там така бітмаска і так дефолтна, -
+  // але тримаємо однаково для всіх, щоб поведінка не залежала від плати.
     esp_err_t err = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     if (err == ESP_OK) {
         Logger::info("Wi-Fi4 (802.11n) forced successfully");
     } else {
-        Logger::error("Wi-Fi4 (802.11n) Protocol change error: %d\n", err);
+        Logger::error("Wi-Fi4 (802.11n) Protocol change error: %d", err);
     }
   // esp_wifi_set_ps(WIFI_PS_NONE); 
+
+  // Повний скан по всіх каналах замість дефолтного WIFI_FAST_SCAN.
+  //
+  // Fast scan зупиняється на ПЕРШІЙ точці з потрібним SSID і слухає кожен
+  // канал дуже коротко - при слабкому сигналі beacon просто не встигає
+  // потрапити у вікно, і WiFi.begin() віддає reason 201 (NO_AP_FOUND) на
+  // мережу, яку окремий WiFi.scanNetworks() бачить без проблем (той слухає
+  // канал довше). Повний скан цю гонку прибирає.
+  //
+  // Побічний плюс для AiMesh/кількох AP з одним SSID: sort by signal
+  // обирає найсильніший BSSID, а не перший-ліпший.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   #endif
   //  WiFi.setSleep(false);
   WiFi.begin(ssid, password);
@@ -163,8 +185,7 @@ void WiFi_scan() {
       String securityStr = WiFi_getAuthTypeName(static_cast<wifi_auth_mode_t>(encryptionType));
 #endif
 
-      // Виведення зібраних String-даних
-      Logger::info("SSID:       %s", ssid.c_str());
+      Logger::info("SSID:       \"%s\"%s", ssid.c_str(), ssid.equals(WIFI_SSID) ? " *" : "");
       Logger::info("BSSID (MAC):%s", bssidStr);
       Logger::info("Signal:     %d dBm", rssi);
       Logger::info("Channel:    %d", channel);

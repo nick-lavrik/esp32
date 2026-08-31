@@ -410,8 +410,36 @@ void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
 }
 #endif
 
+void dumpAsusClientList(String& json) {
+  std::vector<RouterClientInfo> clients;
+  if (!RouterClientListParser::parse(json, clients)) {
+    Logger::error("can't parse client list json. [%d]", clients.capacity());
+  }
+
+  RouterClientListIterator it(std::move(clients));
+  while (it.hasNext()) {
+    const RouterClientInfo& c = it.next();
+    Logger::info("client.name=%s", c.name.c_str());
+  }
+}
 
 void testAsusWRT() {
+  Logger::info("====== AsusWRT test script =======");
+  Logger::info("free heap: %u", ESP.getFreeHeap());
+  if (!routerApi.login()) {
+    Logger::error("AsusWRT login fail");
+    return;
+  }
+  String json;
+  if (!routerApi.fetchClientListJson(json)) {
+    Logger::error("AsusWRT fetch client fail");
+  }
+  dumpAsusClientList(json);
+  Logger::info("------ AsusWRT test script -------");
+  Logger::info("");
+}
+
+void testAsusWRT2() {
   Logger::info("====== AsusWRT test script =======");
   Logger::info("free heap: %u", ESP.getFreeHeap());
 
@@ -425,20 +453,8 @@ void testAsusWRT() {
   // Logger::info("free heap before read: %u", ESP.getFreeHeap());
   String json = file.readString();
   file.close();
+  dumpAsusClientList(json);
   // Logger::info("free heap after read (json size=%u): %u", json.length(), ESP.getFreeHeap());
-
-  std::vector<RouterClientInfo> clients;
-  if (!RouterClientListParser::parse(json, clients)) {
-    Logger::error("can't parse client list json. [%d]", clients.capacity());
-  }
-
-  // Logger::info("free heap after parse: %u", ESP.getFreeHeap());
-
-  RouterClientListIterator it(std::move(clients));
-  while (it.hasNext()) {
-    const RouterClientInfo& c = it.next();
-    Logger::info("client.name=%s", c.name.c_str());
-  }
   Logger::info("------ AsusWRT test script -------");
   Logger::info("");
 }
