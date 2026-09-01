@@ -80,6 +80,14 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
   -F "@Y-@m-@d @H:@M:@S [q@q/r@r] %-50t %p"
 ```
 
+Відповіді на команди приходять у цю ж підписку (`<prefix>/command/mqtt-<env>/reply`), але
+вони багаторядкові й у спільному потоці читаються погано. Для блоку **M** зручніше тримати
+поряд другий термінал лише з reply-топіком і **без** `-F`, щоб рядки виводились як є:
+
+```bash
+mosquitto_sub -h <broker> -p 1883 -t "<prefix>/command/mqtt-$ENV/reply"
+```
+
 ---
 
 ## 1. Матриця покриття
@@ -101,6 +109,12 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
 | **H** — heap і фрагментація | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ інші лічильники |
 | **R** — регресії код-рев'ю | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
+> ⚠️ **`esp32-c3` у цій матриці ще немає.** Плата додана пізніше (див. Changelog у
+> `docs/architecture.md`), і вона перша **без екрана**, тож блоки **D**, **I**, **T**, **V**, **L**
+> до неї не застосовні взагалі, **F** — лише LittleFS (SD немає), **N** — без ping,
+> **B** — лише LED (GPIO8, кнопки немає). Блоки **S**, **M**, **C**, **E**, **H**, **R**
+> застосовні як є. Окремого розділу 14.x і заміряних часів збірки для неї теж поки немає.
+
 ---
 
 ## 2. S — Smoke (усі плати)
@@ -109,7 +123,7 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
 | :-- | :--- | :--- |
 | S1 | Прошити, відкрити монітор, натиснути RESET | Банер `*-*-*-...`, рядок з моделлю чипа і `(<PIOENV>)`, далі послідовність `... setup done`, наприкінці `> Ready. Enter 'list' for comand list.` |
 | S2 | Дочекатись 60 с без дій | Жодних reset/panic/`Guru Meditation`, `Stack canary`, `Task watchdog` у консолі |
-| S3 | `list` | Список команд. Обов'язково присутні: `list`, `status`, `reboot`, `scan`, `flip`, `led`, `clock`, `brightness`, `dump-mqtt`, `publish`, `mqtt-prefix`, `dump-asuswrt` |
+| S3 | `list` | Список команд. Обов'язково присутні: `list`, `status`, `reboot`, `scan`, `flip`, `led`, `clock`, `brightness`, `dump-mqtt`, `publish`, `mqtt-prefix`, `dump-asuswrt`; на платах із Gmail — ще й `mailto`, `sendmail`, `smtp-probe` |
 | S4 | `status sys` | Секція `ESP32 CHIP INFO`: модель чипа, ревізія, ядра, частота, SDK, Core, розмір і швидкість флеш, купа, PSRAM, WiFi SSID/RSSI, IP, `Last Reset Reason`, `display.brightness` |
 | S5 | `zzz` (неіснуюча команда) | `Unknown command: zzz` — **саме текст команди**, не сміття й не порожньо *(регресія R3)* |
 | S6 | `status` без аргументу | Підказка `use: status sys\|cfg\|sd\|sd+\|flash\|flash+\|littlefs` |
@@ -159,14 +173,31 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
 | M1 | `dump-mqtt` | `isConnected = yes, topic prefix = '<prefix>'` | усі |
 | M2 | Дивитись `mosquitto_sub -t "<prefix>/#"` під час старту пристрою | Приходить retained-повідомлення в `<prefix>/devices/<env>/status` з online-текстом | усі |
 | M3 | `publish test/hello world` | У підписнику з'являється `<prefix>/test/hello world`, у консолі `publish (test/hello:world) success` | усі |
-| M4 | `mosquitto_pub -t "<prefix>/command/mqtt-<env>" -m "clock off"` | На пристрої: `command clock off`, годинник зникає | усі |
-| M5 | Те саме з `-m "status sys"` | Пристрій друкує в Serial повний дамп системної інфо | усі |
+| M4 | `mosquitto_pub -t "<prefix>/command/mqtt-<env>" -m "clock off"` | На пристрої в консолі `[I][cmd.reply] > clock off`, годинник зникає *(рядок `command clock off` із листенера прибрано — луна тепер друкується вже під захопленням, щоб потрапити і в консоль, і у відповідь)* | усі |
+| M5 | Те саме з `-m "status sys"` | Пристрій друкує повний дамп системної інфо — **і в Serial, і у reply-топік** (див. M12) | усі |
 | M6 | Дочекатись 5 хв | У `<prefix>/devices/<env>/status` приходить `heartbeat` | усі |
 | M7 | Смикнути живлення пристрою (не `reboot`) | Брокер публікує LWT-offline у `<prefix>/devices/<env>/status` | усі |
 | M8 | `reboot` через консоль | LWT-offline із текстом **`reboot`** доходить до брокера **до** перезавантаження *(регресія R12 — до фіксу на PicoMQTT-платах не доходив ніколи)* | усі; критично для **c6**, **c6-lcd096** |
 | M9 | `mqtt-prefix` | Показує поточний префікс | усі |
 | M10 | `mqtt-prefix testpfx` → `reboot` → `dump-mqtt` | Після ребуту префікс `testpfx`, топіки в підписнику змінили корінь. **Повернути назад** тим самим шляхом | усі |
 | M11 | Флуд: `for i in $(seq 1 300); do mosquitto_pub -t "<prefix>/devices/x/status" -m "$i"; done` одночасно з важкою командою на пристрої (`status sd+` або `blur 8 3`) | Пристрій живий; у консолі допускається `[MQTT] черга переповнена, відкинуто: N вхідних, M вихідних`; **не** має бути OOM/reset *(регресія R11)* | усі; критично для **c6**, **c6-lcd096** (підписка на `#`) |
+
+### Відповідь на команду (request-response)
+
+Механізм — `ScopedLogCapture` + `lib/CommandResponse`; опис і пастки в
+`docs/architecture.md`, розділ «Request-response для команд». Тримати відкритим
+reply-підписника з розділу 0.3.
+
+| # | Дія | Очікуваний результат | Плати |
+| :-- | :--- | :--- | :--- |
+| M12 | `mosquitto_pub -t "<prefix>/command/mqtt-<env>" -m "heap"` | В `<prefix>/command/mqtt-<env>/reply` приходить **одне** повідомлення: перший рядок `[I][cmd.reply] > heap`, далі рядки `heap` рівно в тому вигляді, що в моніторі (той самий префікс `[I][heap   ]`). Ті самі рядки паралельно в `./esp`-моніторі — консоль не «вкрадено», це дублювання, а не перенаправлення | усі |
+| M13 | Те саме з `-m "list"` (десятки рядків) | Повідомлення підряд: до 8 порцій тексту (`COMMAND_RESPONSE_MAX_CHUNKS`) плюс **окреме** коротке фінальне з `...(truncated, N more lines)` — тобто 9 максимум. **Жоден рядок не розрізаний посередині** — порція рветься лише по `'\n'`, поки в буфері гарантовано влазить наступний рядок логу | усі |
+| M14 | Те саме з `-m "dump-mqtt"` — команда, у якій логує сам MQTT-клієнт | Одна відповідь і тишина. Нескінченний потік у reply-топік = зламався re-entrancy guard у `CommandResponse::flushChunk()`: рядки доставки потрапляють у відповідь, яку вони ж доставляють | усі |
+| M15 | Запустити `ecoflow-sync` (REST крутиться у власному таску `ecoflow-rest`) і **під час** нього надіслати `-m "heap"` | У відповіді немає **жодного** рядка з тегом `ecoflow`, хоч у консолі вони йдуть упереміш. Захоплення прив'язане до `TaskHandle_t`, а не глобальне; поява чужих рядків = регресія в `LogCaptureRegistry` | c6, c6-lcd096, c3 |
+| M16 | Тимчасово `-D COMMAND_RESPONSE_MAX_CHUNKS=2`, перезібрати, повторити M13 | 2 порції тексту + третє повідомлення з маркером; N у маркері помітно більше, ніж у M13. **Повернути 8** | одна плата |
+| M17 | `smtp-probe 587`, потім `smtp-probe 465` | Обидва дають `greeting: 220 smtp.gmail.com ESMTP …`: 587 — по відкритому TCP, 465 — через TLS ядра (`WiFiClientSecure`). Це перевірка мережі, порту й mbedTLS **без** поштової бібліотеки: якщо банери є, а `sendmail` усе одно падає — винна бібліотека, не плата. Заміряно на c6-lcd096: конект 51 мс / handshake 430 мс | плати з Gmail |
+| M18 | `mailto <address> heap`, далі `dump-mqtt` | У консолі: `[I][cmd.reply] > heap` (луна **вкладеної** команди, не самого `mailto`), вивід `heap`, `[D][reply.mail] MQTT suspended for SMTP session`, `[I][gmail] connecting to <host>:465 (implicit SSL), … B free`, потім `[I][gmail] sent to <address>`, `session closed, … B free` і `isConnected = yes`. **Лист має прийти** — перевірити скриньку: тема `<env>: heap`, тіло — той самий вивід, що в консолі | плати з Gmail |
+| M19 | `sendmail`, дивитись на таймінги | Попередження `sending test mail to … - blocks this task` іде **до** паузи; уся сесія (конект → `sent to` → `session closed`) укладається в кілька секунд. Заміряно на c6-lcd096: 1.6 с до `sent`, 3.6 с разом із закриттям. Пауза на десятки секунд або тиша після `sent to` = регресія: десь повернувся блокуючий режим ReadyMail (його внутрішній таймаут читання — 120 с) | плати з Gmail |
 
 ---
 
@@ -336,8 +367,7 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
 
 | Виправлення | Чому недосяжне | Що зробити, якщо треба перевірити |
 | :--- | :--- | :--- |
-| `ScreenLogTail`: читання за `'\0'` при `+ skip` | `SCREEN_LOG_TAIL_LINES=0` у **всіх** 7 env — блок не компілюється | Тимчасово поставити `-D SCREEN_LOG_TAIL_LINES=20` для `ttgo-t1`/`st7789`/`s3-lcd147`, викликати `status sys` і подивитись на хвіст логу на екрані |
-| `GmailSender`: текст SMTP-сервера як format-рядок | `sendEmail()` ніде не викликається (закоментовано в `loop()`), та й сам виклик `mailer.sendEmail()` усередині теж закоментований | Розкоментувати обидва місця + мати App Password у `secrets.ini` |
+| `ScreenLogTail`: читання за `'\0'` при `+ skip` | `SCREEN_LOG_TAIL_LINES=0` у **всіх** 8 env — блок не компілюється | Тимчасово поставити `-D SCREEN_LOG_TAIL_LINES=20` для `ttgo-t1`/`st7789`/`s3-lcd147`, викликати `status sys` і подивитись на хвіст логу на екрані |
 | `RouterApiClient::login()`: відсутній `collectHeaders()` | `dump-asuswrt` тестує лише парсер із файлу LittleFS; `login()` з коду не викликається | Дописати тимчасову команду, що робить `routerApi.login()` + `fetchClientListJson()`, і мати доступний ASUS-роутер |
 | `DataType`: необроблений `TYPE_EMPTY` у `switch` | `guess_type()`/`testGuessDataType()` не викликаються з `main.cpp` — мертвий код | Викликати `testGuessDataType()` із `setup()` |
 | `Display::pushImage8bpp`: переюзний буфер замість `malloc` щокадру | Гілка RGB332 недосяжна: у всіх env `SPRITE_COLOR_DEPTH=16` (на esp8266 — 1) | Поставити `-D SPRITE_COLOR_DEPTH=8` для `s3-lcd147` або `c6` (у `platformio.ini` для них уже є закоментовані рядки) |
@@ -366,7 +396,7 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
   ефектів немає. Блок **I** — лише перевірити, що фон видно.
 - `DISPLAY_SPLIT_COUNT=6` — найдрібніше розбиття, найкращий кандидат на перевірку D7.
 - SD на **400 kHz** (`SD_FREQ=400000`) — лістинг великої картки буде помітно повільним, це не баг.
-- Gmail і `ESP Mail Client` тут не підключені.
+- Gmail (`ReadyMail`) тут не підключений.
 
 ### 14.4 `ttgo-t1` (ESP32, LilyGO T-Display 135×240)
 - Найпростіша конфігурація: без SD, touch, сенсора, фону. Фактично перевіряє «спільне ядро»:
@@ -426,7 +456,7 @@ mosquitto_sub -h <broker> -p 1883 -t "<prefix>/#" -v \
 - `ConfigStorage` працює не через NVS, а через файли `/.nvs/<env>/<key>.<type>` у LittleFS —
   блок **C** перевіряє саме цю гілку. `status cfg` має показувати ті ж ключі, що й на ESP32.
 - Ping відсутній; `ESP8266Ping` не в `lib_deps`.
-- 80 KB RAM — після `status sys` звіряти вільну купу; ESP Mail Client тут особливо ненажерливий.
+- 80 KB RAM — після `status sys` звіряти вільну купу; поштова бібліотека (ReadyMail) тут особливо ненажерлива.
 - Немає SD і touch.
 
 ---
@@ -445,7 +475,7 @@ uploadfs виконано:  так / ні / не потрібно
 | S    | S1–S9          |      |      |      |         |
 | D    | D1–D7 (+D6a/b) |      |      |      |         |
 | N    | N1–N7          |      |      |      |         |
-| M    | M1–M11         |      |      |      |         |
+| M    | M1–M19         |      |      |      |         |
 | C    | C1–C4          |      |      |      |         |
 | F    | F1–F9          |      |      |      |         |
 | I    | I1–I8          |      |      |      |         |
@@ -453,7 +483,7 @@ uploadfs виконано:  так / ні / не потрібно
 | V    | V1–V8          |      |      |      |         |
 | L    | L1–L4          |      |      |      |         |
 | B    | B1–B4          |      |      |      |         |
-| R    | R1–R20         |      |      |      |         |
+| R    | R1–R26         |      |      |      |         |
 
 Аптайм на момент завершення: ________
 Незаплановані reset/panic:    так / ні   ->  якщо так, вкласти лог
@@ -465,4 +495,4 @@ uploadfs виконано:  так / ні / не потрібно
 (`esp32-c6-lcd096` для RISC-V/PicoMQTT, `esp32-st7789` для ESP32/PubSubClient/touch/сенсора,
 `esp8266` для ESP8266/LittleFS-конфігу):
 
-S1, S2, S3, S5, S7 · D2, D3 · N1, N3, N5 · M1, M2, M8 · C1, C2 · F1, F2
+S1, S2, S3, S5, S7 · D2, D3 · N1, N3, N5 · M1, M2, M8, M12, M13 · C1, C2 · F1, F2

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "LogCaptureRegistry.hpp"
 #include "LogLevelManager.hpp"
 #include "PrintQueueRegistry.hpp"
 
@@ -109,6 +110,14 @@ void SerialLogger::log(LogLevel level, const char* fmt, va_list args) const {
 
   line[end] = '\n';
   line[end + 1] = '\0';
+
+  // Якщо в цьому таску активний ScopedLogCapture - той самий рядок іде ще й
+  // туди (напр. у відповідь на MQTT-команду). Дублювання, а не перенаправлення:
+  // консоль лишається повною. Робимо ДО черги, бо PrintQueue може відкласти
+  // запис, а порядок рядків у відповіді має відповідати порядку виклику log().
+  if (Print* capture = LogCaptureRegistry::instance().current()) {
+    capture->write(reinterpret_cast<const uint8_t*>(line), end + 1);  // з '\n', без '\0'
+  }
 
   // Пряме write з таймаутом 10мс; якщо _output зайнятий - рядок піде
   // в per-output чергу (PrintQueueRegistry) і буде відправлений пізніше

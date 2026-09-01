@@ -78,8 +78,9 @@
 //
 // УВАГА: підміна через "#define SD SD_MMC" тут навмисно НЕ використовується —
 // вона ламає компіляцію, бо <SD.h> транзитивно підключають і інші бібліотеки
-// (напр. ESP Mail Client -> MB_FS.h), де глобальна текстова підміна імені SD
-// конфліктує з їхніми власними деклараціями/викликами SD.*. Замість цього
+// (це ловилось на ESP Mail Client -> MB_FS.h, яку в проєкті вже замінено на
+// ReadyMail; правило лишається як загальна осторога), де глобальна текстова
+// підміна імені SD конфліктує з їхніми власними деклараціями/викликами SD.*. Замість цього
 // нижче явно використовується SD_MMC (SDCardInspector::printAll(SD_MMC, ...),
 // SD_MMC.cardType()/cardSize()/... — той самий публічний API, що й fs::SDFS).
 #include <SD_MMC.h>
@@ -111,6 +112,10 @@ using ActiveBulkReader = SdSpiBulkReader;
 #endif
 #endif
 #include <LittleFS.h>
+#if defined(ESP32) && __has_include(<WiFiClientSecure.h>)
+// Потрібен команді smtp-probe для TLS-режиму (перевірка mbedTLS ядра).
+#include <WiFiClientSecure.h>
+#endif
 // #include <PubSubClient.h>
 #include <TouchScreenConfig.h>
 #if BOARD_HAS_IMU
@@ -118,7 +123,9 @@ using ActiveBulkReader = SdSpiBulkReader;
 #endif
 
 #include <AnalogSensor.hpp>
+#include <CommandResponse.hpp>
 #include <ConfigStorage.hpp>
+#include <EmailTarget.hpp>
 #include <EspPartitionInspector.hpp>
 #include <EventDispatcher.hpp>
 #include <GmailSender.hpp>
@@ -130,8 +137,10 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <Logger.hpp>
 #include <MqttClient.hpp>
 #include <MqttKeyGenerator.hpp>
+#include <MqttReplyTarget.hpp>
 #include <NtpService.hpp>
 #include <PrintQueue.hpp>
+#include <ScopedLogCapture.hpp>
 #include <RwLock.hpp>
 #include <SerialCommander.hpp>
 #include <SystemReset.hpp>
@@ -345,6 +354,96 @@ TouchController touchController;
 
 #if HAS_GMAIL_SENDER
 GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
+
+// Куди шле дим-тест "sendmail". Дефолт - на власну адресу відправника: лист
+// сам собі однаково проходить весь шлях через SMTP, а в коді не лишається
+// прошитої чужої адреси.
+#ifndef GMAIL_TEST_RECIPIENT
+#define GMAIL_TEST_RECIPIENT GMAIL_EMAIL
+#endif
+#endif
+
+// SMTP-дим-тест: найкоротший шлях перевірити, що лист узагалі виходить із
+// плати. Тіло листа - фіксований рядок, тому це перевірка саме транспорту, а
+// не механізму захоплення виводу (для нього є команда "mailto").
+//
+// Раніше тут був власний виклик mailer.sendEmail() - тобто БЕЗ паузи MQTT,
+// обов'язкової на C6, де дві TLS-сесії не влазять у heap. Тепер відправку
+// робить той самий EmailTarget, що й "mailto": suspend/resume і логування
+// heap лежать в одному місці, а не в двох копіях, що розходяться.
+void sendEmail() {
+#if HAS_GMAIL_SENDER
+  static TLogger logger("sendmail");
+
+  if (!WiFi.isConnected()) {
+    logger.error("wifi is not connected");
+    return;
+  }
+
+  // SMTP над TLS вимагає валідного часу для перевірки сертифіката. Без цієї
+  // перевірки бібліотека сама полізе по NTP і заблокує таск ще на 10 с.
+  if (!ntp.isSynced()) {
+    logger.error("NTP not ready - valid system time required for TLS");
+    return;
+  }
+
+  // Попередження ДО відправки, а не після: сесія блокує цей таск, тобто на
+  // цей час стає і рендер кадру, і MQTT, і тач. Без цього рядка плата
+  // виглядає завислою (саме так це й читалось у консолі).
+  logger.warn("sending test mail to %s - blocks this task until the SMTP session ends",
+              GMAIL_TEST_RECIPIENT);
+
+  EmailTarget target(mailer, GMAIL_TEST_RECIPIENT, PIO_PIOENV ": smtp smoke test",
+#if HAS_MQTT_CLIENT
+                     &mqtt
+#else
+                     nullptr
+#endif
+  );
+  static const char kBody[] = "SMTP smoke test from " PIO_PIOENV ".\n";
+  target.deliver(kBody, sizeof(kBody) - 1, /*isFinal=*/true);
+#else
+  Logger::error("sendmail - GmailSender not found!!!");
+#endif
+}
+
+// Виконує команду й віддає її вивід у target (див. lib/CommandResponse).
+//
+// Хендлери команд нічого про це не знають: увесь їхній вивід іде через TLogger,
+// а ScopedLogCapture дублює кожен рядок у CommandResponse. Тому у відповідь
+// потрапляє і те, що логують бібліотеки всередині команди (MqttClient,
+// SDCardInspector, EspPartitionInspector) - того, чого хендлер не контролює.
+//
+// finish() навмисно ПІСЛЯ закриття скоупу: доставка сама логує, і всередині
+// скоупу ці рядки пішли б у відповідь, яку вони ж доставляють.
+static void runCommandWithResponse(const char* line, std::shared_ptr<ResponseTarget> target) {
+  static TLogger _logger{"cmd.reply"};
+
+  CommandResponse response(std::move(target));
+  {
+    ScopedLogCapture capture(response);
+    // Луна команди - вже ПІД скоупом, щоб потрапила і в консоль, і у
+    // відповідь: підписник reply-топіка бачить лише вивід і без неї не знав
+    // би, на що саме цей вивід.
+    _logger.info("> %s", line);
+    commandHandler.execute(line);
+  }
+  response.finish();
+}
+
+#if HAS_MQTT_CLIENT
+// Приймач відповідей на MQTT-команди. Один на пристрій, лінива ініціалізація
+// (Meyer's singleton) - конструюється при першій команді, а не під час
+// static-init, коли mqtt ще може бути не готовий.
+//
+// Топік БЕЗ префікса: його підставить MqttClient::resolveTopic() через
+// MqttKeyGenerator, як і для будь-якого іншого топіка. Повний вигляд -
+// "<prefix>/command/<client-id>/reply".
+static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
+  static std::shared_ptr<ResponseTarget> target =
+      std::make_shared<MqttReplyTarget>(mqtt, "command/" MQTT_CLIENT_ID "/reply");
+  return target;
+}
 #endif
 
 #if LIGHT_SENSOR_PIN > 0
@@ -419,7 +518,7 @@ void dumpAsusClientList(String& json) {
   RouterClientListIterator it(std::move(clients));
   while (it.hasNext()) {
     const RouterClientInfo& c = it.next();
-    Logger::info("client.name=%s", c.name.c_str());
+    Logger::info("client=%-30s timer=%9s", c.name.c_str(), c.timer.c_str());
   }
 }
 
@@ -1189,8 +1288,10 @@ void setupMqttClient() {
   #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("command/" MQTT_CLIENT_ID, [](const char* topic, const char* payload) {
     // char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
-    _logger.warn("command %s", payload);
-    commandHandler.execute(payload);
+    // Вивід команди повертається в "command/<client-id>/reply" - той самий
+    // текст, що йде в serial-монітор (луну команди логує сам
+    // runCommandWithResponse, тому окремий warn тут більше не потрібен).
+    runCommandWithResponse(payload, mqttReplyTarget());
   });
   #endif
 
@@ -1496,9 +1597,9 @@ void dumpConfigStorage() {
 // ACTIVE_SD — локальний (не глобальний!) макрос-псевдонім лише для функцій
 // нижче: dumpSDlistDir()/dumpSDInfo()/dumpSdRaw()/dumpSdExt4(). Визначається безпосередньо
 // перед використанням і одразу #undef-иться, щоб не впливати на інший код
-// файлу чи транзитивні включення <SD.h> в сторонніх бібліотеках (напр.
-// ESP Mail Client -> MB_FS.h), де глобальний "#define SD SD_MMC" ламає
-// компіляцію (конфлікт з їхніми власними SD.*-викликами).
+// файлу чи транзитивні включення <SD.h> в сторонніх бібліотеках (ловилось на
+// ESP Mail Client -> MB_FS.h, яку вже замінено на ReadyMail), де глобальний
+// "#define SD SD_MMC" ламає компіляцію (конфлікт з їхніми SD.*-викликами).
 #if defined(SD_USE_SDMMC)
 #define ACTIVE_SD SD_MMC
 #include <SDCardInspector.hpp>
@@ -2889,6 +2990,130 @@ void setupSerialCommander() {
 
   commandHandler.registerCommand("scan", "scan WiFi networks", [](const String& args) { WiFi_scan(); });
 
+#if HAS_GMAIL_SENDER
+  // command: mailto
+  //
+  // Той самий механізм відповіді, що для MQTT-команд, але з іншим приймачем -
+  // вивід вкладеної команди їде листом. Тут це ще й єдиний користувач
+  // EmailTarget; для команд за розкладом cron-лямбда так само захоплює
+  // shared_ptr на приймач і віддає результат при кожному спрацюванні.
+  commandHandler.registerCommand(
+      "mailto", "run a command and send its output by email: mailto <address> <command>",
+      [](const String& args) {
+        static TLogger logger("mailto");
+
+        const int spaceIdx = args.indexOf(' ');
+        if (spaceIdx < 0) {
+          logger.info("use: mailto <address> <command>");
+          return;
+        }
+
+        const String address = args.substring(0, spaceIdx);
+        String command = args.substring(spaceIdx + 1);
+        command.trim();
+        if (address.length() == 0 || command.length() == 0) {
+          logger.info("use: mailto <address> <command>");
+          return;
+        }
+
+        auto target = std::make_shared<EmailTarget>(mailer, address, String(PIO_PIOENV ": ") + command,
+#if HAS_MQTT_CLIENT
+                                                    &mqtt
+#else
+                                                    nullptr
+#endif
+        );
+        runCommandWithResponse(command.c_str(), std::move(target));
+      });
+  commandHandler.registerCommand("sendmail", "send an SMTP smoke-test email to " GMAIL_TEST_RECIPIENT,
+                                 [](const String& args) { sendEmail(); });
+
+  // command: smtp-probe
+  //
+  // Конект до SMTP-хоста без поштової бібліотеки. Потрібен, щоб відділити
+  // "мережа/сервер недосяжні" від "бібліотека не читає відповідь": обидва
+  // випадки в логах поштової бібліотеки виглядають однаково. Той самий підхід,
+  // що `sdbb` для SD - перевірка найнижчого шару своїми руками. Саме ця
+  // команда й довела, що на C6 винна була бібліотека, а не плата.
+  commandHandler.registerCommand(
+      "smtp-probe", "probe the SMTP host without the mail library: smtp-probe [port] (465 = TLS)",
+      [](const String& args) {
+        static TLogger logger("smtp");
+
+        if (!WiFi.isConnected()) {
+          logger.error("wifi is not connected");
+          return;
+        }
+
+        // Порт з аргументу, інакше зібраний. 465 пробуємо через TLS ядра
+        // (WiFiClientSecure, mbedTLS) - це рівно той шар, на який спирається
+        // будь-яка поштова бібліотека без власного стека, тож проба каже, чи
+        // взагалі можлива TLS-сесія з Gmail на цій платі.
+        String portArg = args;
+        portArg.trim();
+        const uint16_t port = portArg.length() > 0 ? (uint16_t)portArg.toInt() : (uint16_t)GMAIL_SMTP_PORT;
+        const bool useTls = (port == 465);
+
+#if defined(ESP32)
+        WiFiClientSecure tlsClient;
+        if (useTls) {
+          // Сертифікат навмисно не перевіряємо: тут перевіряється сама
+          // можливість handshake, а не довіра до сервера.
+          tlsClient.setInsecure();
+        }
+#endif
+        WiFiClient plainClient;
+#if defined(ESP32)
+        Client& client = useTls ? static_cast<Client&>(tlsClient) : static_cast<Client&>(plainClient);
+#else
+        Client& client = plainClient;
+        if (useTls) {
+          logger.warn("TLS probe is ESP32-only, falling back to plain TCP");
+        }
+#endif
+
+        logger.info("probing %s:%u (%s), %u B free, largest block %u B", GMAIL_SMTP_HOST, (unsigned)port,
+                    useTls ? "TLS" : "plain", (unsigned)ESP.getFreeHeap(),
+#if defined(ESP32)
+                    (unsigned)ESP.getMaxAllocHeap()
+#else
+                    (unsigned)ESP.getMaxFreeBlockSize()
+#endif
+        );
+
+        const uint32_t started = millis();
+        if (!client.connect(GMAIL_SMTP_HOST, port)) {
+          logger.error("connect to %s:%u failed after %lu ms", GMAIL_SMTP_HOST, (unsigned)port,
+                       (unsigned long)(millis() - started));
+          return;
+        }
+        logger.info("connected to %s:%u in %lu ms, waiting for greeting", GMAIL_SMTP_HOST, (unsigned)port,
+                    (unsigned long)(millis() - started));
+
+        // Банер (код 220) сервер шле сам, одразу після конекту: на 587 у
+        // відкритому вигляді, на 465 - уже всередині TLS-сесії.
+        String greeting;
+        const uint32_t deadline = millis() + 5000;
+        while (millis() < deadline && !greeting.endsWith("\n")) {
+          while (client.available() > 0) {
+            greeting += (char)client.read();
+          }
+          delay(10);
+        }
+
+        if (greeting.length() == 0) {
+          logger.error("connected but silent for 5000 ms - no greeting");
+          if (!useTls && port == 465) {
+            logger.info("port 465 is implicit TLS - silence over plain TCP is expected here");
+          }
+        } else {
+          greeting.trim();
+          logger.info("greeting: %s", greeting.c_str());
+        }
+        client.stop();
+      });
+#endif
+
 #if defined(HAS_FORCE_DOWNLOAD_BOOT)
   commandHandler.registerCommand(
       "bootloader", "reboot into ROM download mode (for flashing without BOOT/RESET buttons)",
@@ -3610,22 +3835,6 @@ void setupLightSensor() {
   touchController.events().onSwipeDown(onSwipe);
 #endif
 #endif
-}
-
-void sendEmail() {
-  static bool once = false;
-  if (once) {
-    return;
-  }
-
-  once = true;
-  display.drawText(10, 10 + 3 * (3 + display.fontHeight()), "SMTP sendmail", TFT_LIGHTGREY);
-  display.flush();
-#if HAS_GMAIL_SENDER
-// mailer.sendEmail("nick.lavrik@gmail.com", PIO_PIOENV, "hhhh");
-#endif
-  display.drawText(10, 10 + 4 * (3 + display.fontHeight()), "SMTP sendmail (done)", TFT_LIGHTGREY);
-  display.flush();
 }
 
 void drawSystemInfo() {
