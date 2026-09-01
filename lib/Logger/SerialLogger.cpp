@@ -5,6 +5,7 @@
 
 #include "LogCaptureRegistry.hpp"
 #include "LogLevelManager.hpp"
+#include "LogMirror.hpp"
 #include "PrintQueueRegistry.hpp"
 
 #if SCREEN_LOG_TAIL_LINES > 0
@@ -117,6 +118,14 @@ void SerialLogger::log(LogLevel level, const char* fmt, va_list args) const {
   // запис, а порядок рядків у відповіді має відповідати порядку виклику log().
   if (Print* capture = LogCaptureRegistry::instance().current()) {
     capture->write(reinterpret_cast<const uint8_t*>(line), end + 1);  // з '\n', без '\0'
+  }
+
+  // Глобальне дзеркало (lib/ConsoleMqtt) - на відміну від capture вище, воно
+  // НЕ прив'язане до таска: сенс саме в тому, щоб віддалено бачити весь потік,
+  // включно з мережевими тасками. Два механізми незалежні - рядок може піти і
+  // у відповідь на команду, і в дзеркало.
+  if (Print* mirror = LogMirror::current()) {
+    mirror->write(reinterpret_cast<const uint8_t*>(line), end + 1);
   }
 
   // Пряме write з таймаутом 10мс; якщо _output зайнятий - рядок піде

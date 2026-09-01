@@ -567,6 +567,10 @@ void MqttClient::reportDroppedMessages() {
 #endif
 }
 
+void MqttClient::setEchoIgnoreTopic(const char* topic) {
+  _echoIgnoreTopic = (topic != nullptr) ? resolveTopic(topic) : std::string();
+}
+
 bool MqttClient::publish(const char* topic, const char* payload, bool retained) {
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
@@ -857,6 +861,12 @@ void MqttClient::dispatchMessage(const char* topic, const uint8_t* payload, unsi
 
 void MqttClient::enqueueIncoming(const char* topic, const uint8_t* payload, unsigned int length) {
 #if defined(ESP32)
+  // Власне ехо (див. setEchoIgnoreTopic()): відсікаємо ДО копіювання в heap,
+  // інакше кожен свій рядок логу коштував би дві алокації і слот у черзі.
+  if (!_echoIgnoreTopic.empty() && topic != nullptr && _echoIgnoreTopic == topic) {
+    return;
+  }
+
   MqttIncomingMessage msg;
   msg.topic.assign(topic);
   msg.payload.assign(payload, payload + length);

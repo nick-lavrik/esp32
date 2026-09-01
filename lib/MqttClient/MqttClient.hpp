@@ -108,6 +108,20 @@ public:
   // 0, якщо таска немає (не ESP32 або клієнт на паузі).
   size_t networkTaskStackHeadroom() const;
 
+  // Топік, вхідні повідомлення якого відкидаються ще в мережевому таску.
+  //
+  // Потрібно тому, що root-підписка за замовчуванням - "#"
+  // (MqttConfig::rootSubscribeTopic), тобто брокер повертає нам НАШІ Ж
+  // публікації. Для рідкісного publish це дрібниця, але дзеркало консолі
+  // (lib/ConsoleMqtt) публікує потоком - і кожен свій рядок логу з'їдав би
+  // слот у _incomingQueue (kMaxIncomingQueue = 32, drop-oldest), тобто власний
+  // шум пристрою здатний витіснити справжню вхідну команду.
+  //
+  // Топік резолвиться через resolveTopic() (з префіксом), бо порівнюється з
+  // топіком, який прийшов від брокера. Викликати ПІСЛЯ begin(): до нього
+  // _keyGenerator ще nullptr і префікс не підставиться.
+  void setEchoIgnoreTopic(const char* topic);
+
   bool publish(const char* topic, const char* payload, bool retained = false);
   bool publish(const char* topic, const uint8_t* payload, unsigned int length, bool retained = false);
   bool subscribe(const char* topic);
@@ -194,6 +208,10 @@ private:
   MqttConfig _config;
   MqttKeyGenerator _defaultKeyGenerator;
   MqttKeyGenerator* _keyGenerator = nullptr;
+
+  // Резолвлений топік, чиї вхідні повідомлення ігноруються - див.
+  // setEchoIgnoreTopic(). Порожній рядок = фільтр вимкнено.
+  std::string _echoIgnoreTopic;
 
 #if __has_include(<PicoMQTT.h>)
   // Сховище для will.topic: PicoMQTT::Client зберігає лише const char*

@@ -125,6 +125,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <AnalogSensor.hpp>
 #include <CommandResponse.hpp>
 #include <ConfigStorage.hpp>
+#include <ConsoleMqtt.hpp>
 #include <EmailTarget.hpp>
 #include <EspPartitionInspector.hpp>
 #include <EventDispatcher.hpp>
@@ -297,6 +298,14 @@ MqttClient mqtt(makeMqttConfig());
 // runtime override поверх MqttConfig::prefix; заповнюється лише за наявності
 // CFG_MQTT_TOPIC_PREFIX в ConfigStorage, див. setupMqttClient()
 MqttKeyGenerator mqttTopicPrefixOverride;
+#endif
+
+#if HAS_CONSOLE_MQTT
+// Дзеркало консолі в "<prefix>/console/<MQTT_CLIENT_ID>" (lib/ConsoleMqtt).
+// Топік БЕЗ префікса - його підставить MqttClient::resolveTopic(), як і для
+// reply-топіка. Клієнт і сховище передані явно: щоб посадити дзеркало на
+// інший MqttClient, правиться цей рядок, а не бібліотека.
+ConsoleMqtt consoleMqtt(mqtt, configStorage, "console/" MQTT_CLIENT_ID);
 #endif
 
 #if HAS_ECOFLOW_CLIENT
@@ -1275,8 +1284,15 @@ void setupMqttClient() {
   mqtt.begin();
   _logger.info("topic prefix = '%s'", mqtt.keyGenerator().prefix().c_str());
 
+#if HAS_CONSOLE_MQTT
+  // ПІСЛЯ mqtt.begin(): до нього _keyGenerator ще nullptr, і топік для фільтра
+  // ехо зарезолвився б без префікса, тобто фільтр не спрацював би.
+  consoleMqtt.begin();
+#endif
+
   // mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "heartbeat"); });
+  scheduler.addCronTask(30 * 60 * 1000UL, []() { testAsusWRT(); });
 
   /* #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("#", [](const char* topic, const char* payload) {
@@ -1324,6 +1340,11 @@ void setupMqttClient() {
   commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
     _logger.info("isConnected = %s, topic prefix = '%s'", mqtt.isConnected() ? "yes" : "no",
                  mqtt.keyGenerator().prefix().c_str());
+    // Запас стека мережевого таска. Потрібен не з цікавості: фільтр дзеркала
+    // консолі (lib/ConsoleMqtt) виконує regexec() у КОЖНОМУ таску, що логує -
+    // тобто й тут. У проєкті вже є урок про зрізаний стек TLS-таска, який
+    // закінчився зависанням без panic-логу, тому це має бути видно командою.
+    _logger.info("network task stack headroom = %u B", (unsigned)mqtt.networkTaskStackHeadroom());
   });
 
   commandHandler.registerCommand(
@@ -1361,6 +1382,80 @@ void setupMqttClient() {
                     args.c_str());
     }
   );
+
+#if HAS_CONSOLE_MQTT
+  commandHandler.registerCommand(
+    "console-mqtt",
+    "mirror the console to MQTT: console-mqtt [on|off | allow <re> | deny <re> | "
+    "clear allow|deny | test <line>]",
+    [](const String args) {
+      String rest = args;
+      rest.trim();
+
+      if (rest.length() == 0) {
+        consoleMqtt.dumpStatus();
+        return;
+      }
+
+      // Перший токен - підкоманда, решта рядка - її аргумент "як є": патерн
+      // може містити пробіли ("took [0-9]{3,} ms"), тому далі не ріжемо.
+      String verb = rest;
+      String value = "";
+      const int space = rest.indexOf(' ');
+      if (space >= 0) {
+        verb = rest.substring(0, space);
+        value = rest.substring(space + 1);
+        value.trim();
+      }
+
+      if (verb.equalsIgnoreCase("on") || verb.equalsIgnoreCase("off")) {
+        consoleMqtt.setActive(verb.equalsIgnoreCase("on"), /*persist=*/true);
+        return;
+      }
+
+      if (verb.equalsIgnoreCase("test")) {
+        if (value.length() == 0) {
+          _logger.info("use: console-mqtt test <line>");
+          return;
+        }
+        _logger.info("'%s' -> %s", value.c_str(), consoleMqtt.wouldPass(value.c_str()) ? "pass" : "blocked");
+        return;
+      }
+
+      const bool isAllow = verb.equalsIgnoreCase("allow");
+      const bool isDeny = verb.equalsIgnoreCase("deny");
+
+      if (verb.equalsIgnoreCase("clear")) {
+        if (value.equalsIgnoreCase("allow")) {
+          consoleMqtt.clearRules(/*deny=*/false);
+        } else if (value.equalsIgnoreCase("deny")) {
+          consoleMqtt.clearRules(/*deny=*/true);
+        } else {
+          _logger.info("use: console-mqtt clear allow|deny");
+          return;
+        }
+        _logger.info("%s rules cleared (built-in ones stay)", value.c_str());
+        return;
+      }
+
+      if (isAllow || isDeny) {
+        if (value.length() == 0) {
+          _logger.info("use: console-mqtt %s <POSIX extended regexp>", verb.c_str());
+          return;
+        }
+        char error[96] = "";
+        if (!consoleMqtt.addRule(isDeny, value.c_str(), error, sizeof(error))) {
+          _logger.error("rule '%s' rejected: %s", value.c_str(), error);
+          return;
+        }
+        _logger.info("%s rule '%s' added", isDeny ? "deny" : "allow", value.c_str());
+        return;
+      }
+
+      _logger.info("use: console-mqtt [on|off | allow <re> | deny <re> | clear allow|deny | test <line>]");
+    }
+  );
+#endif
 
   /*
   static uint32_t i = 0;
