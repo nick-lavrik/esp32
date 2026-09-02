@@ -146,6 +146,46 @@ void Display::pushImage8bpp(int32_t x, int32_t y, int32_t w, int32_t h, const ui
 #endif
 }
 
+void Display::drawBitmapScaled(int32_t x, int32_t y, const uint8_t *bitmap, int32_t w, int32_t h,
+                               uint32_t color, uint8_t scale) {
+  if (!bitmap || w <= 0 || h <= 0) return;
+  if (scale < 1) scale = 1;
+
+  // dXY() рівно один раз: далі все рахується вже в координатах активної смуги.
+  dXY(&x, &y);
+  const int32_t stripH = splitHeight();
+  if (y >= stripH || y + h * (int32_t)scale <= 0) return;  // цілком поза смугою
+
+  if (scale == 1) {
+    // Не через public drawBitmap() - той знову прогнав би dXY().
+    sprite().drawBitmap((int16_t)x, (int16_t)y, bitmap, (int16_t)w, (int16_t)h, (uint16_t)color);
+    return;
+  }
+
+  // Формат той самий, що в MonoBitmap / Adafruit_GFX::drawBitmap():
+  // 1 біт/піксель, MSB = лівий піксель рядка, рядок доповнений до цілого байта.
+  const int32_t stride = (w + 7) / 8;
+
+  for (int32_t row = 0; row < h; ++row) {
+    const int32_t ry = y + row * (int32_t)scale;
+    if (ry + (int32_t)scale <= 0) continue;  // рядок ще вище смуги
+    if (ry >= stripH) break;                 // далі тільки нижче - виходимо
+
+    const uint8_t *p = bitmap + row * stride;
+    int32_t col = 0;
+    while (col < w) {
+      // Малюємо ПРОГОНАМИ однакових бітів: один fillRect замість scale*scale
+      // викликів drawPixel. Для типового спрайта це 3-4 виклики на рядок.
+      while (col < w && !(pgm_read_byte(p + (col >> 3)) & (0x80 >> (col & 7)))) ++col;
+      if (col >= w) break;
+      int32_t run = col;
+      while (run < w && (pgm_read_byte(p + (run >> 3)) & (0x80 >> (run & 7)))) ++run;
+      sprite().fillRect(x + col * scale, ry, (run - col) * scale, scale, color);
+      col = run;
+    }
+  }
+}
+
 void Display::flush() { 
 #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   int x = 0, y = 0;

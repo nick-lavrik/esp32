@@ -362,9 +362,34 @@ class TFT_eSprite {
   void drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color) {
     if (_canvas) _canvas->drawCircle(x, y, r, color);
   }
-  void drawBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fg) {
-    if (_canvas) _canvas->drawBitmap(x, y, const_cast<uint8_t *>(bitmap), w, h, fg);
+  // Заливки: Arduino_GFX має їх нативно (writeFillRectPreclipped у Arduino_Canvas
+  // працює рядком, не попіксельно) і сам клипає по межах канви - тут чиста
+  // проксі-делегація, як і в drawRect/drawCircle вище.
+  void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) {
+    if (_canvas) _canvas->fillRect(x, y, w, h, color);
   }
+  void drawFastHLine(int32_t x, int32_t y, int32_t w, uint32_t color) {
+    if (_canvas) _canvas->drawFastHLine(x, y, w, color);
+  }
+  void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t color) {
+    if (_canvas) _canvas->fillCircle(x, y, r, color);
+  }
+  // БЕЗ const_cast (був тут раніше): Arduino_GFX має ДВІ перевантаження -
+  // const uint8_t[] читає через pgm_read_byte, а uint8_t* читає масив НАПРЯМУ.
+  // const_cast мовчки перемикав виклик на другу, тобто PROGMEM-дані читались
+  // без pgm_read_*. На C6 флеш memory-mapped і це "працює", але тримається
+  // лише на цій властивості платформи.
+  void drawBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fg) {
+    if (_canvas) _canvas->drawBitmap(x, y, bitmap, w, h, fg);
+  }
+  // А ось тут const_cast, на відміну від drawBitmap вище, ПОТРІБЕН і прибирати
+  // його не можна: Arduino_Canvas перевизначає лише uint16_t*-перевантаження
+  // (Arduino_Canvas.h:24, override), а це за правилами C++ ХОВАЄ решту
+  // однойменних методів бази - тобто const-варіант з pgm_read_word звідси
+  // просто не видно. Кваліфікувати базу явно (Arduino_GFX::draw16bitRGB...)
+  // теж не варіант: саме override Canvas пише напряму в framebuffer і він
+  // швидший. PROGMEM-фон (BACKGROUND_PROGMEM_HEADER) читається без
+  // pgm_read_word і тримається на memory-mapped флеші ESP32.
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
     if (_canvas) _canvas->draw16bitRGBBitmap(x, y, const_cast<uint16_t *>(data), w, h);
   }

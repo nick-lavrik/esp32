@@ -90,6 +90,9 @@ public:
 
   void drawRect(int32_t, int32_t, int32_t, int32_t, uint32_t) {}
   void drawCircle(int32_t, int32_t, int32_t, uint32_t) {}
+  void fillRect(int32_t, int32_t, int32_t, int32_t, uint32_t) {}
+  void drawFastHLine(int32_t, int32_t, int32_t, uint32_t) {}
+  void fillCircle(int32_t, int32_t, int32_t, uint32_t) {}
   void drawBitmap(int16_t, int16_t, const uint8_t*, int16_t, int16_t, uint16_t) {}
 
   // Обидві перевантаження pushImage() з src/Display.cpp: RGB565 і

@@ -26,6 +26,17 @@ public:
   explicit TouchEvents(const TouchScreenConfig &config = TouchScreenConfig());
 
   // ---- Підписка (кожна повертає handle для подальшої відписки) ----
+  // onPress спрацьовує в МОМЕНТ НАТИСКАННЯ, onRelease - у момент відпускання,
+  // обидва беззастережно.
+  //
+  // Це не дублікат onTouch: той інвокується вже на ВІДПУСКАННІ, і то лише
+  // якщо дотик не переріс у hold і не виявився свайпом. Для реакції, яка
+  // мусить бути миттєвою і безумовною (кнопка стрибка в грі), цього не
+  // досить: коротке натискання спрацьовувало б із запізненням, а довге
+  // (>holdThresholdMs) не спрацювало б узагалі.
+  int onPress(TouchCallback cb);
+  int onRelease(TouchCallback cb);
+
   int onTouch(TouchCallback cb);
   int onHold(HoldCallback cb);
   int onDblClick(TouchCallback cb);
@@ -39,6 +50,8 @@ public:
   int onSwipeFromRight(SwipeCallback cb);
 
   // ---- Відписка за handle, який повернув відповідний onXxx() ----
+  void offPress(int handle);
+  void offRelease(int handle);
   void offTouch(int handle);
   void offHold(int handle);
   void offDblClick(int handle);
@@ -95,6 +108,8 @@ private:
 
   // Списки колбеків - динамічні (std::vector), без обмеження кількості
   // підписників на один івент.
+  CallbackList<TouchCallback> _onPress;
+  CallbackList<TouchCallback> _onRelease;
   CallbackList<TouchCallback> _onTouch;
   CallbackList<HoldCallback> _onHold;
   CallbackList<TouchCallback> _onDblClick;

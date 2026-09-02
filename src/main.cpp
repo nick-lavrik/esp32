@@ -64,6 +64,8 @@
 #endif
 #endif
 
+#include "Dino/DinoRenderer.hpp"  // без #if: LDF не обчислює препроцесор,
+                                     // а lib/DinoGame має знайтись на всіх env
 #include "Display.h"
 #if BOARD_HAS_SD
 // SD_USE_SDMMC - внутрішній прапорець: SDMMC-режим є лише на платі з таким
@@ -175,6 +177,10 @@ using ActiveBulkReader = SdSpiBulkReader;
 
 const char* EVT_REBOOT = "reboot";
 const char* CFG_SHOW_CLOCK = "clock";
+// Ключ NVS - максимум 15 символів (ConfigStorage::MAX_KEY_LENGTH).
+// Зберігається лише РЕКОРД: сам режим гри після ресету не відновлюється
+// (див. коментар у loadConfig()).
+const char* CFG_DINO_HIGHSCORE = "dino.hi";
 const char* CFG_BLINK_LED = "blink";  // ESP8266 BLINK_LED_PIN dependency
 const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
 const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
@@ -353,6 +359,18 @@ RouterApiClient routerApi(ROUTER_HOST, ROUTER_LOGIN_AUTHORIZATION);
 // include/Setup_Headless.h, усі методи inline й no-op, тому компілятор
 // прибирає ці виклики цілком (у прошивці не лишається ні коду, ні буферів).
 Display display;
+#if HAS_DINO_GAME
+DinoRenderer dinoRenderer;
+#endif
+bool dinoActive = false;
+#if HAS_DINO_GAME
+// Режим показу сітки спрайтів ("dino test"). Окремий режим, а не разовий
+// кадр: разовий одразу затерся б наступною ітерацією loop().
+bool dinoTestMode = false;
+// Скільки ще смуг треба почистити після перемикання режиму. Кадр збирається
+// за DISPLAY_SPLIT_COUNT проходів, тому одного clear() не досить.
+uint8_t dinoPendingClear = 0;
+#endif
 TouchScreenConfig displayConfig = makeTouchScreenConfig();
 
 #if BOARD_HAS_TOUCHSCREEN
@@ -493,6 +511,9 @@ void onSwipeFromRightHandler(TouchPoint start, TouchPoint end) {
 }
 
 void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
+  // У грі утримання - це високий стрибок, а не запит debug-рамки: інакше
+  // кожен такий стрибок залишав би на екрані жовті кола на 10 секунд.
+  if (dinoActive) return;
   // TODO: restore brightness before trigger autobrightness = off (!)
   // display.autobrightness(true);
 
@@ -651,6 +672,45 @@ void show_clock(bool show) {
   Logger::debug("showClock = %s", showClock ? "YES" : "NO");
 }
 
+// Вмикає/вимикає ігровий режим. Гра НЕ малюється поверх звичайного екрана -
+// вона його заміщає (див. loop()), тому перемикач тут же чистить кадр: інакше
+// на платах, де height() не ділиться на DISPLAY_SPLIT_COUNT рівно, останні
+// рядки старої картинки лишились би на екрані назавжди.
+void dino_set_active(bool on) {
+#if HAS_DINO_GAME
+  if (on && !dinoRenderer.ready()) {
+    Logger::warn("dino: renderer not ready");
+    return;
+  }
+
+  dinoActive = on;
+
+  if (on) {
+    dinoRenderer.game().reset();
+  } else if (dinoRenderer.game().highScoreDirty()) {
+    // Рекорд міг лишитись незбереженим, якщо гру вимкнули раніше, ніж
+    // відпрацював cron-таск (див. setupDinoGame()).
+    configStorage.setInt(CFG_DINO_HIGHSCORE, (int32_t)dinoRenderer.game().highScore());
+    dinoRenderer.game().clearHighScoreDirty();
+  }
+
+  // Малювати ЗВІДСИ не можна. Команда виконується з commandHandler.update(),
+  // тобто вже всередині транзакції кадру, а Arduino_HWSPI::beginWrite() на
+  // спільній шині (обидві C6-плати) робить SPI.beginTransaction() БЕЗ обліку
+  // вкладеності. Другий захід у той самий нерекурсивний мьютекс вішає плату
+  // намертво, і watchdog не рятує - та сама пастка, що описана в
+  // docs/architecture.md про YIELD_DISPLAY_BUS. Тому тут лише прапорець,
+  // а чистить екран loop() у своїй транзакції.
+  dinoTestMode = false;
+  dinoPendingClear = display.splitCount();
+
+  Logger::info("dino game %s", on ? "ON" : "OFF");
+#else
+  (void)on;
+  Logger::info("dino: display game not available on this board");
+#endif
+}
+
 // I2C-шина СПІЛЬНА для тача й IMU, тому Wire.begin() робиться рівно один раз
 // тут, а не в кожному драйвері: повторний Wire.begin() з тими самими пінами
 // нешкідливий, але з РІЗНИМИ - мовчки переприв'язує шину і ламає той
@@ -740,6 +800,7 @@ void setupTouchScreen() {
   touchController.events().onHold(onHoldDrawPoints);
 
   touchController.events().onSwipeUp([](TouchPoint s, TouchPoint e) {
+    if (dinoActive) return;  // змах пальцем під час стрибка - не запит яскравості
     if (display.brightness() == 0) {
       display_brightness(1, false);
     } else if (display.brightness() == 1) {
@@ -751,6 +812,7 @@ void setupTouchScreen() {
   });
 
   touchController.events().onSwipeDown([](TouchPoint s, TouchPoint e) {
+    if (dinoActive) return;
     if (display.brightness() == 1) {
       display_brightness(0, false);
     } else {
@@ -3360,6 +3422,58 @@ void setupSerialCommander() {
     }
   });
 
+  // Реєструється поза #if - як flip/clock/brightness: список команд має бути
+  // однаковим на всіх платах, а недоступність фічі видно з відповіді.
+  commandHandler.registerCommand("dino", "Chrome Dino game on screen: dino on|off|test",
+                                 [](const String& args) {
+    if (args.equalsIgnoreCase("on")) {
+      dino_set_active(true);
+    } else if (args.equalsIgnoreCase("off")) {
+      dino_set_active(false);
+    } else if (args.equalsIgnoreCase("test")) {
+#if HAS_DINO_GAME
+      if (!dinoRenderer.ready()) {
+        Logger::warn("dino: renderer not ready");
+      } else {
+        // Знову ж таки лише прапорець - малює loop() (див. dino_set_active).
+        dinoTestMode = true;
+        dinoActive = false;
+        dinoPendingClear = display.splitCount();
+        Logger::info("dino: sprite sheet mode ON (dino off to leave)");
+      }
+#else
+      Logger::info("dino: display game not available on this board");
+#endif
+    } else if (args.length() == 0) {
+#if HAS_DINO_GAME
+      if (!dinoRenderer.ready()) {
+        Logger::info("dino: renderer not ready");
+      } else {
+        const DinoGame& g = dinoRenderer.game();
+        const DinoLayout& L = g.layout();
+        Logger::info("dino: %s%s", dinoActive ? "ON" : "OFF",
+                     dinoTestMode ? " (sprite sheet)" : "");
+        Logger::info("  screen %dx%d, ground y=%d, dino %dx%d, jump %d px",
+                     (int)L.viewW, (int)L.viewH, (int)L.groundY, (int)L.playerW,
+                     (int)L.playerH, (int)L.jumpApex);
+        Logger::info("  obstacle kinds: %u (large cactus %s)", (unsigned)L.obstacleCount,
+                     L.obstacleCount > 1 ? "on" : "off");
+        Logger::info("  score %u, high %u, speed %d px/s", (unsigned)g.score(),
+                     (unsigned)g.highScore(), (int)g.speed());
+        // Кадр збирається за splitCount() проходів loop(), тому ігрових
+        // кадрів на секунду рівно стільки ж разів менше.
+        const uint32_t lr = display.loopFrameRate();
+        Logger::info("  loop %u/s -> game %u fps (%u strips per frame)", (unsigned)lr,
+                     (unsigned)(lr / display.splitCount()), (unsigned)display.splitCount());
+      }
+#else
+      Logger::info("dino: display game not available on this board");
+#endif
+    } else {
+      Logger::info("use: dino on|off|test");
+    }
+  });
+
   commandHandler.registerCommand("brightness", "control screen brightness: brightness 0-100|auto", [](const String& args) {
     if (args.length() == 0) {
       Logger::info("use: brightness 0-100|auto");
@@ -3880,6 +3994,11 @@ void setupConfigStorage() {
 void loadConfig() {
   showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
   isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
+  // Ігровий режим НЕ відновлюється після ресету свідомо. По-перше, у гру,
+  // яку ніхто не почав, грати нема кому - після перезавантаження доречніше
+  // показати годинник. По-друге, це запобіжник: якби гра колись падала на
+  // старті, збережений прапорець дав би boot-loop, з якого пристрій не
+  // вийшов би сам. Рекорд при цьому зберігається (CFG_DINO_HIGHSCORE).
   // _apply: на старті ми лише ЧИТАЄМО збережене значення, тому писати його
   // назад у NVS (як робив display_brightness()) не потрібно.
   display_brightness_apply(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 100), isAutoBrightness);
@@ -4284,6 +4403,12 @@ void setupFlipButton() {
       _pause = false;
       flipButtonPressed = true;
       flippButtonPressedTs = millis();
+#if HAS_DINO_GAME
+      // Ця сама кнопка в грі - кнопка стрибка. Друга cron-задача на той самий
+      // пін не годиться: обидві читали б digitalRead і кожна рахувала б свій
+      // фронт, тому вся логіка кнопки лишається тут, з розгалуженням за режимом.
+      if (dinoActive) dinoRenderer.game().pressJump(now);
+#endif
       Logger::info("Button pressed!");
     } else if (buttonState == LOW) {
       // loop (pressed) ....
@@ -4292,6 +4417,16 @@ void setupFlipButton() {
       } else if (now - flippButtonPressedTs > 3000UL) {
         // "hide/show" action done!
         _pause = true;
+#if HAS_DINO_GAME
+        // У грі довге утримання виходить із режиму, а не гасить екран:
+        // інакше "затиснув для високого стрибка" закінчувалось би чорним
+        // дисплеєм. Порогу 3 с ігрове утримання не досягає (holdExtraSec
+        // це 0.18 с), тож із стрибком це не конфліктує.
+        if (dinoActive) {
+          dino_set_active(false);
+          return;
+        }
+#endif
         if (display.brightness() == 0) {
           display_brightness(max(_brightness, (uint8_t)1), _autoBrightness);
         } else {
@@ -4301,6 +4436,12 @@ void setupFlipButton() {
         }
       }
     } else if (flipButtonPressed) {
+#if HAS_DINO_GAME
+      if (dinoActive) {
+        // Відпускання обрізає підйом - саме це дає керовану висоту стрибка.
+        dinoRenderer.game().releaseJump(now);
+      } else
+#endif
       if (now - flippButtonPressedTs < 1000UL) {
         show_clock(!showClock);
       }
@@ -4312,6 +4453,42 @@ void setupFlipButton() {
     }
   });
   Logger::info("FlipButton GPIO PIN=%d", FLIP_BUTTON_PIN);
+#endif
+}
+
+void setupDinoGame() {
+#if HAS_DINO_GAME
+  if (!dinoRenderer.begin()) {
+    Logger::warn("dino game disabled (renderer init failed)");
+    return;
+  }
+
+  dinoRenderer.game().setHighScore((uint32_t)configStorage.getInt(CFG_DINO_HIGHSCORE, 0));
+
+#if BOARD_HAS_TOUCHSCREEN
+  // onPress/onRelease, а НЕ onTouch: onTouch спрацьовує на відпусканні (і то
+  // лише якщо не було hold чи свайпу), тобто стрибок або запізнювався б, або
+  // не зараховувався взагалі при довгому натисканні.
+  touchController.events().onPress([](TouchPoint) {
+    if (dinoActive) dinoRenderer.game().pressJump(millis());
+  });
+  touchController.events().onRelease([](TouchPoint) {
+    if (dinoActive) dinoRenderer.game().releaseJump(millis());
+  });
+#endif
+
+  // Рекорд пишемо не в момент game over, а окремим таском: запис у NVS
+  // всередині кадру дав би помітний фриз саме тоді, коли гравець дивиться
+  // на екран найуважніше.
+  scheduler.addCronTask(1000, []() {
+    if (!dinoRenderer.game().highScoreDirty()) return;
+    const uint32_t hi = dinoRenderer.game().highScore();
+    configStorage.setInt(CFG_DINO_HIGHSCORE, (int32_t)hi);
+    dinoRenderer.game().clearHighScoreDirty();
+    Logger::info("dino: new high score %u", (unsigned)hi);
+  });
+
+  Logger::info("Dino game setup done (hi %u)", (unsigned)dinoRenderer.game().highScore());
 #endif
 }
 
@@ -4377,6 +4554,13 @@ void setupWiFiIcon() {
   Logger::info("================ Display %dx%d", display.width(), display.height());
 
   scheduler.addCronTask(0, [p]() {
+    // scheduler.loop() крутиться ВСЕРЕДИНІ транзакції кадру, тому цей таск
+    // домалював би іконку поверх ігрової сцени.
+#if HAS_DINO_GAME
+    if (dinoActive || dinoTestMode) return;
+#else
+    if (dinoActive) return;
+#endif
     /* display.drawRect(0, 0, 2, 2, TFT_GREEN);
     display.drawRect(10, 10, 2, 2, TFT_GREEN);
     display.drawRect(20, 20, 2, 2, TFT_GREEN);
@@ -4443,6 +4627,7 @@ void setup() {
   setupEcoflow();
 #endif
   setupFlipButton();
+  setupDinoGame();  // після setupDisplay()/setupTouchScreen(): треба готові розміри екрана
   setupWiFiIcon();
   loadConfig();
 
@@ -4481,9 +4666,50 @@ void loop() {
 
   display.startWrite();
   PrintQueue::flush();
-  doPing();
-  drawBackgroundImage();
-  drawSystemInfo();
+
+#if HAS_DINO_GAME
+  const bool dinoOn = dinoActive && dinoRenderer.ready();
+#else
+  constexpr bool dinoOn = false;
+#endif
+
+  // doPing() блокує loop() до ~1 с раз на 5 с (див. коментар у src/ping.h).
+  // Для годинника це непомітно, для гри - десятки згаяних кадрів, тобто
+  // кактус "телепортується" крізь діно.
+  if (!dinoOn) doPing();
+
+#if HAS_DINO_GAME
+  // Перемикання режиму лишає на екрані шматки попередньої картинки: кадр
+  // збирається за DISPLAY_SPLIT_COUNT проходів, тому чистимо стільки ж смуг.
+  if (dinoPendingClear) {
+    display.clear();
+    dinoPendingClear--;
+  }
+#endif
+
+  if (!dinoOn) {
+#if HAS_DINO_GAME
+    if (dinoTestMode) {
+      dinoRenderer.renderSpriteSheet();
+    } else
+#endif
+    {
+      drawBackgroundImage();
+      drawSystemInfo();
+    }
+  }
+#if HAS_DINO_GAME
+  else {
+    // Фізика рухається лише на початку повного кадру, а сцена малюється
+    // щосмуги - інакше кожна смуга показала б свою фазу руху.
+    dinoRenderer.frame(display.isFrameStart());
+    // Лічильник кадрів живе всередині loopFrameRate(), а той викликається
+    // лише з drawSystemInfo() - тобто в ігровому режимі просто стояв би,
+    // і зміряти FPS самої гри (те, заради чого він і потрібен) було б
+    // неможливо. Тут викликаємо його рівно раз за ітерацію, як і там.
+    display.loopFrameRate();
+  }
+#endif
 
   #if HAS_MQTT_CLIENT
   if (WiFi.isConnected()) {
@@ -4496,13 +4722,19 @@ void loop() {
     }
     // --- В loop(), замість (або поруч з) mqtt.loop() на час тесту: ---
     #if HAS_ECOFLOW_CLIENT
-    ecoflow.loop();
+    // MQTT свідомо лишається активним і в грі - саме ним прилітає "dino off".
+    // А EcoFlow тягне REST-запити й таки помітно рве кадр.
+    if (!dinoOn) ecoflow.loop();
     #endif
   }
   #endif
 
   commandHandler.update();
-  if (showClock) drawTime();
+#if HAS_DINO_GAME
+  if (showClock && !dinoOn && !dinoTestMode) drawTime();
+#else
+  if (showClock && !dinoOn) drawTime();
+#endif
 
   // sendEmail();
   scheduler.loop();

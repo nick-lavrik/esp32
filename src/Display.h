@@ -40,6 +40,42 @@ public:
   // startWrite() у loop() дав би дедлок.
   bool isWriting() const { return _writing; }
 
+  // Скільки ітерацій loop() складають ОДИН повний кадр.
+  // При вимкненому спліті (esp32-c3, DISPLAY_SPLIT_COUNT=0) кадр збирається
+  // за одну ітерацію, тому 1, а не 0 - на це значення діляться.
+  static constexpr uint8_t splitCount() {
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT > 0
+    return (uint8_t)DISPLAY_SPLIT_COUNT;
+#else
+    return 1;
+#endif
+  }
+
+  // Висота однієї смуги (== height() у небуферизованому режимі).
+  int splitHeight() const { return height() / splitCount(); }
+
+  // Індекс смуги, яку малює ПОТОЧНА ітерація loop() (0 = верхня, y == 0).
+  // Поле _activeSplitBlock існує лише при DISPLAY_SPLIT_COUNT > 0 - звідси #if,
+  // а не звичайний геттер.
+  uint8_t splitIndex() const {
+#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT > 0
+    return (uint8_t)_activeSplitBlock;
+#else
+    return 0;
+#endif
+  }
+
+  // true рівно раз на повний кадр - на смузі 0, тобто на ВЕРХНІЙ.
+  //
+  // Хто змінює сцену між кадрами (напр. ігрова фізика), мусить робити це
+  // ТІЛЬКИ тут: тоді смуги 0..N-1 малюються з одним станом світу і кадр
+  // збирається як один цілісний екран згори вниз. Оновлення щоітерації дало б
+  // кожній смузі свою фазу руху - те саме "розривання" на межах смуг, про яке
+  // попереджає docs/architecture.md у розділі про DISPLAY_SPLIT_COUNT.
+  //
+  // Викликати ПІСЛЯ startWrite() (саме він просуває _activeSplitBlock).
+  bool isFrameStart() const { return splitIndex() == 0; }
+
   explicit Display();
   void flip();
   uint8_t getRotation() const { return tft_.getRotation(); }
@@ -96,6 +132,19 @@ public:
     sprite().drawCircle(x, y, r, color);
   }
 
+  void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) {
+    dXY(&x, &y);
+    if (y >= splitHeight() || y + h <= 0) return;  // цілком поза активною смугою
+    sprite().fillRect(x, y, w, h, color);
+  }
+
+  // Цілочисельне масштабування 1bpp-спрайта (nearest neighbour - тобто точний
+  // піксель-арт, без згладжування). scale==1 еквівалентний drawBitmap().
+  // Потрібне тому, що ні TFT_eSPI, ні Adafruit_GFX не вміють масштабувати
+  // drawBitmap, а на 480x480 спрайт розміром 47 px виглядав би мурахою.
+  void drawBitmapScaled(int32_t x, int32_t y, const uint8_t *bitmap, int32_t w, int32_t h,
+                        uint32_t color, uint8_t scale);
+
   /* uint16_t drawString(const char *text, int32_t x, int32_t y) {
     dXY(&x, &y); 
     return sprite().drawString(text, x, y);
@@ -111,8 +160,13 @@ public:
       sprite_.getTextBounds(str, x, y, x1, y1, w, h);
   } */
 
+  // Ранній вихід тут не косметика: drawBitmap на ОБОХ бекендах (TFT_eSPI і
+  // Arduino_GFX) відсікає ПО ПІКСЕЛЮ, тобто чесно проганяє цикл w*h навіть
+  // коли спрайт цілком за межами смуги. При DISPLAY_SPLIT_COUNT=6 це шестикратна
+  // робота "в нікуди" на кожен об'єкт сцени.
   void drawBitmap( int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor) {
     dXY(&x, &y); 
+    if (y >= (int16_t)splitHeight() || y + h <= 0) return;
     sprite().drawBitmap(x, y, bitmap, w, h, fgcolor);
   };
     /*drawBitmap( int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t fgcolor, uint16_t bgcolor),
@@ -122,7 +176,7 @@ public:
   template <typename T>
   void dXY(T* x, T* y) {
     #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT > 0
-    *y = *y - static_cast<T>(_activeSplitBlock * (height() / DISPLAY_SPLIT_COUNT));
+    *y = *y - static_cast<T>(_activeSplitBlock * splitHeight());
     #endif
   }
 

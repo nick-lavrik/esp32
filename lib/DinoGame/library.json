@@ -1,0 +1,20 @@
+{
+  "name": "DinoGame",
+  "version": "0.1.0",
+  "description": "Модель гри Chrome Dino: фізика, спавн перешкод, колізії, рахунок. Без залежності від дисплея",
+  "keywords": ["esp32", "esp8266", "game", "dino"],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32", "espressif8266"],
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  },
+  "export": {
+    "include": [
+      "*.hpp",
+      "*.cpp",
+      "library.json"
+    ]
+  }
+}
