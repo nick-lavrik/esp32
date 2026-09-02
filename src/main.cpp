@@ -484,6 +484,10 @@ AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 // засмічуючи звичайний вивід.
 bool touchLogVerbose = false;
 
+// Підписаний на onTouch (момент НАТИСКАННЯ), а не на onClick: для перевірки
+// «чи взагалі бачить панель і чи не з'їхав мапер» потрібен кожен дотик, тоді
+// як onClick мовчить, якщо жест виявився свайпом або переріс у hold - саме в
+// тих випадках, коли причину й шукають.
 void onTouchLog(TouchPoint p) {
   if (touchLogVerbose) {
     Logger::info("Touch: %d, %d", p.x, p.y);
@@ -4466,10 +4470,10 @@ void setupDinoGame() {
   dinoRenderer.game().setHighScore((uint32_t)configStorage.getInt(CFG_DINO_HIGHSCORE, 0));
 
 #if BOARD_HAS_TOUCHSCREEN
-  // onPress/onRelease, а НЕ onTouch: onTouch спрацьовує на відпусканні (і то
+  // onTouch/onRelease, а НЕ onClick: onClick спрацьовує на відпусканні (і то
   // лише якщо не було hold чи свайпу), тобто стрибок або запізнювався б, або
   // не зараховувався взагалі при довгому натисканні.
-  touchController.events().onPress([](TouchPoint) {
+  touchController.events().onTouch([](TouchPoint) {
     if (dinoActive) dinoRenderer.game().pressJump(millis());
   });
   touchController.events().onRelease([](TouchPoint) {

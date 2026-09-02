@@ -11,9 +11,9 @@ TouchEvents::TouchEvents(const TouchScreenConfig &config) : _config(config) {}
 // ---- Підписка ----
 // cb переміщується (std::move) далі в CallbackList::add - без зайвої копії
 // замикання, так само як TaskScheduler::addCronTask/addJob роблять з TaskCallback.
-int TouchEvents::onPress(TouchCallback cb) { return _onPress.add(std::move(cb)); }
-int TouchEvents::onRelease(TouchCallback cb) { return _onRelease.add(std::move(cb)); }
 int TouchEvents::onTouch(TouchCallback cb) { return _onTouch.add(std::move(cb)); }
+int TouchEvents::onRelease(TouchCallback cb) { return _onRelease.add(std::move(cb)); }
+int TouchEvents::onClick(TouchCallback cb) { return _onClick.add(std::move(cb)); }
 int TouchEvents::onHold(HoldCallback cb) { return _onHold.add(std::move(cb)); }
 int TouchEvents::onDblClick(TouchCallback cb) { return _onDblClick.add(std::move(cb)); }
 int TouchEvents::onSwipeLeft(SwipeCallback cb) { return _onSwipeLeft.add(std::move(cb)); }
@@ -28,9 +28,9 @@ int TouchEvents::onSwipeFromLeft(SwipeCallback cb) { return _onSwipeFromLeft.add
 int TouchEvents::onSwipeFromRight(SwipeCallback cb) { return _onSwipeFromRight.add(std::move(cb)); }
 
 // ---- Відписка ----
-void TouchEvents::offPress(int handle) { _onPress.remove(handle); }
-void TouchEvents::offRelease(int handle) { _onRelease.remove(handle); }
 void TouchEvents::offTouch(int handle) { _onTouch.remove(handle); }
+void TouchEvents::offRelease(int handle) { _onRelease.remove(handle); }
+void TouchEvents::offClick(int handle) { _onClick.remove(handle); }
 void TouchEvents::offHold(int handle) { _onHold.remove(handle); }
 void TouchEvents::offDblClick(int handle) { _onDblClick.remove(handle); }
 void TouchEvents::offSwipeLeft(int handle) { _onSwipeLeft.remove(handle); }
@@ -74,7 +74,7 @@ void TouchEvents::update(bool touched, TouchPoint point) {
       _last = point;
       _state = PRESSED;
       _holdFired = false;
-      _onPress.invoke(point);
+      _onTouch.invoke(point);
     } else {
       _last = point;
 
@@ -89,7 +89,7 @@ void TouchEvents::update(bool touched, TouchPoint point) {
 
   // Палець відпущено
   if (_state == PRESSED || _state == HOLDING) {
-    // ДО розбору свайп/тап: onRelease парний до onPress і мусить прийти
+    // ДО розбору свайп/тап: onRelease парний до onTouch і мусить прийти
     // незалежно від того, чим виявився жест.
     _onRelease.invoke(_last);
 
@@ -103,7 +103,7 @@ void TouchEvents::update(bool touched, TouchPoint point) {
         fireSwipe(dx, dy);
       } else {
         // Це тап
-        _onTouch.invoke(_start);
+        _onClick.invoke(_start);
 
         if ((now - _lastTapTime) <= _config.dblClickIntervalMs) {
           _onDblClick.invoke(_start);

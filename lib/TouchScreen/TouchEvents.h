@@ -21,23 +21,26 @@ public:
   // TouchCallback / HoldCallback / SwipeCallback - std::function (як TaskCallback у
   // TaskController): підписатись можна і звичайною функцією, і лямбдою із захопленням, напр.:
   //   int r = 5;
-  //   touch.onTouch([r](TouchPoint p) { display.drawCircle(p.x, p.y, r, TFT_YELLOW); });
+  //   touch.onClick([r](TouchPoint p) { display.drawCircle(p.x, p.y, r, TFT_YELLOW); });
 
   explicit TouchEvents(const TouchScreenConfig &config = TouchScreenConfig());
 
   // ---- Підписка (кожна повертає handle для подальшої відписки) ----
-  // onPress спрацьовує в МОМЕНТ НАТИСКАННЯ, onRelease - у момент відпускання,
+  // onTouch спрацьовує в МОМЕНТ НАТИСКАННЯ, onRelease - у момент відпускання,
   // обидва беззастережно.
   //
-  // Це не дублікат onTouch: той інвокується вже на ВІДПУСКАННІ, і то лише
+  // Це не дублікат onClick: той інвокується вже на ВІДПУСКАННІ, і то лише
   // якщо дотик не переріс у hold і не виявився свайпом. Для реакції, яка
   // мусить бути миттєвою і безумовною (кнопка стрибка в грі), цього не
   // досить: коротке натискання спрацьовувало б із запізненням, а довге
   // (>holdThresholdMs) не спрацювало б узагалі.
-  int onPress(TouchCallback cb);
+  int onTouch(TouchCallback cb);
   int onRelease(TouchCallback cb);
 
-  int onTouch(TouchCallback cb);
+  // onClick - це "тап": відпускання, яке не переросло в hold і не виявилось
+  // свайпом. Тобто натискання (onTouch) і клік (onClick) - принципово різні
+  // події, а не два імені одної; звідси й розділення назв.
+  int onClick(TouchCallback cb);
   int onHold(HoldCallback cb);
   int onDblClick(TouchCallback cb);
   int onSwipeLeft(SwipeCallback cb);
@@ -50,9 +53,9 @@ public:
   int onSwipeFromRight(SwipeCallback cb);
 
   // ---- Відписка за handle, який повернув відповідний onXxx() ----
-  void offPress(int handle);
-  void offRelease(int handle);
   void offTouch(int handle);
+  void offRelease(int handle);
+  void offClick(int handle);
   void offHold(int handle);
   void offDblClick(int handle);
   void offSwipeLeft(int handle);
@@ -108,9 +111,9 @@ private:
 
   // Списки колбеків - динамічні (std::vector), без обмеження кількості
   // підписників на один івент.
-  CallbackList<TouchCallback> _onPress;
-  CallbackList<TouchCallback> _onRelease;
   CallbackList<TouchCallback> _onTouch;
+  CallbackList<TouchCallback> _onRelease;
+  CallbackList<TouchCallback> _onClick;
   CallbackList<HoldCallback> _onHold;
   CallbackList<TouchCallback> _onDblClick;
   CallbackList<SwipeCallback> _onSwipeLeft;
