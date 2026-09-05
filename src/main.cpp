@@ -7,6 +7,7 @@
 // mosquitto_sub -h broker.hivemq.com -p 1883 -t "mykola-lavryk/#" -F "@Y-@m-@d @H:@M:@S [%q/%r] %-50t %p" # qos/retain
 // mosquitto_pub -h 192.168.1.71 -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock off"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6-lcd096 -m "clock on"
+// mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6-lcd096 -m "dino test"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock on"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "desaturate 0.30"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "darken 0.30"
@@ -1358,7 +1359,7 @@ void setupMqttClient() {
 
   // mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
   scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "heartbeat"); });
-  scheduler.addCronTask(30 * 60 * 1000UL, []() { testAsusWRT(); });
+  // scheduler.addCronTask(30 * 60 * 1000UL, []() { testAsusWRT(); });
 
   /* #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("#", [](const char* topic, const char* payload) {
