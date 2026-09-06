@@ -2,6 +2,9 @@
 
 #include <ArduinoJson.h>
 
+#include <TLogger.hpp>
+#include <algorithm>
+
 #include "ConfigStorage.hpp"
 
 // Портабельна затримка: delay() на ESP8266/blocking, vTaskDelay() на ESP32
@@ -11,6 +14,10 @@
 #define NM_DELAY(ms) vTaskDelay(pdMS_TO_TICKS(ms))
 #endif
 
+// Тег "net" - той самий, під яким світяться команди netcli, щоб грепати лог
+// мережі одним фільтром.
+static const TLogger _logger{"net"};
+
 static constexpr char kConfigKey[] = "nm_config";
 static constexpr char kConnectionsKey[] = "nm_conn";
 static constexpr char kIdCounterKey[] = "nm_id_ctr";
@@ -19,9 +26,21 @@ static constexpr char kIdCounterKey[] = "nm_id_ctr";
 // Ctor / Dtor
 // ============================================================
 
-NetworkSupervisor::NetworkSupervisor(ConfigStorage* storage) : _storage(storage) {}
+NetworkSupervisor::NetworkSupervisor(ConfigStorage* storage) : _storage(storage) {
+#if !defined(ESP8266)
+  _mutex = xSemaphoreCreateRecursiveMutex();
+#endif
+}
 
-NetworkSupervisor::~NetworkSupervisor() { end(); }
+NetworkSupervisor::~NetworkSupervisor() {
+  end();
+#if !defined(ESP8266)
+  if (_mutex) {
+    vSemaphoreDelete(_mutex);
+    _mutex = nullptr;
+  }
+#endif
+}
 
 // ============================================================
 // Ініціалізація
@@ -30,6 +49,17 @@ NetworkSupervisor::~NetworkSupervisor() { end(); }
 void NetworkSupervisor::begin() {
   if (_state != NetworkSupervisorState::IDLE) return;
   _autoReconnect = _config.autoReconnect;
+
+#if !defined(NM_BLOCKING_MODE) && !defined(ESP8266)
+  // В IDLE можна опинитись не тільки до першого begin(), а й після ручного
+  // disconnect - task при цьому живий і події зареєстровані. Другий
+  // xTaskCreate() дав би два FSM на одне радіо.
+  if (_taskHandle) {
+    _setState(NetworkSupervisorState::SCANNING);
+    return;
+  }
+#endif
+
   _registerWifiEvents();
   _setState(NetworkSupervisorState::SCANNING);
 #if !defined(NM_BLOCKING_MODE) && !defined(ESP8266)
@@ -58,6 +88,7 @@ void NetworkSupervisor::end() {
 // ============================================================
 
 uint16_t NetworkSupervisor::addConnection(const WifiConnection& conn) {
+  Lock lock(_mutex);
   WifiConnection c = conn;
   c.connectionId = _nextConnectionId++;
   _connections.push_back(c);
@@ -65,9 +96,11 @@ uint16_t NetworkSupervisor::addConnection(const WifiConnection& conn) {
 }
 
 bool NetworkSupervisor::removeConnection(uint16_t connectionId) {
+  Lock lock(_mutex);
   for (auto it = _connections.begin(); it != _connections.end(); ++it) {
     if (it->connectionId == connectionId) {
       _connections.erase(it);
+      if (_forcedId == connectionId) _forcedId = 0;
       return true;
     }
   }
@@ -75,6 +108,7 @@ bool NetworkSupervisor::removeConnection(uint16_t connectionId) {
 }
 
 WifiConnection* NetworkSupervisor::getConnection(uint16_t connectionId) {
+  Lock lock(_mutex);
   for (auto& c : _connections) {
     if (c.connectionId == connectionId) return &c;
   }
@@ -106,19 +140,65 @@ void NetworkSupervisor::setAutoReconnect(bool enabled) {
 
 bool NetworkSupervisor::autoReconnect() const { return _autoReconnect; }
 
-void NetworkSupervisor::reconnect() {
+void NetworkSupervisor::_dropConnection(NetworkSupervisorState next) {
+  const bool wasConnected = (_state == NetworkSupervisorState::CONNECTED);
+  const std::string lost = _currentSsid;
+  _currentSsid.clear();
+  _currentIp.clear();
+
+  // Стан знімаємо ДО disconnect(): подія STA_DISCONNECTED прилетить у вже
+  // не-CONNECTED стан, тож про втрату звʼязку відзвітує рівно один шлях.
+  // Інакше listeners отримували onDisconnected двічі - вдруге з порожнім
+  // SSID, бо _currentSsid на той момент уже почищено, - а ще хендлер міг
+  // перебити щойно виставлений нами стан своїм RECONNECTING.
+  _setState(next);
   WiFi.disconnect(true);
+
+  if (wasConnected) _notifyDisconnected(lost);
+}
+
+void NetworkSupervisor::reconnect() {
+  _forcedId = 0;
   _candidateIndex = 0;
   _currentRetries = 0;
-  _setState(NetworkSupervisorState::SCANNING);
+  _dropConnection(NetworkSupervisorState::SCANNING);
+}
+
+bool NetworkSupervisor::connectTo(uint16_t connectionId) {
+  {
+    // Замок тримаємо рівно на час перегляду вектора: нижче йдуть блокуючі
+    // виклики WiFi.*, а під замком їх робити не можна (див. коментар до
+    // _mutex у заголовку).
+    Lock lock(_mutex);
+    bool found = false;
+    for (const auto& c : _connections) {
+      if (c.connectionId == connectionId) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+
+  if (_state == NetworkSupervisorState::AP_MODE) {
+    WiFi.softAPdisconnect(true);
+    _notifyApStopped();
+  }
+
+  _forcedId = connectionId;
+  _candidateIndex = 0;
+  _currentRetries = 0;
+  _dropConnection(NetworkSupervisorState::CONNECTING);
+  return true;
 }
 
 void NetworkSupervisor::startAp() {
+  // Повторний виклик у вже піднятому AP тільки перезапустив би точку доступу
+  // і вдруге вистрелив onApStarted - для команди "hotspot" це не те, чого
+  // очікує користувач.
+  if (_state == NetworkSupervisorState::AP_MODE) return;
   if (_state == NetworkSupervisorState::CONNECTED) {
-    WiFi.disconnect(true);
-    _notifyDisconnected(_currentSsid);
-    _currentSsid.clear();
-    _currentIp.clear();
+    _dropConnection(NetworkSupervisorState::STARTING_AP);
   }
   _startApInternal();
 }
@@ -137,11 +217,18 @@ void NetworkSupervisor::stopAp() {
 }
 
 void NetworkSupervisor::scan() {
-#if defined(ESP8266)
-  WiFi.scanNetworks();  // синхронний
-#else
-  WiFi.scanNetworks(true);  // асинхронний
-#endif
+  // FSM уже сканує - другий одночасний скан однаково поверне
+  // WIFI_SCAN_FAILED, а результат першого зіпсує собі ж.
+  if (_state == NetworkSupervisorState::SCANNING) return;
+
+  const bool keepAp = (_state == NetworkSupervisorState::AP_MODE);
+  _notifyScanStart();
+  _applyStaRadioConfig(keepAp);
+  _runScan(keepAp);  // блокуючий: викликається з контексту команди, не з FSM
+
+  auto known = _sortedCandidates();
+  _notifyScanResult(known);
+  _notifyScanEnd(known);
 }
 
 void NetworkSupervisor::startWps() {
@@ -149,10 +236,7 @@ void NetworkSupervisor::startWps() {
     WiFi.softAPdisconnect(true);
     _notifyApStopped();
   } else if (_state == NetworkSupervisorState::CONNECTED) {
-    WiFi.disconnect(true);
-    _notifyDisconnected(_currentSsid);
-    _currentSsid.clear();
-    _currentIp.clear();
+    _dropConnection(NetworkSupervisorState::WPS_WAITING);
   }
   _startWpsInternal();
 }
@@ -168,8 +252,21 @@ void NetworkSupervisor::setConfig(const NetworkSupervisorConfig& cfg) {
 
 const NetworkSupervisorConfig& NetworkSupervisor::config() const { return _config; }
 
+void NetworkSupervisor::setClock(std::function<uint32_t()> nowEpoch) { _clock = std::move(nowEpoch); }
+
+uint32_t NetworkSupervisor::_now() const {
+  if (_clock) {
+    uint32_t epoch = _clock();
+    if (epoch > 0) return epoch;
+  }
+  // Фолбек: грубий лічильник аптайму. Він менший за будь-який unix-час, тому
+  // запис, підключений до синхронізації часу, ніколи не перебʼє свіжіший.
+  return static_cast<uint32_t>(millis() / 1000);
+}
+
 void NetworkSupervisor::saveConfig() {
   if (!_storage) return;
+  Lock lock(_mutex);
 
   // --- config ---
   {
@@ -180,6 +277,9 @@ void NetworkSupervisor::saveConfig() {
     doc["maxRetries"] = _config.maxRetries;
     doc["autoReconnect"] = _config.autoReconnect;
     doc["scanBeforeConnect"] = _config.scanBeforeConnect;
+    doc["forceWifi4"] = _config.forceWifi4;
+    doc["fullChannelScan"] = _config.fullChannelScan;
+    doc["apFallbackEnabled"] = _config.apFallbackEnabled;
     doc["apSsid"] = _config.apSsid.c_str();
     doc["apPassword"] = _config.apPassword.c_str();
     doc["apChannel"] = _config.apChannel;
@@ -228,6 +328,7 @@ void NetworkSupervisor::saveConfig() {
 
 void NetworkSupervisor::loadConfig() {
   if (!_storage) return;
+  Lock lock(_mutex);
 
   // --- config ---
   {
@@ -241,6 +342,9 @@ void NetworkSupervisor::loadConfig() {
         _config.maxRetries = doc["maxRetries"] | _config.maxRetries;
         _config.autoReconnect = doc["autoReconnect"] | _config.autoReconnect;
         _config.scanBeforeConnect = doc["scanBeforeConnect"] | _config.scanBeforeConnect;
+        _config.forceWifi4 = doc["forceWifi4"] | _config.forceWifi4;
+        _config.fullChannelScan = doc["fullChannelScan"] | _config.fullChannelScan;
+        _config.apFallbackEnabled = doc["apFallbackEnabled"] | _config.apFallbackEnabled;
         if (doc["apSsid"].is<const char*>()) _config.apSsid = doc["apSsid"].as<const char*>();
         if (doc["apPassword"].is<const char*>())
           _config.apPassword = doc["apPassword"].as<const char*>();
@@ -314,7 +418,54 @@ void NetworkSupervisor::removeListener(NsListenerId id) {
 
 void NetworkSupervisor::_setState(NetworkSupervisorState next) { _state = next; }
 
+void NetworkSupervisor::_applyStaRadioConfig(bool keepAp) {
+  // keepAp: AP_STA тримає точку доступу піднятою, поки станція сканує ефір.
+  WiFi.mode(keepAp ? WIFI_AP_STA : WIFI_STA);
+
+  // Вимикаємо ВЛАСНИЙ автореконект ядра Arduino: рішення про перепідключення
+  // тут ухвалює лише FSM. З увімкненим - ядро мовчки переасоціюється до
+  // останньої точки, і це ламає одразу дві речі: "net device disconnect" не
+  // тримається (станція вертається сама), а профіль, вимкнений через
+  // connection.autoconnect=no, все одно піднімається. Гірший наслідок - стан
+  // WL_CONNECTED без IP: FSM вважає, що все гаразд, а DNS не резолвиться.
+  WiFi.setAutoReconnect(false);
+
+  // УВАГА: тут НЕ "#if ESP32". arduino-esp32 визначає цей макрос самопосилально
+  // (-DESP32=ESP32, див. pioarduino-build.py), а такий ідентифікатор у #if
+  // розкривається сам у себе й дає 0. Перевірка на ESP8266 - єдина правильна:
+  // esp_wifi.h є в усій родині ESP32.
+#if !defined(ESP8266)
+  if (_config.forceWifi4) {
+    // Обмежуємо станцію 802.11b/g/n ДО старту конекту: на чипах з Wi-Fi 6
+    // (C6) асоціація з AX-точкою валила стек. На чипах без AX (класичний
+    // ESP32, S3, C3) це фактично no-op - там така бітмаска і так дефолтна, -
+    // але тримаємо однаково для всіх, щоб поведінка не залежала від плати.
+    esp_err_t err = esp_wifi_set_protocol(
+      WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    if (err != ESP_OK) {
+      _logger.warn("802.11n protocol change failed: %d", err);
+    }
+  }
+
+  if (_config.fullChannelScan) {
+    // Повний скан по всіх каналах замість дефолтного WIFI_FAST_SCAN.
+    //
+    // Fast scan зупиняється на ПЕРШІЙ точці з потрібним SSID і слухає кожен
+    // канал дуже коротко - при слабкому сигналі beacon просто не встигає
+    // потрапити у вікно, і WiFi.begin() віддає reason 201 (NO_AP_FOUND) на
+    // мережу, яку окремий WiFi.scanNetworks() бачить без проблем (той слухає
+    // канал довше). Повний скан цю гонку прибирає.
+    //
+    // Побічний плюс для AiMesh/кількох AP з одним SSID: sort by signal
+    // обирає найсильніший BSSID, а не перший-ліпший.
+    WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+    WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  }
+#endif
+}
+
 std::vector<WifiConnection*> NetworkSupervisor::_sortedCandidates() {
+  Lock lock(_mutex);
   std::vector<WifiConnection*> result;
   for (auto& c : _connections) {
     if (c.isEnabled) result.push_back(&c);
@@ -330,6 +481,8 @@ std::vector<WifiConnection*> NetworkSupervisor::_sortedCandidates() {
 void NetworkSupervisor::_applyScanResults() {
   int16_t n = WiFi.scanComplete();
   if (n <= 0) return;
+
+  Lock lock(_mutex);
 
   for (auto& c : _connections) c.rssi = 0;  // скидаємо rssi
 
@@ -347,6 +500,9 @@ void NetworkSupervisor::_applyScanResults() {
 }
 
 bool NetworkSupervisor::_connectTo(WifiConnection& conn) {
+  // Радіо треба переналаштувати перед КОЖНИМ begin(): після AP-циклу mode
+  // лишається AP, і без цього вийшов би AP_STA замість STA.
+  _applyStaRadioConfig(/*keepAp=*/false);
   _applyIpConfig(conn);
 
   WiFi.begin(conn.ssid.c_str(), conn.password.c_str());
@@ -357,7 +513,8 @@ NM_DELAY(100);
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    conn.lastConnected = static_cast<uint32_t>(millis() / 1000);  // грубий timestamp
+    if (!conn.staticIp) _ensureDnsAfterDhcp();
+    conn.lastConnected = _now();
     _currentSsid = conn.ssid;
     _currentIp = WiFi.localIP().toString().c_str();
     return true;
@@ -365,6 +522,30 @@ NM_DELAY(100);
 
   WiFi.disconnect(true);
   return false;
+}
+
+void NetworkSupervisor::_ensureDnsAfterDhcp() {
+#if !defined(ESP8266)
+  const IPAddress dns = WiFi.dnsIP();
+  if (static_cast<uint32_t>(dns) != 0) return;  // DHCP усе віддав, нічого робити
+
+  // DNS порожній попри отриману адресу. Причина в ядрі: STA.begin() (його
+  // смикає будь-яка зміна WiFi.mode(), зокрема повернення з AP) викликає
+  // NetworkInterface::config() без аргументів, а та гілка записує всі три
+  // DNS-сервери нулями перед рестартом dhcpc. Клієнт при цьому переукладає
+  // оренду з кешу і DNS назад уже не проставляє.
+  //
+  // Симптом назовні: IP є, LAN пінгується, а hostByName() падає з -54 -
+  // тобто MQTT/NTP/SMTP мовчки не працюють. Підставляємо шлюз: на домашніх
+  // роутерах саме він і роздається як резолвер по DHCP.
+  const IPAddress gw = WiFi.gatewayIP();
+  if (static_cast<uint32_t>(gw) == 0) {
+    _logger.warn("DHCP left DNS empty and there is no gateway to fall back to");
+    return;
+  }
+  WiFi.setDNS(gw);
+  _logger.warn("DHCP left DNS empty, using gateway %s as resolver", gw.toString().c_str());
+#endif
 }
 
 void NetworkSupervisor::_applyIpConfig(const WifiConnection& conn) {
@@ -375,16 +556,29 @@ void NetworkSupervisor::_applyIpConfig(const WifiConnection& conn) {
     subnet.fromString(conn.subnet.c_str());
     dns.fromString(conn.dns.empty() ? "8.8.8.8" : conn.dns.c_str());
     WiFi.config(ip, gateway, subnet, dns);
-  } else {
-#if defined(ESP32)
-    // скидаємо статику на DHCP
-    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
-#endif
+    _staticIpApplied = true;
+    return;
   }
+
+  // DHCP. Скидати статику є сенс ЛИШЕ якщо ми її самі перед цим виставили.
+  //
+  // Безумовний виклик тут коштував робочого DNS: у ядрі гілка DHCP-клієнта
+  // (NetworkInterface::config(), сюди приходить local_ip == INADDR_NONE)
+  // спершу зупиняє dhcpc, потім записує ВСІ три DNS-сервери нулями і лише
+  // тоді стартує dhcpc назад. Адресу пристрій отримує, а DNS лишається
+  // 0.0.0.0 - назовні це виглядає як "IP є, пінг по LAN ходить, а
+  // hostByName() падає з -54".
+  if (!_staticIpApplied) return;
+
+#if defined(ESP32)
+  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+#endif
+  _staticIpApplied = false;
 }
 
 void NetworkSupervisor::_startApInternal() {
   _setState(NetworkSupervisorState::STARTING_AP);
+  _forcedId = 0;
 
   WiFi.mode(WIFI_AP);
   IPAddress apIp;
@@ -402,6 +596,60 @@ void NetworkSupervisor::_startApInternal() {
   _notifyApStarted(_config.apSsid, _config.apIp);
 }
 
+void NetworkSupervisor::_runScan(bool keepAp) {
+#if defined(ESP8266)
+  (void)keepAp;
+  WiFi.scanNetworks();  // синхронний, блокуючий ~2-3 сек
+#else
+  // show_hidden=false: приховані точки в результатах усе одно без SSID, тобто
+  // зіставити їх зі збереженим записом неможливо - для них є connectTo().
+  WiFi.scanNetworks(/*async=*/true);
+  while (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+#endif
+  _applyScanResults();
+}
+
+std::vector<WifiConnection*> NetworkSupervisor::_connectCandidates() {
+  Lock lock(_mutex);  // тут лише читання вектора, жодних WiFi-викликів
+
+  // connectTo(): б'ємось саме в цей запис, ігноруючи і пріоритети, і скан -
+  // мережа може бути прихованою, тобто в результатах скану її не буде взагалі.
+  if (_forcedId != 0) {
+    std::vector<WifiConnection*> forced;
+    for (auto& c : _connections) {
+      if (c.connectionId == _forcedId) {
+        forced.push_back(&c);
+        break;
+      }
+    }
+    return forced;
+  }
+
+  auto candidates = _sortedCandidates();
+  if (_config.scanBeforeConnect) {
+    // rssi == 0 - мережу не видно в ефірі (див. _applyScanResults())
+    candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+                                    [](const WifiConnection* c) { return c->rssi == 0; }),
+                     candidates.end());
+  }
+  return candidates;
+}
+
+void NetworkSupervisor::_fallbackToApOrRescan() {
+  if (_config.apFallbackEnabled) {
+    _startApInternal();
+    return;
+  }
+  // AP вимкнено - просто чекаємо наступного вікна сканування.
+  _candidateIndex = 0;
+  _currentRetries = 0;
+  _forcedId = 0;
+  _setState(NetworkSupervisorState::SCANNING);
+  NM_DELAY(_config.scanIntervalMs);
+}
+
 // ============================================================
 // FSM — основний цикл
 // ============================================================
@@ -413,29 +661,10 @@ void NetworkSupervisor::_taskLoop() {
       case NetworkSupervisorState::SCANNING: {
         _notifyScanStart();
 
-        if (_config.scanBeforeConnect) {
-#if defined(ESP8266)
-          WiFi.scanNetworks();  // синхронний, блокуючий ~2-3 сек
-          _applyScanResults();
-#else
-          WiFi.scanNetworks(true);  // асинхронний
-          // чекаємо завершення
-          while (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
-            vTaskDelay(pdMS_TO_TICKS(200));
-          }
-          _applyScanResults();
-#endif
-        }
+        _applyStaRadioConfig(/*keepAp=*/false);
+        if (_config.scanBeforeConnect) _runScan(/*keepAp=*/false);
 
-        auto candidates = _sortedCandidates();
-
-        if (_config.scanBeforeConnect) {
-          // залишаємо тільки видимі (rssi != 0)
-          candidates.erase(
-              std::remove_if(candidates.begin(), candidates.end(),
-                             [](const WifiConnection* c) { return c->rssi == 0; }),
-              candidates.end());
-        }
+        auto candidates = _connectCandidates();
 
         _notifyScanResult(candidates);
         _notifyScanEnd(candidates);
@@ -444,7 +673,7 @@ void NetworkSupervisor::_taskLoop() {
         _currentRetries = 0;
 
         if (candidates.empty()) {
-          _startApInternal();
+          _fallbackToApOrRescan();
           break;
         }
 
@@ -454,20 +683,17 @@ void NetworkSupervisor::_taskLoop() {
 
       // ----------------------------------------------------------
       case NetworkSupervisorState::CONNECTING: {
-        auto candidates = _sortedCandidates();
-        if (_config.scanBeforeConnect) {
-          candidates.erase(
-              std::remove_if(candidates.begin(), candidates.end(),
-                             [](const WifiConnection* c) { return c->rssi == 0; }),
-              candidates.end());
-        }
+        auto candidates = _connectCandidates();
 
         if (_candidateIndex >= candidates.size()) {
-          // всі кандидати вичерпано — WPS або AP fallback
+          // всі кандидати вичерпано — WPS або AP fallback.
+          // Форсована ціль (connectTo) на цьому знімається: далі знову
+          // працює звичайний підбір за пріоритетами.
+          _forcedId = 0;
           if (_config.wpsEnabled) {
             _startWpsInternal();
           } else {
-            _startApInternal();
+            _fallbackToApOrRescan();
           }
           break;
         }
@@ -476,6 +702,7 @@ void NetworkSupervisor::_taskLoop() {
         _notifyConnecting(*conn);
 
         if (_connectTo(*conn)) {
+          _forcedId = 0;
           _setState(NetworkSupervisorState::CONNECTED);
           _notifyConnected(*conn, _currentIp);
           _candidateIndex = 0;
@@ -506,6 +733,11 @@ NM_DELAY(_config.retryDelayMs);
             _candidateIndex = 0;
             _currentRetries = 0;
             _setState(NetworkSupervisorState::RECONNECTING);
+          } else {
+            // Інакше стан лишався б CONNECTED назавжди, а ця гілка щопівсекунди
+            // вистрелювала б onDisconnected заново - і при цьому state() брехав
+            // би "connected" на вимкненому радіо.
+            _setState(NetworkSupervisorState::IDLE);
           }
         }
 NM_DELAY(500);
@@ -525,8 +757,9 @@ NM_DELAY(500);
           if (_wpsSuccess) {
             _onWpsSuccess(_wpsSsid, _wpsPassword);
           } else {
-            // WPS fail/timeout — fallback до AP
-            _startApInternal();
+            // WPS fail/timeout — fallback до AP (або далі сканувати,
+            // якщо apFallbackEnabled=false)
+            _fallbackToApOrRescan();
           }
         } else {
 NM_DELAY(200);
@@ -540,16 +773,38 @@ NM_DELAY(200);
 NM_DELAY(1000);
           break;
         }
-        // перевіряємо інтервал сканування
-        if (millis() - _lastScanMs >= _config.scanIntervalMs) {
-          WiFi.softAPdisconnect(true);
-          _notifyApStopped();
-          _candidateIndex = 0;
-          _currentRetries = 0;
-          _setState(NetworkSupervisorState::SCANNING);
-        } else {
+        if (millis() - _lastScanMs < _config.scanIntervalMs) {
 NM_DELAY(1000);
+          break;
         }
+
+        // Сканування У ФОНІ, не гасячи точку доступу: AP_STA дозволяє станції
+        // пройтись по каналах, поки AP лишається в ефірі. Раніше тут був
+        // softAPdisconnect() перед кожним скануванням - пристрій періодично
+        // зникав з ефіру, і клієнт, підключений до AP, губив зʼєднання просто
+        // тому, що настав час чергової перевірки.
+        _lastScanMs = millis();
+
+        if (_config.scanBeforeConnect) {
+          _notifyScanStart();
+          _applyStaRadioConfig(/*keepAp=*/true);
+          _runScan(/*keepAp=*/true);
+
+          auto visible = _connectCandidates();
+          _notifyScanResult(visible);
+          _notifyScanEnd(visible);
+
+          if (visible.empty()) break;  // нема куди йти - лишаємось точкою доступу
+        } else if (_sortedCandidates().empty()) {
+          break;  // список порожній або все вимкнено - сканувати нема сенсу
+        }
+
+        // Відома мережа зʼявилась - тільки тепер згортаємо AP.
+        WiFi.softAPdisconnect(true);
+        _notifyApStopped();
+        _candidateIndex = 0;
+        _currentRetries = 0;
+        _setState(NetworkSupervisorState::CONNECTING);
         break;
       }
 
@@ -721,6 +976,7 @@ void NetworkSupervisor::_onWpsSuccess(const std::string& ssid, const std::string
   }
 
   // підключаємось до щойно отриманої мережі
+  _applyStaRadioConfig(/*keepAp=*/false);
   WiFi.begin(ssid.c_str(), password.c_str());
   uint32_t deadline = millis() + _config.connectTimeoutMs;
   while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
@@ -728,12 +984,13 @@ NM_DELAY(100);
   }
 
   if (WiFi.status() == WL_CONNECTED) {
+    _ensureDnsAfterDhcp();
     _currentSsid = ssid;
     _currentIp = WiFi.localIP().toString().c_str();
     // оновлюємо lastConnected
     for (auto& c : _connections) {
       if (c.ssid == ssid) {
-        c.lastConnected = static_cast<uint32_t>(millis() / 1000);
+        c.lastConnected = _now();
         break;
       }
     }
@@ -747,7 +1004,7 @@ NM_DELAY(100);
 #endif
   } else {
     WiFi.disconnect(true);
-    _startApInternal();
+    _fallbackToApOrRescan();
   }
 }
 
@@ -816,14 +1073,32 @@ void NetworkSupervisor::_registerWifiEvents() {
     [this](arduino_event_id_t, arduino_event_info_t info) {
       // GOT_IP — підтверджуємо CONNECTED на рівні FSM
       _currentIp = IPAddress(info.got_ip.ip_info.ip.addr).toString().c_str();
-      // currentSsid вже встановлено в _connectTo()
-      WifiConnection* conn = nullptr;
-      for (auto& c : _connections) {
-        if (c.ssid == _currentSsid) { conn = &c; break; }
+
+      // Про вдале зʼєднання звітує ХТОСЬ ОДИН. Коли конект ініціював
+      // _connectTo(), він сам вистрелить onConnected після свого polling-
+      // циклу; якщо повідомити ще й звідси, listeners отримають подію двічі.
+      // Тут лишається випадок, коли IP прийшов не з нашої ініціативи -
+      // автореконект силами самого SDK.
+      if (_state == NetworkSupervisorState::CONNECTED) return;
+
+      // currentSsid вже встановлено в _connectTo(). Беремо КОПІЮ запису:
+      // тримати замок під час _notifyConnected() не можна - listener живе в
+      // прошивці й може робити що завгодно, зокрема викликати нас назад.
+      WifiConnection snapshot;
+      bool found = false;
+      {
+        Lock lock(_mutex);
+        for (const auto& c : _connections) {
+          if (c.ssid == _currentSsid) {
+            snapshot = c;
+            found = true;
+            break;
+          }
+        }
       }
-      if (conn) {
+      if (found) {
         _setState(NetworkSupervisorState::CONNECTED);
-        _notifyConnected(*conn, _currentIp);
+        _notifyConnected(snapshot, _currentIp);
       }
     },
     ARDUINO_EVENT_WIFI_STA_GOT_IP);
@@ -834,6 +1109,9 @@ void NetworkSupervisor::_registerWifiEvents() {
 
   _evtStaDisconnected = WiFi.onEvent(
     [this](arduino_event_id_t, arduino_event_info_t) {
+      // Без замка: тут лише скаляри й рядки стану, а блокування в хендлері
+      // подій зупинило б увесь WiFi-стек (WiFi.mode()/softAP() чекають саме
+      // на цей task).
       if (_state == NetworkSupervisorState::CONNECTED) {
         std::string lost = _currentSsid;
         _currentSsid.clear();
@@ -843,6 +1121,8 @@ void NetworkSupervisor::_registerWifiEvents() {
           _candidateIndex = 0;
           _currentRetries = 0;
           _setState(NetworkSupervisorState::RECONNECTING);
+        } else {
+          _setState(NetworkSupervisorState::IDLE);
         }
       }
     },

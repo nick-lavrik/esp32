@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdint.h>
+
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -8,8 +10,10 @@
 #include <ESP8266WiFi.h>
 #else
 #include <WiFi.h>
+#include <esp_wifi.h>  // esp_wifi_set_protocol() у _applyStaRadioConfig()
 #include <esp_wps.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #endif
 
@@ -33,27 +37,37 @@ static constexpr NsListenerId kInvalidNsListenerId = 0;
 //   NetworkSupervisorConfig cfg;
 //   cfg.apSsid = "ESP32-Setup";
 //
-//   NetworkSupervisor nm(&storage);
-//   nm.setConfig(cfg);
-//   nm.loadConfig();                     // завантажити збережені з'єднання
+//   NetworkSupervisor ns(&storage);
+//   ns.setConfig(cfg);
+//   ns.loadConfig();                     // завантажити збережені з'єднання
 //
-//   WifiConnection home;
-//   home.ssid = "HomeWiFi";
-//   home.password = "secret";
-//   home.priority = 10;
-//   nm.addConnection(home);
+//   if (ns.connections().empty()) {      // перший старт - засіяти дефолтом
+//     WifiConnection home;
+//     home.ssid = "HomeWiFi";
+//     home.password = "secret";
+//     home.priority = 10;
+//     ns.addConnection(home);
+//     ns.saveConfig();                   // addConnection() САМ не зберігає
+//   }
 //
-//   nm.addListener(&myListener);
-//   nm.begin();                          // стартує FreeRTOS task
+//   ns.setClock([] { return ntp.isSynced() ? (uint32_t)time(nullptr) : 0u; });
+//   ns.addListener(&myListener);
+//   ns.begin();                          // стартує FreeRTOS task
 //
 // Після підключення:
-//   Serial.println(nm.localIp().c_str());
+//   Serial.println(ns.localIp().c_str());
 //
 // Ручне управління:
-//   nm.setAutoReconnect(false);          // зупинити автоперепідключення
-//   nm.scan();                           // форсований скан
-//   nm.startAp();                        // форсований AP mode
-//   nm.saveConfig();                     // зберегти поточну конфігурацію
+//   ns.setAutoReconnect(false);          // зупинити автоперепідключення
+//   ns.connectTo(id);                    // підключитись саме до цього запису
+//   ns.reconnect();                      // повний перебір з нуля
+//   ns.startAp();                        // форсований AP mode
+//   ns.saveConfig();                     // зберегти поточну конфігурацію
+//
+// AP-fallback: коли жодна зі збережених мереж не видима, FSM піднімає точку
+// доступу і НЕ гасить її заради сканування - ефір перевіряється у режимі
+// AP_STA кожні config.scanIntervalMs. Точка доступу зникає лише тоді, коли
+// відома мережа реально з'явилась і є до чого підключатись.
 
 class NetworkSupervisor {
  public:
@@ -105,6 +119,11 @@ class NetworkSupervisor {
   // Форсований reconnect: перериває поточний стан і починає SCANNING.
   void reconnect();
 
+  // Підключитись саме до цього з'єднання, ігноруючи пріоритети й результат
+  // скану (мережа може бути прихованою). Повертає false, якщо id не знайдено.
+  // Після успіху або вичерпання спроб FSM повертається до звичайного підбору.
+  bool connectTo(uint16_t connectionId);
+
   // Форсований перехід в AP_MODE (наприклад, з SerialCommander).
   void startAp();
 
@@ -124,6 +143,13 @@ class NetworkSupervisor {
 
   void setConfig(const NetworkSupervisorConfig& cfg);
   const NetworkSupervisorConfig& config() const;
+
+  // Джерело реального часу для WifiConnection::lastConnected.
+  // Без нього лічильник рахується з millis(), тобто обнуляється на кожному
+  // ребуті - і збережений порядок "останній вдалий першим" після рестарту
+  // стає випадковим. Провайдер має повертати unix-час або 0, якщо час ще
+  // не синхронізовано (тоді працює millis()-фолбек).
+  void setClock(std::function<uint32_t()> nowEpoch);
 
   // Зберігає config + список з'єднань в ConfigStorage ("nm_config", "nm_connections").
   void saveConfig();
@@ -152,8 +178,40 @@ class NetworkSupervisor {
   // Спроба підключення до одного з'єднання. Повертає true при успіху.
   bool _connectTo(WifiConnection& conn);
 
+  // Розірвати поточне з'єднання і перейти в next. Стан міняється ДО
+  // WiFi.disconnect(), щоб про втрату звʼязку відзвітував рівно один шлях
+  // (див. коментар у реалізації).
+  void _dropConnection(NetworkSupervisorState next);
+
   // Конфігурує статичну IP або DHCP перед WiFi.begin().
   void _applyIpConfig(const WifiConnection& conn);
+
+  // Підстраховка після DHCP: якщо netif лишився без DNS-серверів, підставляє
+  // шлюз. Деталі й причина - у реалізації.
+  void _ensureDnsAfterDhcp();
+
+  // Переводить радіо в STA (або AP_STA, якщо треба не гасити точку доступу)
+  // і застосовує налаштування протоколу/скану з _config. Викликати ПЕРЕД
+  // кожним скануванням і кожним WiFi.begin(): після циклу в AP-режимі
+  // mode лишається AP, і без цього WiFi.begin() дав би AP_STA замість STA.
+  void _applyStaRadioConfig(bool keepAp);
+
+  // Поточний час для lastConnected: _clock(), якщо заданий і повернув не 0,
+  // інакше грубий лічильник з millis().
+  uint32_t _now() const;
+
+  // Кандидати після фільтра "видно в ефірі" (або без нього, якщо
+  // scanBeforeConnect=false). При заданому _forcedId - лише цей запис.
+  std::vector<WifiConnection*> _connectCandidates();
+
+  // Один цикл сканування: старт, очікування завершення, _applyScanResults().
+  // keepAp лише документує контекст виклику - режим радіо задає
+  // _applyStaRadioConfig(), який треба викликати перед цим методом.
+  void _runScan(bool keepAp);
+
+  // AP-fallback з урахуванням config.apFallbackEnabled: при вимкненому
+  // fallback лишаємось у SCANNING замість підняття точки доступу.
+  void _fallbackToApOrRescan();
 
   // Запускає AP з параметрами з _config.
   void _startApInternal();
@@ -253,6 +311,16 @@ class NetworkSupervisor {
   std::vector<WifiConnection> _connections;
   uint16_t _nextConnectionId = 1;
 
+  // Ціль connectTo(): 0 = звичайний підбір за пріоритетами.
+  uint16_t _forcedId = 0;
+
+  // Чи виставляли ми статичну IP. Потрібне, щоб не смикати WiFi.config()
+  // даремно на DHCP-профілях - див. _applyIpConfig().
+  bool _staticIpApplied = false;
+
+  // Джерело unix-часу (див. setClock()); порожній - фолбек на millis().
+  std::function<uint32_t()> _clock;
+
   std::string _currentSsid;
   std::string _currentIp;
 
@@ -283,5 +351,50 @@ class NetworkSupervisor {
 
 #if !defined(NM_BLOCKING_MODE) && !defined(ESP8266)
   TaskHandle_t _taskHandle = nullptr;
+#endif
+
+  // Мʼютекс на _connections.
+  //
+  // Вектор чіпають ТРИ контексти: task супервізора, arduino event task
+  // (хендлер STA_GOT_IP шукає в ньому запис) і той, звідки прилітають
+  // команди (loop()/SerialCommander). Без замка addConnection() під час
+  // _sortedCandidates() дає realloc вектора і висячі вказівники.
+  //
+  // ЗАЛІЗНЕ ПРАВИЛО: під замком не можна викликати блокуючі WiFi.* (mode(),
+  // softAP(), begin(), disconnect()) і не можна нотифікувати listener'ів.
+  // Ті виклики всередині чекають на arduino event task, а той упреться в
+  // цей самий замок - і весь WiFi-стек стане. Саме так і сталося: команда
+  // 'net device wifi hotspot' переставала відповідати, а плата лишалася на
+  // старій точці з побитим DNS. Тому замок беремо рівно на час роботи з
+  // вектором, а стан (_state, _current*) - прості скаляри й рядки, гонка
+  // на них нешкідлива порівняно з дедлоком.
+  //
+  // Рекурсивний свідомо: saveConfig() викликається як ззовні, так і
+  // зсередини вже залоченого _onWpsSuccess().
+#if !defined(ESP8266)
+  SemaphoreHandle_t _mutex = nullptr;
+
+  // RAII-гард; при _mutex == nullptr (ще не створений) - no-op.
+  class Lock {
+   public:
+    explicit Lock(SemaphoreHandle_t m) : _m(m) {
+      if (_m) xSemaphoreTakeRecursive(_m, portMAX_DELAY);
+    }
+    ~Lock() {
+      if (_m) xSemaphoreGiveRecursive(_m);
+    }
+    Lock(const Lock&) = delete;
+    Lock& operator=(const Lock&) = delete;
+
+   private:
+    SemaphoreHandle_t _m;
+  };
+#else
+  // ESP8266 однопотоковий - замок вироджується в порожній об'єкт.
+  class Lock {
+   public:
+    explicit Lock(int) {}
+  };
+  int _mutex = 0;
 #endif
 };

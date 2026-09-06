@@ -11,6 +11,7 @@
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "clock on"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "desaturate 0.30"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c6 -m "darken 0.30"
+// mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-esp32-c3 -m "heap"
 // mosquitto_pub -h broker.hivemq.com -p 1883 -t mykola-lavryk/command/mqtt-ttgo-t1 -m "clock on"
 //
 // ./esp bg-save assets/background-02-320x172.h   # 55040 значень, ~35 с
@@ -170,6 +171,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include "ping.h"
 #include "setup.h"
 #include "wifi.h"
+#include "netcli.h"  // після wifi.h: netcli викликає WiFi_scan()
 #include "strip.h"
 
 #if BOARD_HAS_TOUCHSCREEN
@@ -345,7 +347,38 @@ EcoflowDeviceRegistry ecoflowDevices;
 
 LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
-//NetworkSupervisor wifi;
+
+// Менеджер WiFi: тримає список мереж у NVS (namespace той самий, що й у
+// configStorage - PIO_PIOENV) і сам веде підключення. Керується командою 'net',
+// див. src/netcli.h.
+NetworkSupervisor netSupervisor(&configStorage);
+
+// Єдиний listener у прошивці: перекладає події FSM у лог. Усе інше в коді
+// питає стан у глобального WiFi (WiFi.isConnected() тощо) - воно працює
+// однаково, хто б не викликав begin().
+struct NetworkEventLogger : public INetworkSupervisorListener {
+  const TLogger logger{"net"};
+
+  void onConnecting(const WifiConnection& conn) override {
+    logger.info("connecting to '%s'...", conn.ssid.c_str());
+  }
+  void onConnected(const WifiConnection& conn, const std::string& ip) override {
+    logger.info("connected to '%s', IP %s (%d dBm)", conn.ssid.c_str(), ip.c_str(), WiFi.RSSI());
+  }
+  void onDisconnected(const std::string& ssid) override {
+    logger.warn("disconnected from '%s'", ssid.c_str());
+  }
+  void onConnectionFailed(const WifiConnection& conn) override {
+    logger.warn("failed to connect to '%s'", conn.ssid.c_str());
+  }
+  void onApStarted(const std::string& apSsid, const std::string& ip) override {
+    logger.info("hotspot '%s' up at %s, still scanning for known networks", apSsid.c_str(),
+                ip.c_str());
+  }
+  void onApStopped() override { logger.info("hotspot down"); }
+};
+
+NetworkEventLogger networkEventLogger;
 
 // Хост і base64(login:password) приходять із secrets.ini через build_flags
 // (ROUTER_HOST / ROUTER_LOGIN_AUTHORIZATION) - раніше вони були захардкожені
@@ -3150,7 +3183,16 @@ void setupSerialCommander() {
 #endif
   });
 
-  commandHandler.registerCommand("scan", "scan WiFi networks", [](const String& args) { WiFi_scan(); });
+  registerNetCommand(commandHandler, netSupervisor);
+  // 'scan' лишається як коротший псевдонім 'net device wifi list'
+  commandHandler.registerCommand("scan", "scan WiFi networks (alias of 'net device wifi list')",
+                                 [](const String& args) {
+                                   std::vector<std::string> known;
+                                   for (const auto& c : netSupervisor.connections()) {
+                                     known.push_back(c.ssid);
+                                   }
+                                   WiFi_scan(known);
+                                 });
 
 #if HAS_GMAIL_SENDER
   // command: mailto
@@ -4017,6 +4059,48 @@ void loadConfig() {
 
 void setupEventDispatcher() { Logger::info("EventDispatcher setup done"); }
 
+// Замість колишнього setupWiFi(): підняти NetworkSupervisor і віддати йому
+// радіо. Виклик неблокуючий, як і раніше - FSM крутиться у власному
+// FreeRTOS-таску, а все, що нижче в setup(), і так стоїть під
+// WiFi.isConnected()-гардами.
+void setupNetworkSupervisor() {
+  NetworkSupervisorConfig cfg;
+  // Ім'я env у SSID точки доступу: у мережі часто крутиться кілька плат.
+  cfg.apSsid = std::string("ESP-") + PIO_PIOENV;
+  cfg.apFallbackEnabled = true;
+  netSupervisor.setConfig(cfg);
+
+  // Список мереж живе в NVS; loadConfig() перекриє щойно виставлений cfg
+  // збереженим, якщо він там є.
+  netSupervisor.loadConfig();
+
+  // Перший старт (або стерта NVS): засіваємо мережею з secrets.ini, щоб
+  // пристрій не лишився без зв'язку після чистої прошивки. Далі build-flag
+  // більше нічого не перевизначає - запис редагується через 'net'.
+  if (netSupervisor.connections().empty()) {
+    WifiConnection seed;
+    seed.ssid = ssid;
+    seed.password = password;
+    seed.priority = 10;
+    netSupervisor.addConnection(seed);
+    netSupervisor.saveConfig();
+    Logger::info("NetworkSupervisor seeded with build-time SSID '%s'", ssid);
+  }
+
+  // lastConnected інакше рахувався б від millis() і обнулявся на кожному
+  // ребуті - тоді збережений порядок "останній вдалий першим" після рестарту
+  // ставав би випадковим. ntp ще не стартував, але лямбда ліниво питає час
+  // у момент підключення.
+  netSupervisor.setClock([]() -> uint32_t {
+    return ntp.isSynced() ? static_cast<uint32_t>(time(nullptr)) : 0u;
+  });
+
+  netSupervisor.addListener(&networkEventLogger);
+  netSupervisor.begin();
+  Logger::info("NetworkSupervisor started with %u profile(s)",
+               (unsigned)netSupervisor.connections().size());
+}
+
 void setupTaskCommander() {}
 
 void setupLightSensor() {
@@ -4620,7 +4704,7 @@ void setup() {
   setupDisplay();
   setupTouchScreen();
   setupImu();
-  setupWiFi();
+  setupNetworkSupervisor();
   setupNtpService();
   setupBackgroundImage();
   setupTaskCommander();

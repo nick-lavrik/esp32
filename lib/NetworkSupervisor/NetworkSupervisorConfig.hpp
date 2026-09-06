@@ -35,6 +35,24 @@ struct NetworkSupervisorConfig {
   bool scanBeforeConnect = true;      // true  → scan → filter by visible → connect
                                       // false → перебирати список без попереднього скану
 
+  // ---- налаштування радіо STA ----
+  // Обмежити станцію 802.11b/g/n ДО старту конекту: на чипах з Wi-Fi 6
+  // (C6) асоціація з AX-точкою валила стек. На чипах без AX (класичний
+  // ESP32, S3, C3) це фактично no-op - там така бітмаска і так дефолтна.
+  bool forceWifi4 = true;
+
+  // Повний скан по всіх каналах замість дефолтного WIFI_FAST_SCAN.
+  //
+  // Fast scan зупиняється на ПЕРШІЙ точці з потрібним SSID і слухає кожен
+  // канал дуже коротко - при слабкому сигналі beacon просто не встигає
+  // потрапити у вікно, і WiFi.begin() віддає reason 201 (NO_AP_FOUND) на
+  // мережу, яку окремий WiFi.scanNetworks() бачить без проблем (той слухає
+  // канал довше). Повний скан цю гонку прибирає.
+  //
+  // Побічний плюс для AiMesh/кількох AP з одним SSID: sort by signal
+  // обирає найсильніший BSSID, а не перший-ліпший.
+  bool fullChannelScan = true;
+
   // ---- автоперепідключення ----
   bool autoReconnect = true;  // false → нічого не робить після втрати; потрібен ручний виклик
 
@@ -49,6 +67,10 @@ struct NetworkSupervisorConfig {
   int8_t wpsSavedPriority = 0;       // пріоритет для збереженого WPS-з'єднання
 
   // ---- точка доступу (AP fallback) ----
+  // false → коли жодного кандидата не знайдено, AP НЕ піднімається;
+  // FSM просто продовжує сканувати з інтервалом scanIntervalMs.
+  bool apFallbackEnabled = true;
+
   std::string apSsid = "ESP-NetworkSupervisor";
   std::string apPassword = "";  // порожній рядок → відкрита мережа
   uint8_t apChannel = 1;

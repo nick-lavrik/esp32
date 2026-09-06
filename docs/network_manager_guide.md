@@ -234,3 +234,86 @@ sudo systemctl restart NetworkManager
 ### 4. Повне увімкнення/вимкнення радіомодулів
 * Перевірити стан радіомодулів: `nmcli radio`
 * Увімкнути Wi-Fi: `nmcli radio wifi on`
+
+---
+
+## Команда `net` на пристрої: те саме, але в ESP32
+
+Прошивка має власний менеджер мереж (`lib/NetworkSupervisor`) і серійну команду
+`net`, яка свідомо дзеркалить `nmcli` — щоб не тримати в голові дві різні
+граматики. Структура та сама: `net ОБ'ЄКТ ДІЯ [аргументи]`, слова скорочуються
+до унікального префікса (`net c s` == `net connection show`), імена налаштувань
+у `modify` — nmcli-івські.
+
+```
+net                                       = net general status
+net help | net <object> help
+
+net general status                        стан, IP, шлюз, DNS, сигнал
+net radio wifi [on|off]                   увімкнути/вимкнути менеджер
+
+net device status                         стан інтерфейсу, MAC
+net device wifi list                      скан ефіру (таблиця IN-USE/SSID/CHAN/SIGNAL)
+net device wifi connect <ssid> [password <p>]
+net device wifi hotspot [ssid <s>] [password <p>]
+net device disconnect
+
+net connection show [<id|ssid>]
+net connection add ssid <s> [password <p>] [priority <n>]
+net connection modify <id|ssid> <setting> <value>
+net connection delete <id|ssid>
+net connection up <id|ssid>
+net connection down
+net connection reload                     перечитати профілі з NVS
+```
+
+Налаштування для `modify` — і повні, і скорочені посекційно
+(`wifi-sec.psk`, `con.autoconnect-priority`, просто `psk`):
+
+| nmcli setting | що робить |
+|---|---|
+| `wifi.ssid` | SSID профілю |
+| `wifi-security.psk` | пароль |
+| `connection.autoconnect` `yes\|no` | чи брати профіль до уваги при підборі |
+| `connection.autoconnect-priority` | пріоритет (більше = раніше) |
+| `connection.autoconnect-retries` | спроб на цей профіль; `-1` = глобальний дефолт |
+| `ipv4.method` `auto\|manual` | DHCP чи статика |
+| `ipv4.addresses` | `192.168.1.50/24` — адреса з маскою, вмикає статику |
+| `ipv4.gateway` | шлюз |
+| `ipv4.dns` | DNS-сервер |
+
+### Чим відрізняється від справжнього nmcli
+
+* **Профіль адресується `id` або `SSID`.** UUID і `con-name` тут немає: пристрій
+  тримає плаский список, а не каталог `.nmconnection`-файлів.
+* **Зміни зберігаються одразу.** `add` / `modify` / `delete` самі пишуть у NVS,
+  окремого `save` немає. `net connection reload` — це відкат до збереженого,
+  аналог `nmcli connection reload`.
+* **`radio wifi off` зупиняє менеджер цілком** (`NetworkSupervisor::end()`), а не
+  лише глушить радіо через rfkill.
+* **`hotspot` не гасне заради сканування.** Коли жодна зі збережених мереж не
+  видима, пристрій піднімає точку доступу `ESP-<env>` і далі перевіряє ефір у
+  режимі AP_STA кожні `scanIntervalMs`. Точка зникає лише тоді, коли відома
+  мережа реально з'явилась. У Linux-NetworkManager такої поведінки немає — там
+  hotspot це окремий профіль, який треба гасити вручну.
+* **Немає `type`, `ifname`, VPN, bridge/bond/vlan** — інтерфейс рівно один,
+  `wlan0`.
+* **Перший старт засівається з `secrets.ini`.** Якщо список профілів у NVS
+  порожній, туди додається мережа з build-flag'ів `WIFI_SSID`/`WIFI_PASSWORD`,
+  щоб плата після чистої прошивки не лишилась без зв'язку. Далі build-flag
+  нічого не перевизначає.
+
+### Дві пастки arduino-esp32, на які тут є обхід
+
+1. **`WiFi.config(INADDR_NONE, ...)` обнуляє DNS.** Гілка DHCP-клієнта в
+   `NetworkInterface::config()` спершу зупиняє `dhcpc`, записує всі три
+   DNS-сервери нулями і лише тоді стартує `dhcpc` назад — а той переукладає
+   оренду з кешу й DNS уже не проставляє. Назовні це «IP є, LAN пінгується, а
+   `hostByName()` падає з -54». Тому `_applyIpConfig()` чіпає `WiFi.config()`
+   лише коли реально треба зняти раніше виставлену статику, а
+   `_ensureDnsAfterDhcp()` після кожного DHCP-підключення підставляє шлюз, якщо
+   DNS усе одно лишився порожнім.
+2. **Не тримати мʼютекс під час викликів `WiFi.*`.** `WiFi.mode()`, `softAP()`,
+   `begin()` всередині чекають на arduino event task. Якщо той упреться в той
+   самий замок, стає весь WiFi-стек: команда мовчить, плата лишається на старій
+   точці. Замок у `NetworkSupervisor` захищає рівно вектор профілів.
