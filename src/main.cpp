@@ -4074,8 +4074,24 @@ void setupNetworkSupervisor() {
   // збереженим, якщо він там є.
   netSupervisor.loadConfig();
 
-  // Перший старт (або стерта NVS): засіваємо мережею з secrets.ini, щоб
-  // пристрій не лишився без зв'язку після чистої прошивки. Далі build-flag
+  // Порожній список - пробуємо файли з LittleFS (/network/*.nmconnection,
+  // формат keyfile NetworkManager). Їх кладуть з компа через
+  // 'pio run -t uploadfs', тобто плату можна спорядити мережами не
+  // перекомпільовуючи прошивку й не набираючи нічого в консолі.
+  //
+  // Саме ЗАСІВ, а не постійне джерело: далі список живе в NVS, бо uploadfs
+  // перезаписує розділ цілком і поховав би все додане командою 'net'.
+  // Перечитати файли будь-коли - 'net connection reload'.
+  if (netSupervisor.connections().empty()) {
+    const size_t imported = importNetProfilesFromFs(netSupervisor);
+    if (imported > 0) {
+      Logger::info("NetworkSupervisor imported %u profile(s) from LittleFS",
+                   (unsigned)imported);
+    }
+  }
+
+  // Остання лінія оборони: мережа з secrets.ini, щоб пристрій не лишився без
+  // зв'язку після чистої прошивки з порожнім LittleFS. Далі build-flag
   // більше нічого не перевизначає - запис редагується через 'net'.
   if (netSupervisor.connections().empty()) {
     WifiConnection seed;

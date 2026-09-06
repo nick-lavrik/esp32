@@ -61,6 +61,19 @@ void NetworkSupervisor::begin() {
 #endif
 
   _registerWifiEvents();
+
+  // Мережевий стек піднімаємо ТУТ, у контексті того, хто викликав begin(), і
+  // тільки потім стартуємо task.
+  //
+  // Інакше перший WiFi.mode() робить уже FSM-task - паралельно з рештою
+  // setup(). А esp_netif_init() всередині не потокобезпечний: обидва
+  // контексти бачать стек неініціалізованим, обидва кличуть
+  // esp_vfs_lwip_sockets_register(), другий отримує ESP_ERR_INVALID_ARG - і
+  // ESP_ERROR_CHECK всередині IDF валить пристрій у бут-луп
+  // (vfs_lwip.c:112). Раніше цієї гонки не було: setupWiFi() робив
+  // WiFi.mode() синхронно, до всього іншого.
+  _applyStaRadioConfig(/*keepAp=*/false);
+
   _setState(NetworkSupervisorState::SCANNING);
 #if !defined(NM_BLOCKING_MODE) && !defined(ESP8266)
   xTaskCreate(_taskEntry, "NetworkSupervisor", 4096, this, 1, &_taskHandle);
@@ -543,8 +556,19 @@ void NetworkSupervisor::_ensureDnsAfterDhcp() {
     _logger.warn("DHCP left DNS empty and there is no gateway to fall back to");
     return;
   }
-  WiFi.setDNS(gw);
-  _logger.warn("DHCP left DNS empty, using gateway %s as resolver", gw.toString().c_str());
+
+  // САМЕ WiFi.STA.dnsIP(), а НЕ WiFi.setDNS(). Останній розгортається в
+  // STA.begin() -> connect() -> config(), тобто (а) знову обнуляє DNS перед
+  // тим як його виставити і (б) переініціалізує netif. Пункт (б) коштував
+  // бут-лупа: esp_vfs_lwip_sockets_register() вдруге віддає
+  // ESP_ERR_INVALID_ARG, і ESP_ERROR_CHECK всередині IDF валить пристрій
+  // (vfs_lwip.c:112). dnsIP() же лише кличе esp_netif_set_dns_info().
+  if (WiFi.STA.dnsIP(0, gw)) {
+    _logger.warn("DHCP left DNS empty, using gateway %s as resolver", gw.toString().c_str());
+  } else {
+    _logger.warn("DHCP left DNS empty and setting gateway %s as resolver failed",
+                 gw.toString().c_str());
+  }
 #endif
 }
 

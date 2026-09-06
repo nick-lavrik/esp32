@@ -264,7 +264,9 @@ net connection modify <id|ssid> <setting> <value>
 net connection delete <id|ssid>
 net connection up <id|ssid>
 net connection down
-net connection reload                     перечитати профілі з NVS
+net connection reload                     перечитати /network/*.nmconnection
+net connection load <file>                імпортувати один файл
+net connection export [<id|ssid>]         вивантажити профілі у файли
 ```
 
 Налаштування для `modify` — і повні, і скорочені посекційно
@@ -317,3 +319,94 @@ net connection reload                     перечитати профілі з
    `begin()` всередині чекають на arduino event task. Якщо той упреться в той
    самий замок, стає весь WiFi-стек: команда мовчить, плата лишається на старій
    точці. Замок у `NetworkSupervisor` захищає рівно вектор профілів.
+
+### Де живе конфігурація: NVS чи LittleFS
+
+Сховищ два, і в них різні ролі — плутати їх дорого.
+
+| | NVS | LittleFS `/network/*.nmconnection` |
+|---|---|---|
+| роль | **робоче сховище** | джерело **постачання** |
+| хто пише | команди `net`, сам FSM | ви, з компа |
+| переживає `pio run -t upload` | так | так |
+| переживає `pio run -t uploadfs` | **так** | **ні, розділ перезаписується цілком** |
+| читається людиною | ні (JSON у NVS) | так, звичайний INI |
+
+Вирішальний рядок — передостанній. `uploadfs` пише образ файлової системи
+цілком, тож усе, що додали на пристрої командою `net connection add`, у файлах
+би загинуло під час найближчого деплою статики. Тому робочим сховищем лишається
+NVS, а файли — це «те, що ви поклали з компа».
+
+Звідси й правила імпорту:
+
+* **на старті** файли читаються, лише якщо список профілів у NVS **порожній**
+  (чиста плата або стерта NVS). Порядок джерел:
+  `NVS → /network/*.nmconnection → WIFI_SSID/WIFI_PASSWORD з secrets.ini`;
+* **будь-коли вручну** — `net connection reload` (усі файли) або
+  `net connection load <file>` (один). Мерж іде за SSID: наявний профіль
+  оновлюється на місці, зберігаючи `id` та історію підключень, новий —
+  додається;
+* `net connection delete` прибирає профіль **лише з NVS**, файл лишається
+  (на відміну від справжнього nmcli, який видаляє і файл). Тобто після
+  `delete` + `reload` профіль повернеться — це навмисно: файли є деклараціями
+  постачання, а не дзеркалом runtime-стану;
+* `net connection export` робить зворотну дію — пише поточні профілі у файли,
+  щоб їх можна було зняти з плати, поправити на компі й задеплоїти назад.
+
+### Як спорядити плату мережами з компа
+
+```bash
+mkdir -p data/network
+$EDITOR data/network/home.nmconnection     # формат нижче
+pio run -e esp32-c6 -t uploadfs            # УВАГА: перезаписує весь LittleFS
+```
+
+Файл (це рівно те, що лежить у `/etc/NetworkManager/system-connections/`, тож
+робочий профіль можна просто скопіювати з ноутбука):
+
+```ini
+[connection]
+id=HomeWiFi
+type=wifi
+autoconnect=true
+autoconnect-priority=10
+autoconnect-retries=-1
+
+[wifi]
+mode=infrastructure
+ssid=HomeWiFi
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=secret
+
+[ipv4]
+method=manual
+address1=192.168.1.50/24,192.168.1.1
+dns=8.8.8.8;1.1.1.1;
+
+[ipv6]
+method=ignore
+```
+
+Ігноруються (читаються без помилки, але не використовуються): `uuid`,
+`interface-name`, `permissions`, `802-1x`/WPA-Enterprise, `ipv6` крім `method`,
+другий і подальші DNS зі списку. `method=auto` в `[ipv4]` — звичайний DHCP.
+
+Дві деталі, які легко проґавити:
+
+* **Ім'я файлу косметичне.** Мережу визначає `wifi.ssid` усередині, як і в
+  NetworkManager. Так зроблено навмисно: SSID буває до 32 символів, а LittleFS
+  на ESP8266 обмежує довжину компонента шляху — прив'язка до імені файлу ламала
+  б довгі SSID.
+* **SSID із пробілом на краю пишеться байтами.** `ssid=65;115;117;115;32;` —
+  це `"Asus "`, десяткові байти через `;`, точно як у NetworkManager. Без цієї
+  форми пробіл гине при читанні, профіль перестає збігатися зі збереженим і
+  кожен `reload` плодить дубль. Запис сам обирає форму, читання розпізнає обидві.
+
+> **Пароль лежить у відкритому вигляді** — і у файлі, і в NVS (як і в
+> `/etc/NetworkManager/system-connections/`, де файл рятують лише права `600`).
+> На LittleFS прав немає. Якщо колись увімкнете роздачу статики з LittleFS
+> (`httpServer.setStaticSource(&littleFsSource)` у `src/main.cpp` зараз
+> закоментовано), `/network/*.nmconnection` стануть доступними по HTTP — тоді
+> каталог треба виключити зі статики або тримати профілі лише в NVS.

@@ -13,3 +13,9 @@ secrets.ini
 
 # Персональні налаштування Claude Code (hooks, попапи) - не для команди
 .claude/settings.local.json
+
+# Профілі WiFi для LittleFS: містять psk у відкритому вигляді (формат keyfile
+# NetworkManager, як /etc/NetworkManager/system-connections/). Кладуться в
+# data/network/ і їдуть на плату через 'pio run -t uploadfs'. Приклад файлу -
+# у docs/network_manager_guide.md.
+data/network/*.nmconnection
