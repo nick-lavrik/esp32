@@ -21,6 +21,7 @@ namespace {
 // кшталт 0x52AA став би там тим самим пікселем, що й фон.
 constexpr uint16_t kBg = TFT_BLACK;
 constexpr uint16_t kFg = TFT_WHITE;
+// constexpr uint16_t kFg = TFT_YELLOW;
 
 constexpr uint8_t kScale = DINO_SPRITE_SCALE;
 
@@ -96,11 +97,11 @@ void DinoRenderer::frame(bool frameStart) {
   render();
 }
 
-void DinoRenderer::drawSprite(const MonoBitmap &bmp, int32_t x, int32_t y) {
+void DinoRenderer::drawSprite(const MonoBitmap &bmp, int32_t x, int32_t y, uint16_t color = kFg) {
   if (kScale == 1) {
-    display.drawBitmap((int16_t)x, (int16_t)y, bmp.data(), (int16_t)bmp.width(), (int16_t)bmp.height(), kFg);
+    display.drawBitmap((int16_t)x, (int16_t)y, bmp.data(), (int16_t)bmp.width(), (int16_t)bmp.height(), color);
   } else {
-    display.drawBitmapScaled(x, y, bmp.data(), bmp.width(), bmp.height(), kFg, kScale);
+    display.drawBitmapScaled(x, y, bmp.data(), bmp.width(), bmp.height(), color, kScale);
   }
 }
 
@@ -135,7 +136,6 @@ void DinoRenderer::drawObstacles() {
 void DinoRenderer::drawPlayer() {
   const DinoLayout &L = _game.layout();
   const int32_t y = L.groundY - L.playerH - (int32_t)_game.player().y;
-
   const MonoBitmap *bmp = &DinoArt::trexIdle();
   switch (_game.state()) {
     case DinoState::GameOver:

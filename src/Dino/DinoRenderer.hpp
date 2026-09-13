@@ -38,7 +38,7 @@ private:
   void drawPlayer();
   void drawHud();
   void drawOverlay();
-  void drawSprite(const MonoBitmap &bmp, int32_t x, int32_t y);
+  void drawSprite(const MonoBitmap &bmp, int32_t x, int32_t y, uint16_t color);
 
   DinoGame _game;
   bool _ready = false;
