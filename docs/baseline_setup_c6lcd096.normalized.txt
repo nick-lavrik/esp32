@@ -1,0 +1,45 @@
+[I][app]
+[I][app]
+[I][app] *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+[I][app]  ESP32-C6 (esp32-c6-lcd096)
+[I][app] *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+[I][app]
+[I][app] free heap memory from scratch: <n>
+[I][app] SD (SPI): CS=4 SCK=7 MOSI=6 MISO=5
+[W][app] SD init fail @ 4000000 Hz
+[W][app] SD init fail @ 400000 Hz
+[E][app] SD init fail. Check: card inserted? FAT32/FAT16 (NOT exFAT, NOT >32GB)? pins?
+[I][app] LittleFS mounted successfully (done)
+[I][app] EventDispatcher setup done
+[I][app] ConfigStorage init done
+[I][app] SerialCommander setup done
+[I][tft] initSprite(160, 40, depth=16)
+[I][app] Display setup done.
+[I][app] TouchScreen not found (disabled)!
+[I][app] NetworkSupervisor started with 1 profile(s)
+[I][web] portal started on port 80, auth off, 2 module(s)
+[I][app] WebPortal setup done
+[I][jpeg] "/background-<n>-160x80.jpg" 160x80 (<n>:<n> bytes) - free (<n>)
+[I][jpeg] Loaded 160x80, depth: 16 bit, buffer: 25600 B, memory: RAM
+[I][mqtt] topic prefix = 'mykola-lavryk'
+[I][console] mirror on -> mykola-lavryk/console/mqtt-esp32-c6-lcd096
+[I][mqtt] devices/+/light-sensor listen
+[I][mqtt] broker.hivemq.com:1883 (mqtt-esp32-c6-lcd096) lwt:mykola-lavryk/devices/esp32-c6-lcd096/status
+[D][ecoflow] DBEBZ5XD9180271  DELTA mini
+[D][ecoflow] DCEBZ8ZF2230701  DELTA Pro (104)
+[D][ecoflow] DCEBZ8ZE9250273  DELTA Pro (xama)
+[D][ecoflow] R331ZEB4ZEBW0026 DELTA 2
+[I][mqtt] MQTT connect fail    [broker.hivemq.com:1883]
+[I][ecoflow] mqtt-e.ecoflow.com:8883 account=app-d60c0ab5fc0b466f8f02762e8011935f, subscriptions: 8
+[I][app] FlipButton GPIO PIN=9
+[I][dino] layout 160x80 ground=73 player=22x24 apex=34 kinds=2
+[I][app] Dino game setup done (hi <n>)
+[I][app] ================ Display 160x80
+[I][app] ConfigStorage load done
+[I][app] 	- clock = ON
+[I][app] 	- auto-brightness = false
+[I][app] 	- brightness = 1
+[I][app]
+[D][app] free heap memory: <n>
+[I][app]
+[I][app] > Ready. Enter 'list' for comand list.

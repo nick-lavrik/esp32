@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #endif
 #include <Logger.hpp>
+#include <NetworkSupervisor.hpp>
 
 #include <string>
 #include <vector>
@@ -24,52 +25,14 @@ const char* password = WIFI_PASSWORD;
 // застосовувати перед КОЖНИМ WiFi.begin(), а не один раз на старті, бо після
 // AP-циклу режим радіо збивається. Тому setupWiFi() тут більше немає.
 
-#if defined(BOARD_ESP8266)
-// ESP8266 не має wifi_auth_mode_t/WIFI_AUTH_* (це ESP32 API) - тут ENC_TYPE_*
-// з ESP8266WiFiType.h (те, що повертає WiFi.encryptionType(i) на ESP8266)
-String WiFi_getAuthTypeName(uint8_t encryptionType) {
-  switch (encryptionType) {
-    case ENC_TYPE_NONE:
-      return String("OPEN");
-    case ENC_TYPE_WEP:
-      return String("WEP");
-    case ENC_TYPE_TKIP:
-      return String("WPA_PSK");
-    case ENC_TYPE_CCMP:
-      return String("WPA2_PSK");
-    case ENC_TYPE_AUTO:
-      return String("AUTO");
-    default:
-      return String("UNKNOWN");
-  }
-}
-// ESP8266 core не надає API для визначення бітмаски протоколів (802.11b/g/n) - немає аналога.
-#else
-// Функція повертає об'єкт String, використовуючи C++17 string_view для оптимізації
-String WiFi_getAuthTypeName(wifi_auth_mode_t authMode) {
-  switch (authMode) {
-    case WIFI_AUTH_OPEN:
-      return String("OPEN");
-    case WIFI_AUTH_WEP:
-      return String("WEP");
-    case WIFI_AUTH_WPA_PSK:
-      return String("WPA_PSK");
-    case WIFI_AUTH_WPA2_PSK:
-      return String("WPA2_PSK");
-    case WIFI_AUTH_WPA_WPA2_PSK:
-      return String("WPA_WPA2_PSK");
-    case WIFI_AUTH_WPA2_ENTERPRISE:
-      return String("WPA2_ENT");
-    case WIFI_AUTH_WPA3_PSK:
-      return String("WPA3_PSK");
-    case WIFI_AUTH_WPA2_WPA3_PSK:
-      return String("WPA2_WPA3_PSK");
-    default:
-      return String("UNKNOWN");
-  }
-}
+// WiFi_getAuthTypeName() переїхав у lib/NetworkSupervisor як
+// wifiAuthTypeName(): та сама функція була ще й у веб-порталі, з іншими
+// назвами станів. Тепер джерело одне (DRY, див. CLAUDE.md).
 
-// Функція для визначення стандарту Wi-Fi за маскою протоколів
+// Функція для визначення стандарту Wi-Fi за маскою протоколів.
+// ESP32-only: ESP8266 core не надає API для читання бітмаски протоколів
+// (802.11b/g/n) - аналога немає.
+#if !defined(BOARD_ESP8266)
 String WiFi_getProtocolName(uint8_t protocol_bitmap) {
   String protocols = "";
   if (protocol_bitmap & WIFI_PROTOCOL_11B) protocols += "802.11b ";
@@ -150,17 +113,13 @@ void WiFi_scan(const std::vector<std::string>& knownSsids = {}) {
     snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X", bssid[0], bssid[1],
              bssid[2], bssid[3], bssid[4], bssid[5]);
 
-#if defined(BOARD_ESP8266)
-    String securityStr = WiFi_getAuthTypeName(encryptionType);
-#else
-    String securityStr = WiFi_getAuthTypeName(static_cast<wifi_auth_mode_t>(encryptionType));
-#endif
+    const char* securityStr = wifiAuthTypeName(encryptionType);
 
     // .c_str() обов'язково - String через "..." до %s це UB, див.
     // SerialCommander::printUnknown().
     Logger::info("%-6s  %-32s  Infra  %4d  %4d    %-14s %s", inUse,
                  hidden ? "--" : scannedSsid.c_str(), (int)channel, (int)rssi,
-                 securityStr.c_str(), bssidStr);
+                 securityStr, bssidStr);
   }
 
   // Очищення пам'яті після сканування

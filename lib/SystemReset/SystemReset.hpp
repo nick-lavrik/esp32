@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Arduino.h>
+#include <Journal.hpp>
+#include <TLogger.hpp>
 #if defined(ESP32)
 #include "esp_system.h"
 #include "esp_task_wdt.h"
@@ -12,8 +14,15 @@ class SystemReset {
 public:
   // Штатний програмний reset
   static inline void reboot() {
-    Serial.println("[SystemReset] Rebooting...");
-    Serial.flush();
+    // Спершу залогувати, потім дренаж: журнал доставляє записи з таска помпи,
+    // тобто асинхронно, і без явного flush останні рядки перед ESP.restart()
+    // просто лишились би в кільці.
+    logger().info("rebooting");
+    Journal::instance().flushBlocking(300);
+    // Serial.flush() тут НЕ КЛИКАТИ: на USB CDC (setTxTimeoutMs(0)) він не
+    // дочікує TX, а викидає його - перевірено на 'bg-dump', де через це
+    // зникав хвіст файлу. Дренаж уже зробив flushBlocking(), лишається дати
+    // USB час вивезти буфер.
     delay(100);
     ESP.restart();
   }
@@ -23,8 +32,9 @@ public:
   // API відповідає esp_task_wdt_config_t (ESP-IDF v5+).
   static inline void rebootViaWatchdog(uint32_t timeoutMs = 1000) {
 #if defined(ESP32)
-    Serial.println("[SystemReset] Rebooting via watchdog...");
-    Serial.flush();
+    logger().info("rebooting via watchdog");
+    Journal::instance().flushBlocking(300);
+    delay(50);  // не Serial.flush(): див. reboot()
 
     esp_task_wdt_config_t config = {
         .timeout_ms = timeoutMs,
@@ -37,7 +47,7 @@ public:
     // достатньо додати поточну задачу.
     esp_err_t err = esp_task_wdt_init(&config);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-      Serial.printf("[SystemReset] esp_task_wdt_init failed: %s\n", esp_err_to_name(err));
+      logger().error("esp_task_wdt_init failed: %s", esp_err_to_name(err));
     }
 
     esp_task_wdt_add(NULL);
@@ -89,6 +99,14 @@ public:
 
   // Зручний метод для логування причини ресету при старті
   static inline void printLastResetReason() {
-    Serial.printf("[SystemReset] Last reset reason: %s\n", getLastResetReason());
+    logger().info("last reset reason: %s", getLastResetReason());
+  }
+
+private:
+  // Meyer's singleton, а не поле: клас статичний, а глобальний TLogger тут
+  // потрапив би в static-init разом із рештою - див. Journal::instance().
+  static const TLogger& logger() {
+    static const TLogger instance{"reset"};
+    return instance;
   }
 };

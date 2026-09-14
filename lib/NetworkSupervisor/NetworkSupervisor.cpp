@@ -1351,3 +1351,34 @@ void NetworkSupervisor::_notifyWpsTimeout() {
 void NetworkSupervisor::_notifyWpsPinGenerated(const std::string& pin) {
   for (auto& e : _listeners) e.listener->onWpsPinGenerated(pin);
 }
+
+// Див. коментар у NetworkSupervisor.hpp. Назви станів - ті, що історично
+// друкує 'scan'; веб-портал перейшов на них (data/www/index.html).
+#if defined(ESP8266)
+// ESP8266 не має wifi_auth_mode_t/WIFI_AUTH_* (це ESP32 API). WiFi.encryptionType()
+// повертає ENC_TYPE_* з ESP8266WiFiType.h; WPA3 і enterprise там відсутні.
+const char* wifiAuthTypeName(uint8_t encryptionType) {
+  switch (encryptionType) {
+    case ENC_TYPE_NONE: return "OPEN";
+    case ENC_TYPE_WEP: return "WEP";
+    case ENC_TYPE_TKIP: return "WPA_PSK";
+    case ENC_TYPE_CCMP: return "WPA2_PSK";
+    case ENC_TYPE_AUTO: return "AUTO";
+    default: return "UNKNOWN";
+  }
+}
+#else
+const char* wifiAuthTypeName(uint8_t encryptionType) {
+  switch (static_cast<wifi_auth_mode_t>(encryptionType)) {
+    case WIFI_AUTH_OPEN: return "OPEN";
+    case WIFI_AUTH_WEP: return "WEP";
+    case WIFI_AUTH_WPA_PSK: return "WPA_PSK";
+    case WIFI_AUTH_WPA2_PSK: return "WPA2_PSK";
+    case WIFI_AUTH_WPA_WPA2_PSK: return "WPA_WPA2_PSK";
+    case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2_ENT";
+    case WIFI_AUTH_WPA3_PSK: return "WPA3_PSK";
+    case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2_WPA3_PSK";
+    default: return "UNKNOWN";
+  }
+}
+#endif

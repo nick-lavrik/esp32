@@ -19,3 +19,6 @@ secrets.ini
 # data/network/ і їдуть на плату через 'pio run -t uploadfs'. Приклад файлу -
 # у docs/network_manager_guide.md.
 data/network/*.nmconnection
+
+# Кеш байткоду інструментів у tools/ - локальний, у git не потрібен
+__pycache__/

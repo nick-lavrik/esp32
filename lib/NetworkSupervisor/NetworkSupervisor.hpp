@@ -398,3 +398,20 @@ class NetworkSupervisor {
   int _mutex = 0;
 #endif
 };
+
+// Тип шифрування Wi-Fi у людський рядок.
+//
+// Живе тут, а не в src/, бо потрібен щонайменше трьом місцям: команді 'scan'
+// (src/wifi.h), розділу 'net device wifi list' і веб-порталу
+// (lib/WebPortal/WebWifiModule.cpp) - тобто і src/, і lib/. Раніше було дві
+// незалежні копії з РІЗНИМИ назвами станів ("OPEN" проти "open", "WPA2_PSK"
+// проти "WPA2"), хоча коментар в одній із них стверджував, що назви ті самі.
+//
+// Аргумент - те, що повертає WiFi.encryptionType(i): на ESP32 це
+// wifi_auth_mode_t (WIFI_AUTH_*), на ESP8266 - ENC_TYPE_* з ESP8266WiFiType.h.
+// Обидва влазять у uint8_t, розбір - у .cpp під #if.
+//
+// Повертає const char* на статичний літерал: без String, тобто без heap -
+// викликається в циклі по результатах скану.
+const char* wifiAuthTypeName(uint8_t encryptionType);
+

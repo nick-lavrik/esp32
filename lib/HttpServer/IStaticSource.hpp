@@ -17,7 +17,7 @@ public:
   virtual ~IStaticSource() = default;
 
   // Перевіряє, чи є в цьому джерелі контент за вказаним шляхом.
-  // Викликається на кожен запит у StaticRequestHandler::canHandle(),
+  // Викликається на кожен запит у StaticSourceHandler::canHandle(),
   // тому має бути дешевою операцією (без мережевих/довгих I/O викликів).
   virtual bool exists(const String& path) const = 0;
 

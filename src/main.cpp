@@ -128,6 +128,8 @@ using ActiveBulkReader = SdSpiBulkReader;
 #endif
 
 #include <AnalogSensor.hpp>
+#include <CommandQueue.hpp>
+#include <SerialSink.hpp>
 #include <CommandResponse.hpp>
 #include <ConfigStorage.hpp>
 #include <ConsoleMqtt.hpp>
@@ -138,15 +140,12 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <HttpServer.hpp>
 #include <ImageEffects.hpp>
 #include <JpegImage.hpp>
-#include <LittleFsStaticSource.hpp>
-#include <LogLevelManager.hpp>
 #include <Logger.hpp>
 #include <MqttClient.hpp>
 #include <MqttKeyGenerator.hpp>
 #include <MqttReplyTarget.hpp>
 #include <NtpService.hpp>
-#include <PrintQueue.hpp>
-#include <ScopedLogCapture.hpp>
+#include <Journal.hpp>
 #include <RwLock.hpp>
 #include <SerialCommander.hpp>
 #include <SystemReset.hpp>
@@ -156,7 +155,20 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <RouterClientListParser.hpp>
 #include <RouterClientListIterator.hpp>
 
-#include "ScreenLogTail.hpp"
+
+// HAS_WEB_PORTAL приходить з build_flags (див. platformio.ini). Як і
+// HAS_ECOFLOW_CLIENT, значення задається явно, а не виводиться з
+// __has_include: воно має бути однаковим і для компілятора, і для
+// IDE-індексатора.
+#ifndef HAS_WEB_PORTAL
+#define HAS_WEB_PORTAL 0
+#endif
+
+#if HAS_WEB_PORTAL
+#include <WebConsoleModule.hpp>
+#include <WebPortal.hpp>
+#include <WebWifiModule.hpp>
+#endif
 
 // HAS_ECOFLOW_CLIENT приходить з build_flags (див. platformio.ini, env з
 // PicoMQTT). Свідомо НЕ виводимо його тут з __has_include: значення має бути
@@ -173,6 +185,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include "setup.h"
 #include "wifi.h"
 #include "netcli.h"  // після wifi.h: netcli викликає WiFi_scan()
+#include "journalcli.h"
 #include "strip.h"
 
 #if BOARD_HAS_TOUCHSCREEN
@@ -300,6 +313,10 @@ TaskController scheduler;
 ConfigStorage configStorage;
 JpegImage spaceImage;
 SerialCommander commandHandler;
+
+// Один вхід для всіх джерел команд (serial, MQTT, веб, cron) і один виконавець
+// у loop(). Див. lib/CommandQueue.
+CommandQueue commandQueue;
 WiFiClient wifiClient;
 // PubSubClient client(wifiClient);
 
@@ -346,7 +363,6 @@ EcoflowClient ecoflow(makeEcoflowConfig());
 EcoflowDeviceRegistry ecoflowDevices;
 #endif
 
-LittleFsStaticSource littleFsSource(LittleFS);
 HttpServer httpServer(HttpServerConfig{});
 
 // Менеджер WiFi: тримає список мереж у NVS (namespace той самий, що й у
@@ -380,6 +396,18 @@ struct NetworkEventLogger : public INetworkSupervisorListener {
 };
 
 NetworkEventLogger networkEventLogger;
+
+#if HAS_WEB_PORTAL
+// Веб-портал. Живе незалежно від того, чи є підключення до роутера: коли
+// жодної збереженої мережі не видно, NetworkSupervisor піднімає власну точку
+// доступу ("ESP-<env>"), і сторінка доступна на ній - саме тоді вона й
+// потрібна найбільше. Тому httpServer.begin() робиться один раз на старті і
+// не гаситься при зміні стану мережі.
+WebWifiModule webWifiModule(netSupervisor);
+WebConsoleModule webConsoleModule(commandHandler,
+                                 [](const char* line) { return commandQueue.submit(line); });
+WebPortal webPortal(httpServer, configStorage);
+#endif
 
 // Хост і base64(login:password) приходять із secrets.ini через build_flags
 // (ROUTER_HOST / ROUTER_LOGIN_AUTHORIZATION) - раніше вони були захардкожені
@@ -469,28 +497,28 @@ void sendEmail() {
 #endif
 }
 
-// Виконує команду й віддає її вивід у target (див. lib/CommandResponse).
-//
-// Хендлери команд нічого про це не знають: увесь їхній вивід іде через TLogger,
-// а ScopedLogCapture дублює кожен рядок у CommandResponse. Тому у відповідь
-// потрапляє і те, що логують бібліотеки всередині команди (MqttClient,
-// SDCardInspector, EspPartitionInspector) - того, чого хендлер не контролює.
-//
-// finish() навмисно ПІСЛЯ закриття скоупу: доставка сама логує, і всередині
-// скоупу ці рядки пішли б у відповідь, яку вони ж доставляють.
-static void runCommandWithResponse(const char* line, std::shared_ptr<ResponseTarget> target) {
-  static TLogger _logger{"cmd.reply"};
+// printf для машинних дампів: форматує в буфер і віддає в SerialSink::writeRaw()
+// - повз журнал, але під тим самим замком, що й приймач. Єдиний користувач -
+// 'bg-dump' (див. коментар у SerialSink.hpp, чому виняток саме тут).
+static uint32_t rawLost = 0;   // шматків, які не вийшли цілими
+static uint32_t rawBytes = 0;  // скільки байтів віддано в Serial (звіряти з отриманим)
 
-  CommandResponse response(std::move(target));
-  {
-    ScopedLogCapture capture(response);
-    // Луна команди - вже ПІД скоупом, щоб потрапила і в консоль, і у
-    // відповідь: підписник reply-топіка бачить лише вивід і без неї не знав
-    // би, на що саме цей вивід.
-    _logger.info("> %s", line);
-    commandHandler.execute(line);
-  }
-  response.finish();
+static void rawPrintf(const char* fmt, ...) {
+  char buf[160];
+  va_list args;
+  va_start(args, fmt);
+  const int written = vsnprintf(buf, sizeof(buf), fmt, args);
+  va_end(args);
+  if (written <= 0) return;
+  const size_t length = (size_t)written < sizeof(buf) ? (size_t)written : sizeof(buf) - 1;
+  if (!SerialSink::writeRaw(buf, length)) ++rawLost; else rawBytes += length;
+
+}
+
+// Кладе команду в чергу; вивід піде в target (див. lib/CommandQueue).
+// Повертає false, якщо черга повна - джерело мусить сказати про це вголос.
+static bool queueCommand(const char* line, std::shared_ptr<ResponseTarget> target = {}) {
+  return commandQueue.submit(line, std::move(target));
 }
 
 #if HAS_MQTT_CLIENT
@@ -513,40 +541,37 @@ AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 #endif
 
 #if BOARD_HAS_TOUCHSCREEN
-// За замовчуванням дотики йдуть у debug, а DEFAULT_LOG_LEVEL=3 (info) їх не
-// пропускає - тобто в консолі порожньо навіть коли тач справний. Прапорець
-// нижче (команда "touchlog on") піднімає їх до info на час налагодження, не
-// засмічуючи звичайний вивід.
-bool touchLogVerbose = false;
+// Увесь тач логується в debug під власним тегом, а DEFAULT_LOG_LEVEL=3 (info)
+// debug ріже - тобто в звичайному режимі тут тихо, як і має бути. Щоб побачити
+// дотики під час налагодження: 'journal level touch debug'.
+//
+// Раніше цього не вміли, тому існувала окрема команда 'touchlog on|off' і
+// глобальний прапорець, що піднімав рівень одного повідомлення до info. І
+// команда, і прапорець зникли: керування рівнем за тегом тепер спільне.
+static const TLogger touchLog{"touch"};
 
 // Підписаний на onTouch (момент НАТИСКАННЯ), а не на onClick: для перевірки
 // «чи взагалі бачить панель і чи не з'їхав мапер» потрібен кожен дотик, тоді
 // як onClick мовчить, якщо жест виявився свайпом або переріс у hold - саме в
 // тих випадках, коли причину й шукають.
-void onTouchLog(TouchPoint p) {
-  if (touchLogVerbose) {
-    Logger::info("Touch: %d, %d", p.x, p.y);
-  } else {
-    Logger::debug("Touch: %d, %d", p.x, p.y);
-  }
-}
-void onHoldHandler(TouchPoint p, unsigned long ms) { Logger::debug("Hold at %d,%d for %lu ms", p.x, p.y, ms); }
-void onDblClickHandler(TouchPoint p) { Logger::debug("Double click: %d, %d\n", p.x, p.y); }
+void onTouchLog(TouchPoint p) { touchLog.debug("Touch: %d, %d", p.x, p.y); }
+void onHoldHandler(TouchPoint p, unsigned long ms) { touchLog.debug("Hold at %d,%d for %lu ms", p.x, p.y, ms); }
+void onDblClickHandler(TouchPoint p) { touchLog.debug("Double click: %d, %d\n", p.x, p.y); }
 
-void onSwipeLeftHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe LEFT"); }
-void onSwipeRightHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe RIGHT"); }
-void onSwipeUpHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe UP"); }
-void onSwipeDownHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe DOWN"); }
+void onSwipeLeftHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe LEFT"); }
+void onSwipeRightHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe RIGHT"); }
+void onSwipeUpHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe UP"); }
+void onSwipeDownHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe DOWN"); }
 
 void onSwipeFromBottomHandler(TouchPoint start, TouchPoint end) {
-  Logger::debug("Swipe FROM BOTTOM (e.g. open menu)");
+  touchLog.debug("Swipe FROM BOTTOM (e.g. open menu)");
 }
 void onSwipeFromTopHandler(TouchPoint start, TouchPoint end) {
-  Logger::debug("Swipe FROM TOP (e.g. notification shade)");
+  touchLog.debug("Swipe FROM TOP (e.g. notification shade)");
 }
-void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end) { Logger::debug("Swipe FROM LEFT (e.g. back)"); }
+void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe FROM LEFT (e.g. back)"); }
 void onSwipeFromRightHandler(TouchPoint start, TouchPoint end) {
-  Logger::debug("Swipe FROM RIGHT (e.g. side panel)");
+  touchLog.debug("Swipe FROM RIGHT (e.g. side panel)");
 }
 
 void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
@@ -1057,33 +1082,37 @@ void setupEcoflow() {
     ecoflow.syncSnapshotsAsync();
   });
 
-  scheduler.addCronTask(60 * 1000UL, []() { commandHandler.execute("ecoflow"); });
+  scheduler.addCronTask(60 * 1000UL, []() {
+    if (!queueCommand("ecoflow")) _logger.warn("command queue full, cron 'ecoflow' skipped");
+  });
 
   // command: ecoflow
   commandHandler.registerCommand("ecoflow", "show EcoFlow cloud MQTT status", [](const String args) {
-    _logger.info("========== ECOFLOW ==========");
-    _logger.info("connected = %s, account = %s", ecoflow.isConnected() ? "yes" : "no",
+    char buf[20] = "";
+    _logger.info("================= ECOFLOW ================= %s ================",
+      ntp.ftime("%Y-%m-%d %H:%M:%S", buf, sizeof(buf)));
+    _logger.debug("connected = %s, account = %s", ecoflow.isConnected() ? "yes" : "no",
                  ecoflow.account().c_str());
-    _logger.info("broker = %s:%d, channel = %s, verbose = %s", ECOFLOW_MQTT_HOST,
+    _logger.debug("broker = %s:%d, channel = %s, verbose = %s", ECOFLOW_MQTT_HOST,
                  ECOFLOW_MQTT_PORT, EcoflowClient::channelName(ecoflow.channel()),
                  ecoflowVerbose ? "on" : "off");
     // TLS-сесія - найбільший споживач heap у цьому клієнті, тому цифри тут
     // корисніші за загальний 'dump-heap': саме вони кажуть, чи пройде REST.
-    _logger.info("running = %s, heap = %u B free, largest block = %u B",
+    _logger.debug("running = %s, heap = %u B free, largest block = %u B",
                  ecoflow.isRunning() ? "yes" : "no", (unsigned)ESP.getFreeHeap(),
                  (unsigned)ESP.getMaxAllocHeap());
     // Запас стеку мережевого таска: підстава змінювати MqttConfig::taskStackSize.
-    _logger.info("net task stack headroom = %u B", (unsigned)ecoflow.networkStackHeadroom());
+    _logger.debug("net task stack headroom = %u B", (unsigned)ecoflow.networkStackHeadroom());
     if (ecoflow.lastError().length() > 0) {
       _logger.warn("last error: %s", ecoflow.lastError().c_str());
     }
 
-    _logger.info("messages received = %u, last topic = %s", ecoflow.messageCount(),
+    _logger.debug("messages received = %u, last topic = %s", ecoflow.messageCount(),
                  ecoflow.lastTopic().length() > 0 ? ecoflow.lastTopic().c_str() : "(none)");
 
     const char* separator = "-------------------------------";
 
-    _logger.info("");
+    _logger.debug("");
     _logger.info("%-1s %-16s %-18s %-7s %6s %-9s %7s %9s", "#", "SERIAL", "NAME", "STATUS",
                  "CHARGE", "GRID", "LEFT", "AGE");
     _logger.info("%.1s %.16s %.18s %.7s %.6s %.9s %.7s %.9s", separator, separator, separator, separator,
@@ -1408,7 +1437,12 @@ void setupMqttClient() {
     // Вивід команди повертається в "command/<client-id>/reply" - той самий
     // текст, що йде в serial-монітор (луну команди логує сам
     // runCommandWithResponse, тому окремий warn тут більше не потрібен).
-    runCommandWithResponse(payload, mqttReplyTarget());
+    if (!queueCommand(payload, mqttReplyTarget())) {
+      // Явна відмова, а не тиша: інакше відправник чекав би відповіді, якої
+      // не буде. Публікуємо прямо в reply-топік, повз чергу.
+      mqtt.publish("command/" MQTT_CLIENT_ID "/reply", "busy: command queue is full");
+      _logger.warn("command queue full, rejected: %s", payload);
+    }
   });
   #endif
 
@@ -1487,8 +1521,8 @@ void setupMqttClient() {
 #if HAS_CONSOLE_MQTT
   commandHandler.registerCommand(
     "console-mqtt",
-    "mirror the console to MQTT: console-mqtt [on|off | allow <re> | deny <re> | "
-    "clear allow|deny | test <line>]",
+    "mirror the console to MQTT: console-mqtt [on|off | allow <tag> | deny <tag> | "
+    "clear allow|deny | test <tag>]",
     [](const String args) {
       String rest = args;
       rest.trim();
@@ -1498,8 +1532,8 @@ void setupMqttClient() {
         return;
       }
 
-      // Перший токен - підкоманда, решта рядка - її аргумент "як є": патерн
-      // може містити пробіли ("took [0-9]{3,} ms"), тому далі не ріжемо.
+      // Перший токен - підкоманда, решта рядка - її аргумент. Тег пробілів не
+      // містить, але ріжемо так само: зайвий пробіл у кінці зніме trim().
       String verb = rest;
       String value = "";
       const int space = rest.indexOf(' ');
@@ -1516,7 +1550,7 @@ void setupMqttClient() {
 
       if (verb.equalsIgnoreCase("test")) {
         if (value.length() == 0) {
-          _logger.info("use: console-mqtt test <line>");
+          _logger.info("use: console-mqtt test <tag>");
           return;
         }
         _logger.info("'%s' -> %s", value.c_str(), consoleMqtt.wouldPass(value.c_str()) ? "pass" : "blocked");
@@ -1535,13 +1569,14 @@ void setupMqttClient() {
           _logger.info("use: console-mqtt clear allow|deny");
           return;
         }
-        _logger.info("%s rules cleared (built-in ones stay)", value.c_str());
+        _logger.info("%s rules cleared", value.c_str());
         return;
       }
 
       if (isAllow || isDeny) {
         if (value.length() == 0) {
-          _logger.info("use: console-mqtt %s <POSIX extended regexp>", verb.c_str());
+          _logger.info("use: console-mqtt %s <tag> (hierarchical: 'mqtt' covers 'mqtt.send')",
+                       verb.c_str());
           return;
         }
         char error[96] = "";
@@ -1553,7 +1588,8 @@ void setupMqttClient() {
         return;
       }
 
-      _logger.info("use: console-mqtt [on|off | allow <re> | deny <re> | clear allow|deny | test <line>]");
+      _logger.info("use: console-mqtt [on|off | allow <tag> | deny <tag> | clear allow|deny | "
+                   "test <tag>]");
     }
   );
 #endif
@@ -3064,6 +3100,61 @@ void dumpStatus(const String& section) {
 }
 
 void setupSerialCommander() {
+#if HAS_WEB_PORTAL
+  // Пароль порталу інакше можна було б задати лише з самого порталу - тобто
+  // з відкритої сторінки, яку до першого пароля бачить уся мережа. Тому
+  // креденшели ставляться з консолі.
+  commandHandler.registerCommand(
+      "web", "web portal: status | auth <user> <pass> | auth off", [](const String args) {
+        static TLogger _log{"web"};
+        String rest = args;
+        rest.trim();
+
+        if (rest.length() == 0 || rest.startsWith("status")) {
+          _log.info("server   : %s", webPortal.isRunning() ? "running" : "stopped");
+          _log.info("auth     : %s", httpServer.hasAuth() ? "on (HTTP Basic)" : "off - open to everyone");
+          _log.info("jobs     : %u pending", (unsigned)webPortal.jobs().pending());
+          if (WiFi.isConnected()) _log.info("url      : http://%s/", WiFi.localIP().toString().c_str());
+          if (netSupervisor.state() == NetworkSupervisorState::AP_MODE) {
+            _log.info("hotspot  : http://%s/", WiFi.softAPIP().toString().c_str());
+          }
+          return;
+        }
+
+        if (!rest.startsWith("auth")) {
+          _log.warn("use: web status | web auth <user> <pass> | web auth off");
+          return;
+        }
+
+        rest = rest.substring(4);
+        rest.trim();
+
+        if (rest == "off") {
+          webPortal.setCredentials("", "");
+          _log.warn("auth disabled, restart to apply");
+          return;
+        }
+
+        const int space = rest.indexOf(' ');
+        if (space <= 0) {
+          _log.warn("use: web auth <user> <pass> | web auth off");
+          return;
+        }
+
+        String user = rest.substring(0, space);
+        String pass = rest.substring(space + 1);
+        user.trim();
+        pass.trim();
+        if (user.length() == 0 || pass.length() == 0) {
+          _log.warn("both user and password are required");
+          return;
+        }
+
+        webPortal.setCredentials(user, pass);
+        _log.warn("credentials saved for '%s', restart to apply", user.c_str());
+      });
+#endif
+
   // Фрагментація важливіша за сам обсяг вільного heap: алокація падає, коли
   // немає ОДНОГО суцільного блоку потрібного розміру, навіть якщо сумарно
   // вільно вдесятеро більше. largest/free і є цим показником.
@@ -3132,33 +3223,65 @@ void setupSerialCommander() {
       }
 
       // Глушимо логи на весь час дампу: інакше чужий рядок вклиниться ПОСЕРЕДИНІ
-      // рядка з пікселями (MQTT сипле логи щосекунди, а дамп триває ~35 с) -
-      // і фільтр по префіксу в './esp bg-save' такого вже не врятує.
-      const LogLevel savedLevel = LogLevelManager::instance().getDefaultLevel();
-      LogLevelManager::instance().setDefaultLevel(LogLevel::Error);
+      // рядка з пікселями (MQTT сипле логи щосекунди, а дамп триває десятки
+      // секунд) - і фільтр по префіксу в './esp bg-save' такого вже не врятує.
+      const LogLevel savedLevel = Journal::instance().defaultLevel();
+      Journal::instance().setDefaultLevel(LogLevel::Error);
 
-      Serial.printf("// generated by 'bg-dump' from %s (%ux%u, effects applied)\n",
-                    LITTLEFS_BACKGROUND_IMAGE, (unsigned)width, (unsigned)height);
-      Serial.println("#pragma once");
-      Serial.println("#include <pgmspace.h>");
-      Serial.println("#define HAS_BACKGROUND_PROGMEM_RGB565 1");
-      Serial.printf("#define BACKGROUND_PROGMEM_WIDTH  %u\n", (unsigned)width);
-      Serial.printf("#define BACKGROUND_PROGMEM_HEIGHT %u\n", (unsigned)height);
+      // І ОКРЕМО - лог самого ESP-IDF. Він пише в UART напряму, повз журнал і
+      // повз замок SerialSink, тому наш фільтр рівня на нього не діє. Перевірено
+      // на залізі: у дамп влізло "[E][ssl_client.cpp:127] ... Host is
+      // unreachable" від ecoflow, який саме перепідключався.
+      const esp_log_level_t savedIdfLevel = esp_log_level_get("*");
+      esp_log_level_set("*", ESP_LOG_NONE);
+      rawLost = 0;
+      rawBytes = 0;
+
+      // Сирий вивід повз журнал - інакше кожен рядок дістав би префікс
+      // "[I][tag    ] " і заголовок не скомпілювався б. SerialSink::writeRaw()
+      // пише під тим самим замком, що й приймач журналу, і чекає місця в TX
+      // (див. коментар у SerialSink.hpp).
+      rawPrintf("// generated by 'bg-dump' from %s (%ux%u, effects applied)\n",
+                LITTLEFS_BACKGROUND_IMAGE, (unsigned)width, (unsigned)height);
+      rawPrintf("#pragma once\n");
+      rawPrintf("#include <pgmspace.h>\n");
+      rawPrintf("#define HAS_BACKGROUND_PROGMEM_RGB565 1\n");
+      rawPrintf("#define BACKGROUND_PROGMEM_WIDTH  %u\n", (unsigned)width);
+      rawPrintf("#define BACKGROUND_PROGMEM_HEIGHT %u\n", (unsigned)height);
       // Розмір масиву - width*height ЕЛЕМЕНТІВ по 2 байти (не width*height*2:
       // це вдвічі більше, ніж потрібно).
-      Serial.printf("const uint16_t background_progmem_rgb565[%uu * %uu] PROGMEM = {\n",
-                    (unsigned)width, (unsigned)height);
+      rawPrintf("const uint16_t background_progmem_rgb565[%uu * %uu] PROGMEM = {\n",
+                (unsigned)width, (unsigned)height);
 
+      // Пікселі йдуть пачками по 16 значень в один writeRaw(): 24 тисячі
+      // окремих викликів коштували б 24 тисячі захоплень замка.
       const uint32_t total = (uint32_t)width * height;
+      char row[16 * 7 + 2];
+      size_t used = 0;
       for (uint32_t i = 0; i < total; i++) {
-        Serial.printf("0x%04X,", pixels[i]);
-        if ((i + 1) % 16 == 0) { Serial.println(); }
+        used += snprintf(row + used, sizeof(row) - used, "0x%04X,", pixels[i]);
+        if ((i + 1) % 16 == 0 || i + 1 == total) {
+          used += snprintf(row + used, sizeof(row) - used, "\n");
+          if (!SerialSink::writeRaw(row, used)) ++rawLost; else rawBytes += used;
+          used = 0;
+        }
       }
-      Serial.println();
-      Serial.println("};");
-      Serial.flush();
+      rawPrintf("};\n");
 
-      LogLevelManager::instance().setDefaultLevel(savedLevel);
+      // Serial.flush() ТУТ НЕ КЛИКАТИ. На USB CDC цієї плати він не дочікує
+      // TX, а ВИКИДАЄ його: з flush() наприкінці дамп регулярно приїжджав без
+      // "};" і без хвоста останнього рядка, а спроба флашити кожні 64 рядки
+      // з'їдала 1700 значень із 12800. Без нього три прогони поспіль дали
+      // рівно 90701 байт - стільки ж, скільки пристрій віддав у Serial.
+      // Замість флашу - пауза: USB встигає вивезти буфер сам.
+      delay(200);
+
+      esp_log_level_set("*", savedIdfLevel);
+      Journal::instance().setDefaultLevel(savedLevel);
+      _log.debug("dump: %u bytes handed to serial", (unsigned)rawBytes);
+      if (rawLost > 0) {
+        _log.error("dump incomplete: %u chunk(s) did not fit into serial TX", (unsigned)rawLost);
+      }
     }
   );
 #endif
@@ -3175,9 +3298,9 @@ void setupSerialCommander() {
     mqtt.flushOutgoing(500);
 #endif
 #if defined(BOARD_ESP8266)
-    Serial.println("[SystemReset] Rebooting...");
-    Serial.flush();
-    delay(100);
+    Logger::info("rebooting");
+    Journal::instance().flushBlocking(300);
+    delay(100);  // не Serial.flush(): на USB CDC він викидає TX, а не дочікує
     ESP.restart();
 #else
         SystemReset::reboot();
@@ -3185,6 +3308,17 @@ void setupSerialCommander() {
   });
 
   registerNetCommand(commandHandler, netSupervisor);
+  registerJournalCommand(commandHandler);
+
+  // Єдиний виконавець команд і єдиний вхід. Читач serial більше не виконує
+  // рядок сам - він кладе його в чергу, як і MQTT, веб та cron.
+  commandQueue.begin([](const char* line) { commandHandler.execute(line); });
+  commandHandler.setLineHandler([](const String& line) {
+    static const TLogger log{"cmd"};
+    if (!queueCommand(line.c_str())) {
+      log.warn("busy: command queue is full (%u slots), try again", (unsigned)CommandQueue::kSlots);
+    }
+  });
   // 'scan' лишається як коротший псевдонім 'net device wifi list'
   commandHandler.registerCommand("scan", "scan WiFi networks (alias of 'net device wifi list')",
                                  [](const String& args) {
@@ -3228,7 +3362,9 @@ void setupSerialCommander() {
                                                     nullptr
 #endif
         );
-        runCommandWithResponse(command.c_str(), std::move(target));
+        // ПРЯМО ЗАРАЗ, повз чергу: вкладена команда мусить виконатись у цьому
+        // ж виклику, інакше лист пішов би без її виводу.
+        commandQueue.runNow(command.c_str(), std::move(target));
       });
   commandHandler.registerCommand("sendmail", "send an SMTP smoke-test email to " GMAIL_TEST_RECIPIENT,
                                  [](const String& args) { sendEmail(); });
@@ -3333,44 +3469,13 @@ void setupSerialCommander() {
         // примусового download-boot зберігається в RTC-домені, тому переживає
         // перезапуск ядра.
         Logger::warn("rebooting into bootloader (download mode)");
-        Serial.flush();
-        delay(100);
+        Journal::instance().flushBlocking(300);
+        delay(100);  // не Serial.flush(): на USB CDC він викидає TX, а не дочікує
         REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
         esp_restart();
       });
 #endif
 
-#if SCREEN_LOG_TAIL_LINES > 0
-  commandHandler.registerCommand(
-      "history", "print the buffered tail of the log (last SCREEN_LOG_TAIL_LINES lines)",
-      [](const String& args) {
-        ScreenLogTail& tail = screenLogTail();
-        const size_t n = tail.count();
-
-        if (n == 0) {
-          Logger::info("history: buffer is empty");
-          return;
-        }
-
-        // pause() обов'язковий: інакше рядки, які ми ЗАРАЗ друкуємо, самі
-        // потраплять у той самий кільцевий буфер і витіснять з нього
-        // справжню історію ще під час друку.
-        tail.pause();
-
-        // Пишемо напряму в Serial під тим самим rwlock, яким користується
-        // логер, а не через Logger::info(): рядки в буфері ВЖЕ містять свій
-        // префікс "[I][tag ] ", і друк через логер додав би поверх нього
-        // другий.
-        rwlock::write(Serial, 50, []() { Serial.println("=== log history (oldest first) ==="); });
-        for (size_t i = 0; i < n; ++i) {
-          const char* logLine = tail.line(i);
-          rwlock::write(Serial, 50, [logLine]() { Serial.println(logLine); });
-        }
-        rwlock::write(Serial, 50, []() { Serial.println("=== end of history ==="); });
-
-        tail.resume();
-      });
-#endif
 #if BOARD_HAS_SD && !defined(SD_USE_SDMMC)
   commandHandler.registerCommand(
       "sdprobe", "low-level TF card probe over SPI: sdprobe [force] (force demounts the card until reboot)",
@@ -3418,21 +3523,6 @@ void setupSerialCommander() {
 #endif
 
   commandHandler.registerCommand("flip", "flip display (180)", [](const String& args) { display_flip(); });
-
-#if BOARD_HAS_TOUCHSCREEN
-  commandHandler.registerCommand("touchlog", "log touch coordinates at info level: touchlog on|off",
-                                 [](const String& args) {
-                                   if (args.equalsIgnoreCase("on")) {
-                                     touchLogVerbose = true;
-                                   } else if (args.equalsIgnoreCase("off")) {
-                                     touchLogVerbose = false;
-                                   } else {
-                                     Logger::info("use: touchlog on|off");
-                                     return;
-                                   }
-                                   Logger::info("touchlog = %s", touchLogVerbose ? "on" : "off");
-                                 });
-#endif
 
 #if defined(I2C_SDA) && defined(I2C_SCL)
   commandHandler.registerCommand("i2cscan", "scan I2C bus and list device addresses",
@@ -4118,6 +4208,24 @@ void setupNetworkSupervisor() {
                (unsigned)netSupervisor.connections().size());
 }
 
+#if HAS_WEB_PORTAL
+// Піднімає портал ОДИН раз і назавжди. Свідомо без жодної перевірки
+// WiFi.isConnected(): AsyncWebServer слухає на всіх інтерфейсах lwIP, тож той
+// самий сервер обслуговує і домашню мережу, і AP-fallback. Прив'язка до
+// стану мережі лише створила б вікно, коли пристрій уже підняв точку доступу,
+// а портал на ній ще не відповідає.
+void setupWebPortal() {
+  webPortal.addModule(&webWifiModule);
+  webPortal.addModule(&webConsoleModule);
+
+  if (!webPortal.begin()) {
+    Logger::error("WebPortal setup failed");
+    return;
+  }
+  Logger::info("WebPortal setup done");
+}
+#endif
+
 void setupTaskCommander() {}
 
 void setupLightSensor() {
@@ -4283,28 +4391,6 @@ void drawSystemInfo() {
     display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
   #endif
 
-  #if SCREEN_LOG_TAIL_LINES > 0
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
-  display.println("------------------------------------");
-  #if BOARD_TTGO_T1 || BOARD_ST7789
-  int skip = 11; // hide loglevel and tag
-  #elif BOARD_ESP32_S3_LCD147
-  int skip = 11; // hide loglevel only!
-  #else
-  int skip = 0;
-  #endif
-
-  ScreenLogTail& tail = screenLogTail();
-  // Цикл іде від НАЙНОВІШОГО (count-1) до найстарішого (0) - найсвіжіший рядок
-  // опиняється зверху. (Попередній коментар тут стверджував протилежне.)
-  for (size_t i = tail.count(); i ;--i) {
-    const char* logLine = tail.line(i - 1);
-    // skip обрізає префікс "[I][tag ] " - але тільки якщо рядок реально
-    // довший за нього. Інакше logLine + skip вказував би ЗА '\0', у застарілі
-    // байти попереднього, довшого рядка того ж слота (сміття на екрані).
-    display.println(strlen(logLine) > (size_t)skip ? logLine + skip : logLine);
-  }
-  #endif
 #endif
 
   // Візуальний бар пам'яті
@@ -4722,6 +4808,13 @@ void setup() {
   setupTouchScreen();
   setupImu();
   setupNetworkSupervisor();
+#if HAS_WEB_PORTAL
+  // Після setupNetworkSupervisor(): мережевий стек має бути ініціалізований
+  // (WiFi.mode() всередині FSM), інакше AsyncTCP піднімається на ще
+  // неіснуючому інтерфейсі. Самого ПІДКЛЮЧЕННЯ чекати не треба - його може
+  // не бути взагалі.
+  setupWebPortal();
+#endif
   setupNtpService();
   setupBackgroundImage();
   setupTaskCommander();
@@ -4736,10 +4829,6 @@ void setup() {
   setupDinoGame();  // після setupDisplay()/setupTouchScreen(): треба готові розміри екрана
   setupWiFiIcon();
   loadConfig();
-
-  // httpServer.setStaticSource(&littleFsSource);
-  // // httpServer.setEventDispatcher(&dispatcher);
-  // httpServer.begin();
 
   display.flush();
   // testAsusWRT();
@@ -4771,7 +4860,9 @@ void loop() {
 #endif
 
   display.startWrite();
-  PrintQueue::flush();
+  // На ESP32 журнал дренажить власний таск; тут — щоб та сама гілка працювала
+  // на ESP8266, де RTOS немає. Повторний виклик безпечний: помпа одна за раз.
+  Journal::instance().pump();
 
 #if HAS_DINO_GAME
   const bool dinoOn = dinoActive && dinoRenderer.ready();
@@ -4836,6 +4927,16 @@ void loop() {
   #endif
 
   commandHandler.update();
+  // Один виконавець на всі джерела, не більше однієї команди за ітерацію:
+  // команда може блокувати на десятки секунд (sdbench, sdmap, scan).
+  commandQueue.runNext();
+#if HAS_WEB_PORTAL
+  // Тут виконуються задачі, поставлені з HTTP: скан ефіру, connect, запис у
+  // NVS. У таску сервера їм не місце - вони блокують на секунди (див.
+  // WebJobQueue.hpp). Serial-команди з веб-консолі сюди більше не ходять - з
+  // етапу 6 вони йдуть у CommandQueue разом з рештою джерел.
+  webPortal.loop();
+#endif
 #if HAS_DINO_GAME
   if (showClock && !dinoOn && !dinoTestMode) drawTime();
 #else

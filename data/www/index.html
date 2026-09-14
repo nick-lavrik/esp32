@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 portal</title>
+<style>
+:root {
+  --bg: #14171c; --panel: #1c2027; --line: #2b313b; --text: #e6e9ef;
+  --muted: #8b94a3; --accent: #4da3ff; --ok: #4cc38a; --warn: #e0a33e; --err: #e5534b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+header .spacer { flex: 1; }
+#devstate { color: var(--muted); font-size: 12px; }
+nav { display: flex; gap: 4px; padding: 8px 16px 0; }
+nav button { background: none; border: 1px solid transparent; border-bottom: none;
+  color: var(--muted); padding: 7px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit; }
+nav button.active { background: var(--panel); border-color: var(--line); color: var(--text); }
+main { padding: 0 16px 24px; }
+section { display: none; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 0 8px 8px 8px; padding: 16px; }
+section.active { display: block; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: 20px 0 8px; font-weight: 600; }
+h2:first-child { margin-top: 0; }
+button.act { background: var(--accent); border: none; color: #06121f; padding: 7px 14px;
+  border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; }
+button.act.ghost { background: none; border: 1px solid var(--line); color: var(--text); font-weight: 400; }
+button.act:disabled { opacity: .5; cursor: default; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+input, select { background: var(--bg); border: 1px solid var(--line); color: var(--text);
+  padding: 7px 10px; border-radius: 6px; font: inherit; }
+input:focus, select:focus { outline: 1px solid var(--accent); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; }
+#log { background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+  height: 55vh; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#log .e { color: var(--err); } #log .w { color: var(--warn); }
+#log .d { color: var(--muted); } #log .cmd { color: var(--accent); }
+#cmd { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel);
+  border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px;
+  padding: 10px 14px; max-width: 60vw; display: none; }
+.muted { color: var(--muted); }
+@media (max-width: 560px) { dl { grid-template-columns: 1fr; } th.opt, td.opt { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>ESP32 portal</h1>
+  <span id="devstate">connecting…</span>
+  <span class="spacer"></span>
+  <span id="heap" class="muted"></span>
+</header>
+
+<nav>
+  <button data-tab="wifi" class="active">Wi-Fi</button>
+  <button data-tab="console">Console</button>
+</nav>
+
+<main>
+<section id="tab-wifi" class="active">
+  <h2>Status</h2>
+  <dl id="wifi-status"></dl>
+
+  <h2>Actions</h2>
+  <div class="row">
+    <button class="act" id="btn-scan">Scan networks</button>
+    <button class="act ghost" id="btn-reconnect">Reconnect</button>
+    <button class="act ghost" id="btn-hotspot">Start hotspot</button>
+    <button class="act ghost" id="btn-hotspot-stop">Stop hotspot</button>
+  </div>
+
+  <h2>Networks in range</h2>
+  <table id="scan-table"><tbody><tr><td class="muted">Press “Scan networks”.</td></tr></tbody></table>
+
+  <h2>Saved profiles</h2>
+  <table id="profiles">
+    <thead><tr><th>SSID</th><th class="opt">Priority</th><th class="opt">Signal</th><th>State</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<section id="tab-console">
+  <h2>Log <span id="feed" class="muted" style="font-size:.75em; font-weight:400; cursor:pointer"></span></h2>
+  <div id="log"></div>
+  <h2>Command</h2>
+  <form class="row" id="cmd-form">
+    <input id="cmd" list="cmd-list" autocomplete="off" placeholder="type a command, e.g. list">
+    <datalist id="cmd-list"></datalist>
+    <button class="act" type="submit">Run</button>
+  </form>
+  <p class="muted" id="cmd-hint">Output appears in the log above. Prompt history: ↑ / ↓.</p>
+</section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+const $ = (sel) => document.querySelector(sel);
+
+function toast(text, kind) {
+  const el = $("#toast");
+  el.textContent = text;
+  el.style.borderLeftColor = kind === "err" ? "var(--err)" : kind === "ok" ? "var(--ok)" : "var(--accent)";
+  el.style.display = "block";
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { el.style.display = "none"; }, 4000);
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (res.status === 401) { toast("Authentication required", "err"); throw new Error("unauthorized"); }
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((body && body.error) || ("HTTP " + res.status));
+  return body;
+}
+
+function form(fields) {
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(fields)) body.set(k, v);
+  return { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } };
+}
+
+// Мутації сервер виконує не одразу, а в loop() - тому кожна відповідає
+// номером задачі, а результат забираємо опитуванням /api/job.
+async function job(path, options) {
+  const started = await api(path, options);
+  if (!started || !started.jobId) return started;
+
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    const state = await api("/api/job?id=" + started.jobId);
+    if (state.status === "done") return state.result;
+    if (state.status === "expired") throw new Error("Job result expired");
+  }
+  throw new Error("Job timed out");
+}
+
+/* ---------------- tabs ---------------- */
+
+document.querySelectorAll("nav button").forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
+    document.querySelectorAll("section").forEach((s) =>
+      s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
+    // Свіжий знімок одразу при відкритті - щоб вкладка не показувала старе,
+    // поки не настане наступний тік.
+    if (btn.dataset.tab === "wifi") refreshWifi();
+  };
+});
+
+/* ---------------- wi-fi ---------------- */
+
+function signal(rssi) {
+  if (!rssi) return "–";
+  const bars = rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -80 ? 2 : 1;
+  return "▮".repeat(bars) + "▯".repeat(4 - bars) + " " + rssi + " dBm";
+}
+
+function renderStatus(s) {
+  const ap = s.ap || {};
+  $("#devstate").textContent = s.connected ? s.ssid + " · " + s.ip
+    : ap.active ? "hotspot " + ap.ssid : s.state;
+  $("#wifi-status").innerHTML = [
+    ["State", s.state],
+    ["SSID", s.ssid || "–"],
+    ["IP address", s.ip || "–"],
+    ["Signal", s.connected ? signal(s.rssi) : "–"],
+    ["MAC", s.mac],
+    ["Auto reconnect", s.autoReconnect ? "on" : "off"],
+    ["Hotspot", ap.active ? ap.ssid + " · " + ap.ip + " · " + ap.clients + " client(s)" : "off"],
+  ].map(([k, v]) => "<dt>" + k + "</dt><dd>" + escapeHtml(String(v)) + "</dd>").join("");
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function renderProfiles(list) {
+  const body = $("#profiles tbody");
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="5" class="muted">No saved profiles.</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map((c) => `
+    <tr>
+      <td>${escapeHtml(c.ssid)}${c.hasPassword ? "" : ' <span class="muted">(open)</span>'}</td>
+      <td class="num opt">${c.priority}</td>
+      <td class="opt">${c.rssi ? signal(c.rssi) : '<span class="muted">not in range</span>'}</td>
+      <td>${c.enabled ? "enabled" : '<span class="muted">disabled</span>'}</td>
+      <td class="num">
+        <button class="act ghost" data-connect="${c.id}">Connect</button>
+        <button class="act ghost" data-forget="${c.id}">Forget</button>
+      </td>
+    </tr>`).join("");
+}
+
+function renderScan(networks) {
+  const body = $("#scan-table").querySelector("tbody");
+  if (!networks.length) {
+    body.innerHTML = '<tr><td class="muted">Nothing found.</td></tr>';
+    return;
+  }
+  networks.sort((a, b) => b.rssi - a.rssi);
+  body.innerHTML = networks.map((n) => `
+    <tr>
+      <td>${n.hidden ? '<span class="muted">&lt;hidden&gt;</span>' : escapeHtml(n.ssid)}
+          ${n.inUse ? ' <span style="color:var(--ok)">•</span>' : ""}
+          ${n.known ? ' <span class="muted">saved</span>' : ""}</td>
+      <td class="opt">${n.security}</td>
+      <td class="opt num">ch ${n.channel}</td>
+      <td>${signal(n.rssi)}</td>
+      <td class="num">${n.hidden ? "" : `<button class="act ghost" data-join="${escapeHtml(n.ssid)}" data-open="${n.security === "OPEN"}">Join</button>`}</td>
+    </tr>`).join("");
+}
+
+// Опитувальник, який НЕ накладається сам на себе: наступний запит іде лише
+// після того, як завершився попередній. Через setInterval вкладка накопичувала
+// десятки паралельних fetch'ів з однаковим ?since= - плата не встигала
+// відповідати, а сторінка сипала ще й ще. Плюс пауза, коли вкладка невидима:
+// фонові вкладки не мають нічого вантажити.
+function poller(fn, ms, isActive) {
+  let stopped = false;
+  let failures = 0;
+  const tick = async () => {
+    if (stopped) return;
+    let delay = ms;
+    if (!document.hidden && (!isActive || isActive())) {
+      try {
+        await fn();
+        failures = 0;
+      } catch (e) {
+        // Відступ при збоях. На слабкому лінку (тут це буває: 20% сигналу -
+        // і половина запитів не доходить) наполегливе опитування з тим самим
+        // періодом лише додає платі роботи, якої вона й так не встигає.
+        failures = Math.min(failures + 1, 3);
+        delay = ms * (1 << failures);
+      }
+    }
+    if (!stopped) setTimeout(tick, delay);
+  };
+  tick();
+  return { stop() { stopped = true; } };
+}
+
+const onWifiTab = () => $("#tab-wifi").classList.contains("active");
+
+// Тільки стан - його й опитуємо періодично.
+async function refreshWifiStatus() {
+  renderStatus(await api("/api/wifi/status"));
+}
+
+// Список профілів у NVS сам собою не міняється, тому окремо і НЕ по таймеру:
+// лише при відкритті вкладки й після дій, що його змінюють.
+async function refreshWifi() {
+  try {
+    renderStatus(await api("/api/wifi/status"));
+    renderProfiles(await api("/api/wifi/connections"));
+  } catch (e) { /* мережа пристрою могла впасти - наступний тік спробує знову */ }
+}
+
+$("#btn-scan").onclick = async (ev) => {
+  ev.target.disabled = true;
+  ev.target.textContent = "Scanning…";
+  try {
+    const result = await job("/api/wifi/scan", { method: "POST" });
+    if (result && result.ok) renderScan(result.networks);
+    else toast((result && result.message) || "Scan failed", "err");
+  } catch (e) { toast(e.message, "err"); }
+  ev.target.disabled = false;
+  ev.target.textContent = "Scan networks";
+};
+
+$("#btn-reconnect").onclick = () => runAction("/api/wifi/reconnect", { method: "POST" });
+$("#btn-hotspot").onclick = () => runAction("/api/wifi/hotspot", form({ action: "start" }));
+$("#btn-hotspot-stop").onclick = () => runAction("/api/wifi/hotspot", form({ action: "stop" }));
+
+async function runAction(path, options) {
+  try {
+    const r = await job(path, options);
+    toast((r && r.message) || "Done", r && r.ok === false ? "err" : "ok");
+  } catch (e) { toast(e.message, "err"); }
+  refreshWifi();
+}
+
+document.addEventListener("click", (ev) => {
+  const join = ev.target.closest("[data-join]");
+  if (join) {
+    const ssid = join.dataset.join;
+    const password = join.dataset.open === "true" ? "" : prompt("Password for “" + ssid + "”:");
+    if (password === null) return;
+    runAction("/api/wifi/connections", form({ ssid, password, connect: "true" }));
+    return;
+  }
+  const connect = ev.target.closest("[data-connect]");
+  if (connect) { runAction("/api/wifi/connect", form({ id: connect.dataset.connect })); return; }
+
+  const forget = ev.target.closest("[data-forget]");
+  if (forget && confirm("Remove this profile?")) {
+    runAction("/api/wifi/connections?id=" + forget.dataset.forget, { method: "DELETE" });
+  }
+});
+
+/* ---------------- console ---------------- */
+
+let logCursor = null;
+const history = [];
+let historyPos = 0;
+
+function appendLog(lines) {
+  const box = $("#log");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  for (const line of lines) {
+    const div = document.createElement("div");
+    div.textContent = line;
+    if (line.startsWith("> ")) div.className = "cmd";
+    else if (line.startsWith("[E]")) div.className = "e";
+    else if (line.startsWith("[W]")) div.className = "w";
+    else if (line.startsWith("[D]")) div.className = "d";
+    box.appendChild(div);
+  }
+  while (box.childElementCount > 500) box.removeChild(box.firstChild);
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+async function pollLog() {
+  try {
+    const data = await api("/api/console/log" + (logCursor === null ? "" : "?since=" + logCursor));
+    if (logCursor !== null && data.from > logCursor) {
+      appendLog(["… " + (data.from - logCursor) + " line(s) dropped, ring overflow …"]);
+    }
+    appendLog(data.lines);
+    logCursor = data.next;
+  } catch (e) { /* тихо: наступний тік спробує знову */ }
+}
+
+// SSE - основний шлях, опитування лишається відкатом: через AP-режим або
+// кепський лінк потік може не піднятись. Обидва курсорні й ділять один logCursor
+// (це той самий seq журналу), тому перемикання туди-сюди не дає ні дублів, ні
+// дірок - за перекриття кожен просто не бачить нічого нового.
+let sse = null;
+let logPoller = null;
+
+// Видно, звідки йде стрічка. Це не косметика: SSE - одне з'єднання й нуль
+// запитів у спокої, опитування - запит щосекунди, і на платі це помітно.
+function setFeed(mode) {
+  $("#feed").textContent = mode;
+}
+
+function startPolling() {
+  if (logPoller === null) {
+    logPoller = poller(pollLog, 1000);
+  }
+}
+
+function stopPolling() {
+  if (logPoller !== null) { logPoller.stop(); logPoller = null; }
+}
+
+// Скільки разів поспіль пробувати підняти SSE, перш ніж лишитись на
+// опитуванні. Браузер перепідключається сам кожні ~3 с, і на мертвому лінку це
+// просто зайві з'єднання до плати.
+const SSE_MAX_RETRIES = 3;
+let sseFailures = 0;
+
+function startStream() {
+  if (!window.EventSource) {
+    setFeed("polling (no EventSource)");
+    startPolling();
+    return;
+  }
+
+  sse = new EventSource("/api/console/stream");
+
+  sse.onopen = () => { sseFailures = 0; setFeed("live (SSE)"); stopPolling(); };
+
+  sse.onmessage = (ev) => {
+    const id = Number(ev.lastEventId);
+    // id поїхав НАЗАД - пристрій перезавантажився, seq почався з нуля. Мовчки
+    // ігнорувати такі кадри не можна: консоль осліпла б до кінця сесії, поки
+    // новий seq не дожене старий курсор.
+    if (logCursor !== null && id < logCursor) logCursor = id;
+    if (logCursor !== null && id > logCursor) {
+      appendLog(["… " + (id - logCursor) + " line(s) dropped, ring overflow …"]);
+    }
+    appendLog([ev.data]);
+    logCursor = id + 1;
+  };
+
+  // Перепідключається браузер сам (і надсилає Last-Event-ID), але поки він
+  // мовчить, вкладка не має сліпнути - тому вмикаємо опитування. Коли потік
+  // повернеться, onopen його вимкне.
+  sse.onerror = () => {
+    startPolling();
+    if (++sseFailures >= SSE_MAX_RETRIES) {
+      sse.close();
+      sse = null;
+      setFeed("polling (AJAX) — click to retry SSE");
+      return;
+    }
+    setFeed("reconnecting… (polling)");
+  };
+}
+
+// Індикатор клікабельний: якщо потік відвалився через мережу, підняти його
+// назад можна без перезавантаження сторінки.
+$("#feed").onclick = () => {
+  if (sse !== null) return;
+  sseFailures = 0;
+  setFeed("connecting…");
+  startStream();
+}
+
+$("#cmd-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const input = $("#cmd");
+  const cmd = input.value.trim();
+  if (!cmd) return;
+
+  input.value = "";
+  history.push(cmd);
+  historyPos = history.length;
+  try {
+    await api("/api/console/exec", form({ cmd }));
+    // Під SSE підганяти не треба: вивід приїде сам, і то швидше.
+    if (sse === null || sse.readyState !== EventSource.OPEN) setTimeout(pollLog, 200);
+  } catch (e) { toast(e.message, "err"); }
+};
+
+$("#cmd").onkeydown = (ev) => {
+  if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+  if (!history.length) return;
+  ev.preventDefault();
+  historyPos += ev.key === "ArrowUp" ? -1 : 1;
+  historyPos = Math.max(0, Math.min(history.length, historyPos));
+  ev.target.value = history[historyPos] || "";
+};
+
+async function loadCommands() {
+  try {
+    const list = await api("/api/console/commands");
+    $("#cmd-list").innerHTML = list
+      .map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.description)}</option>`)
+      .join("");
+    $("#cmd-hint").textContent =
+      list.length + " commands registered. Output appears in the log above. History: ↑ / ↓.";
+  } catch (e) { /* необов'язкове */ }
+}
+
+/* ---------------- boot ---------------- */
+
+async function pollStatus() {
+  try {
+    const s = await api("/api/status");
+    $("#heap").textContent = "heap " + Math.round(s.freeHeap / 1024) + " KB";
+  } catch (e) { /* ignore */ }
+}
+
+refreshWifi();
+loadCommands();
+startStream();
+
+// Стан мережі - лише поки відкрита вкладка Wi-Fi; купа - раз на 10 с.
+// Раніше обидва йшли кожні 3 і 5 секунд незалежно від того, чи їх видно.
+poller(refreshWifiStatus, 5000, onWifiTab);
+poller(pollStatus, 10000);
+</script>
+</body>
+</html>

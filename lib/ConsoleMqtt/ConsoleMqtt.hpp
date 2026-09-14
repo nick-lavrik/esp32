@@ -1,19 +1,24 @@
 #pragma once
 
-// Дзеркало консолі в MQTT: кожен рядок, що йде через SerialLogger, публікується
-// в topic (за замовчуванням "<prefix>/console/<MQTT_CLIENT_ID>") - тим самим
-// текстом, що в serial-моніторі, разом із префіксом "[I][tag    ] ".
+// Дзеркало консолі в MQTT: кожен запис журналу публікується в topic (за
+// замовчуванням "<prefix>/console/<MQTT_CLIENT_ID>") тим самим текстом, що в
+// serial-моніторі, разом із префіксом "[I][tag    ] ".
+//
+// ПІДПИСНИК ЖУРНАЛУ, а не Print-приймач логера. Різниця не косметична:
+//
+//   - рядок приходить у таску помпи, а не в таску того, хто логував. Тому
+//     зникли і re-entrancy guard (_busy), і три вбудовані deny-правила: рядок,
+//     народжений усередині доставки, просто лягає в кільце й піде наступною
+//     помпою, тобто обробляється РІВНО ОДИН раз. Зациклитись нема як.
+//   - фільтр тепер по ТЕГУ, а не регексом по тексту. POSIX regcomp/regexec і
+//     весь lib/ConsoleMqtt/LogRule видалені: тег - окреме поле запису, і
+//     ієрархічний матчинг ("mqtt" накриває "mqtt.send") робить та сама
+//     journalTagMatches(), що й підписка приймачів.
 //
 // БЕЗ БУФЕРИЗАЦІЇ. Поки MQTT не підключений (або на паузі через suspend()),
-// рядки просто не існують для дзеркала: вони нікуди не складаються й не
-// приїдуть пачкою після конекту. Тобто в топіку видно рівно те, що відбувалось
-// при живому з'єднанні.
-//
-// Чому це тут, а не в lib/CommandResponse. Там per-task захоплення
-// (ScopedLogCapture) - воно навмисно бере рядки лише з таска, де виконується
-// команда. Дзеркалу потрібно протилежне: ВСІ таски, включно з "mqtt-net" і
-// "ecoflow-rest". Тому механізм інший - глобальний LogMirror, і два працюють
-// одночасно (рядок може піти і у відповідь на команду, і в дзеркало).
+// записи для дзеркала не існують: вони нікуди не складаються й не приїдуть
+// пачкою після конекту. Приймач lossy - якщо він відстав, журнал перестрибує
+// його курсор уперед і рахує пропуск, але нікого не чекає.
 //
 // Залежності передаються в конструктор, глобалів усередині немає: дзеркало
 // можна посадити на ОКРЕМИЙ MqttClient (напр. на інший брокер), не чіпаючи
@@ -26,11 +31,10 @@
 // вирізати механізм у конкретному env, туди додається -D HAS_CONSOLE_MQTT=0.
 //
 // Прив'язка до PicoMQTT не косметична. Там publish() лише КЛАДЕ команду в
-// _outgoingQueue, тобто виклик із будь-якого таска дешевий і не блокує. На
-// esp8266 (єдиний env на PubSubClient) publish() пише в сокет СИНХРОННО: кожен
-// рядок логу став би мережевим I/O всередині log(), а рядок, залогований із
-// callback-у самого PubSubClient, дав би реентерабельний запис у той самий
-// сокет - те, що вже ламало MQTT-потік на C6 (див. networkTaskLoop()).
+// _outgoingQueue, тобто виклик із таска помпи дешевий і не блокує. На esp8266
+// (єдиний env на PubSubClient) publish() пише в сокет СИНХРОННО: кожен рядок
+// логу став би мережевим I/O в помпі, а помпи як окремого таска там і немає -
+// вона крутиться в loop().
 #if !defined(HAS_CONSOLE_MQTT)
 #  if defined(ESP32) && HAS_MQTT_CLIENT && __has_include(<PicoMQTT.h>)
 #    define HAS_CONSOLE_MQTT 1
@@ -48,14 +52,11 @@
 
 #include <Arduino.h>
 #include <ConfigStorage.hpp>
-#include <PrintQueue.hpp>
+#include <Journal.hpp>
 #include <TLogger.hpp>
 
-#include <atomic>
 #include <cstddef>
 #include <string>
-
-#include "LogRule.hpp"
 
 // Стан дзеркала одразу після першого старту (поки не збережено в NVS).
 #ifndef CONSOLE_MQTT_ACTIVE
@@ -69,15 +70,15 @@
 #define CONSOLE_MQTT_RATE_PER_SEC 10
 #endif
 
-// Скільки правил у КОЖНОМУ зі списків (allow / deny). Масиви фіксовані, без
-// heap - як PrintQueue і LogCaptureRegistry.
+// Скільки тегів у КОЖНОМУ зі списків (allow / deny). Масиви фіксовані, без heap.
 #ifndef CONSOLE_MQTT_MAX_RULES
 #define CONSOLE_MQTT_MAX_RULES 8
 #endif
 
-class ConsoleMqtt : public Print {
+class ConsoleMqtt {
 public:
   static constexpr size_t kMaxRules = CONSOLE_MQTT_MAX_RULES;
+  static constexpr size_t kTagSize = 24;  // як JOURNAL_RULE_TAG_SIZE
   static constexpr uint32_t kRatePerSec = CONSOLE_MQTT_RATE_PER_SEC;
   // Скільки рядків можна віддати "залпом" після паузи - щоб короткий сплеск
   // (напр. вивід "status sys") пройшов цілим, а не по краплині.
@@ -86,9 +87,13 @@ public:
   // topic - БЕЗ префікса ("console/<client-id>"): префікс підставить сам
   // MqttClient через MqttKeyGenerator, як і для будь-якого іншого топіка.
   ConsoleMqtt(MqttClient& client, ConfigStorage& cfg, const char* topic);
+  ~ConsoleMqtt();
 
-  // Читає стан і правила з ConfigStorage, компілює вбудовані правила, ставить
-  // фільтр ехо на СВІЙ клієнт і вішає себе в LogMirror.
+  ConsoleMqtt(const ConsoleMqtt&) = delete;
+  ConsoleMqtt& operator=(const ConsoleMqtt&) = delete;
+
+  // Читає стан і правила з ConfigStorage, ставить фільтр ехо на СВІЙ клієнт і
+  // підписується в журнал.
   //
   // Кликати ПІСЛЯ MqttClient::begin(): до нього _keyGenerator ще nullptr, і
   // топік для фільтра ехо зарезолвився б без префікса.
@@ -97,33 +102,27 @@ public:
   bool active() const { return _active; }
   void setActive(bool on, bool persist);
 
-  // deny == false - whitelist. Повертає false і заповнює errBuf, якщо патерн
-  // не компілюється або список повний.
-  bool addRule(bool deny, const char* pattern, char* errBuf, size_t errBufSize);
+  // deny == false - whitelist. tag - ієрархічний тег ("mqtt" накриває
+  // "mqtt.send"), а не регекс. Повертає false і заповнює errBuf, якщо тег
+  // задовгий або список повний.
+  bool addRule(bool deny, const char* tag, char* errBuf, size_t errBufSize);
   void clearRules(bool deny);
 
-  // Прогнати фільтр по рядку, нічого не публікуючи ("console-mqtt test").
-  bool wouldPass(const char* line) const;
+  // Прогнати фільтр по тегу, нічого не публікуючи ("console-mqtt test <tag>").
+  bool wouldPass(const char* tag) const { return passesFilters(tag); }
 
   void dumpStatus() const;
 
-  // Print: сюди SerialLogger віддає готовий рядок (з '\n', null-terminated).
-  size_t write(const uint8_t* buffer, size_t size) override;
-  // Дзеркало приймає лише цілі рядки - побайтовий Print-інтерфейс не
-  // підтримується (SerialLogger ним не користується).
-  size_t write(uint8_t) override { return 1; }
-
 private:
-  // Вбудовані deny-правила: не персистяться, не видаляються, застосовуються
-  // ПЕРШИМИ. Без них дзеркало годує саме себе - див. коментар у .cpp.
-  static const char* const kBuiltinDeny[];
-  static const size_t kBuiltinDenyCount;
-
   // Топік із префіксом - лише для показу людині (публікація резолвить його
   // сама, всередині MqttClient::publish()).
   std::string resolvedTopic() const;
 
-  bool passesFilters(const char* line) const;
+  // Приймач журналу. Завжди повертає true: дзеркало не має права
+  // пригальмовувати кільце (lossless - лише serial).
+  bool deliver(const JournalEntry& entry);
+
+  bool passesFilters(const char* tag) const;
   bool takeToken(uint32_t now);
   void persistRules(bool deny);
   void loadRules(bool deny, const char* key);
@@ -134,16 +133,10 @@ private:
 
   bool _active = (CONSOLE_MQTT_ACTIVE != 0);
 
-  LogRule _builtin[4];
-  LogRule _allow[kMaxRules];
-  LogRule _deny[kMaxRules];
+  char _allow[kMaxRules][kTagSize] = {};
+  char _deny[kMaxRules][kTagSize] = {};
 
-  // Re-entrancy guard. Плоский прапорець, а НЕ per-task: publish() тут - це
-  // лише enqueueOutgoing(), тобто мікросекунди, тож у гіршому разі губиться
-  // кілька рядків з іншого таска, поки перший у процесі. Це строгіше за
-  // per-task guard і на два порядки простіше. Без нього будь-який лог,
-  // народжений усередині доставки, повертався б сюди ж.
-  std::atomic_flag _busy = ATOMIC_FLAG_INIT;
+  JournalSubId _sub = kInvalidJournalSub;
 
   // Token bucket у "мілі-токенах": 1000 = один дозволений рядок.
   uint32_t _tokensMilli = kBurst * 1000;

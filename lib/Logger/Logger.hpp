@@ -12,7 +12,7 @@
 // build_flags, напр.: -D LOGGER_DEFAULT_TAG=\"main\"
 //
 // Для тегованого логування з ієрархією тегів (mqtt -> mqtt.send -> ...)
-// і фільтрацією рівня через LogLevelManager - використовуйте TLogger
+// і фільтрацією рівня за тегом - використовуйте TLogger
 // напряму (див. TLogger.hpp), напр.:
 //   static TLogger _log{"mqtt.send"};
 //   _log.info("heartbeat sent");

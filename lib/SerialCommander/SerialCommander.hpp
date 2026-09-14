@@ -24,12 +24,34 @@ public:
   // Викликати щоразу в loop(). Неблокуючий.
   void update();
 
+  // Куди віддавати зібраний із serial рядок. За замовчуванням - одразу
+  // execute(), тобто бібліотека самодостатня. Застосунок підміняє це на
+  // CommandQueue::submit(): виконувати команду прямо в читачі не можна, бо
+  // 'sdbench' блокує loop() на десятки секунд, а джерел команд три.
+  using LineHandler = std::function<void(const String& line)>;
+  void setLineHandler(LineHandler handler) { lineHandler_ = std::move(handler); }
+
   // виконати команду 
   void execute(const char* line);
 
   // Максимальна довжина буфера рядка
   // (захист від переповнення, якщо хтось шле дані без термінатора).
   void setMaxLineLength(size_t maxLen) { maxLineLength_ = maxLen; }
+
+  // ---- перелік зареєстрованих команд ----
+  //
+  // Потрібен не тільки команді "list": той самий список показує розділ
+  // команд веб-порталу (lib/WebPortal). Віддаємо позиційний доступ, а не
+  // сам вектор: зовнішній код не повинен могти ні змінити реєстр, ні
+  // утримати посилання на елемент, який переживе registerCommand()
+  // (той може перевиділити вектор).
+  size_t commandCount() const { return commands_.size(); }
+  String commandName(size_t index) const {
+    return index < commands_.size() ? commands_[index].name : String();
+  }
+  String commandDescription(size_t index) const {
+    return index < commands_.size() ? commands_[index].description : String();
+  }
 
 private:
   struct Command {
@@ -43,6 +65,7 @@ private:
   String buffer_;
   size_t maxLineLength_ = 128;
   std::vector<Command> commands_;
+  LineHandler lineHandler_;
 
   void processLine(const String& line);
   void printUnknown(const String& name);

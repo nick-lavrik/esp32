@@ -2,7 +2,7 @@
 
 #if HAS_CONSOLE_MQTT
 
-#include <LogMirror.hpp>
+#include <JournalTag.hpp>
 
 #include <cstdio>
 #include <cstring>
@@ -24,40 +24,12 @@ constexpr uint32_t kMaxRefillWindowMs = 10000;
 constexpr size_t kErrorBufSize = 96;
 }  // namespace
 
-// Вбудовані deny-правила. Не персистяться, не видаляються, застосовуються
-// ПЕРШИМИ - бо без них дзеркало годує саме себе:
-//
-//   \[MQTT\]              "[MQTT] queue overflow, dropped: N outgoing" і
-//                         "broker denied N subscriptions" (MqttClient.cpp).
-//                         Обидва - про той самий канал, яким ми публікуємо:
-//                         переповнення черги породжувало б рядок, який іде в
-//                         ту саму чергу.
-//   mqtt\.loop\(\) took   src/main.cpp, спрацьовує щоітерації під навантаженням.
-//   ^\[.\]\[console       власний тег - звіт про зрізане лімітом і dumpStatus().
-const char* const ConsoleMqtt::kBuiltinDeny[] = {
-  "\\[MQTT\\]",
-  "mqtt\\.loop\\(\\) took",
-  "^\\[.\\]\\[console",
-};
-const size_t ConsoleMqtt::kBuiltinDenyCount =
-    sizeof(ConsoleMqtt::kBuiltinDeny) / sizeof(ConsoleMqtt::kBuiltinDeny[0]);
-
 ConsoleMqtt::ConsoleMqtt(MqttClient& client, ConfigStorage& cfg, const char* topic)
     : _client(client), _cfg(cfg), _topic(topic != nullptr ? topic : "") {}
 
+ConsoleMqtt::~ConsoleMqtt() { Journal::instance().unsubscribe(_sub); }
+
 void ConsoleMqtt::begin() {
-  static_assert(sizeof(ConsoleMqtt::kBuiltinDeny) / sizeof(ConsoleMqtt::kBuiltinDeny[0]) <=
-                    sizeof(_builtin) / sizeof(_builtin[0]),
-                "ConsoleMqtt::_builtin is smaller than kBuiltinDeny");
-
-  char err[kErrorBufSize];
-  for (size_t i = 0; i < kBuiltinDenyCount; ++i) {
-    if (!_builtin[i].compile(kBuiltinDeny[i], err, sizeof(err))) {
-      // Не фатально, але означає, що зникла головна перепона зациклюванню.
-      _logger.error("built-in rule '%s' failed: %s", kBuiltinDeny[i], err);
-    }
-  }
-
   _active = _cfg.getBool(kKeyActive, CONSOLE_MQTT_ACTIVE != 0);
   loadRules(/*deny=*/false, kKeyAllow);
   loadRules(/*deny=*/true, kKeyDeny);
@@ -71,7 +43,17 @@ void ConsoleMqtt::begin() {
   // здатний витіснити справжню вхідну команду.
   _client.setEchoIgnoreTopic(_topic.c_str());
 
-  LogMirror::set(this);
+  // Патерн "" - беремо все, що пройшло фільтр рівня; звуження робить allow-лист
+  // (він може мати кілька тегів, а патерн підписки - лише один).
+  //
+  // lossless НЕ ставимо навмисно: мережа може стояти хвилинами, і дзеркало,
+  // яке пригальмовує продюсера, зупинило б увесь пристрій.
+  _sub = Journal::instance().subscribe(
+      "mqtt-mirror", "", LogLevel::Verbose,
+      [this](const JournalEntry& entry) { return deliver(entry); });
+  if (_sub == kInvalidJournalSub) {
+    _logger.error("no free journal slot - mirror is off");
+  }
 
   _logger.info("mirror %s -> %s", _active ? "on" : "off", resolvedTopic().c_str());
 }
@@ -90,47 +72,57 @@ void ConsoleMqtt::loadRules(bool deny, const char* key) {
   std::vector<String> patterns;
   _cfg.getStringArray(key, patterns);
 
-  LogRule* list = deny ? _deny : _allow;
   char err[kErrorBufSize];
-  size_t slot = 0;
-
   for (const String& pattern : patterns) {
-    if (slot >= kMaxRules) {
-      _logger.warn("stored %s list has more than %u rules - the rest ignored", deny ? "deny" : "allow",
-                   (unsigned)kMaxRules);
-      break;
-    }
-    if (!list[slot].compile(pattern.c_str(), err, sizeof(err))) {
-      // Патерн у NVS міг зберегтись при іншій версії прошивки - не мовчимо,
-      // інакше фільтр просто "не працює" без пояснень.
+    // Правило в NVS могло зберегтись від версії з регексами - не мовчимо,
+    // інакше фільтр просто "не працює" без пояснень.
+    if (!addRule(deny, pattern.c_str(), err, sizeof(err))) {
       _logger.error("stored %s rule '%s' rejected: %s", deny ? "deny" : "allow", pattern.c_str(), err);
-      continue;
     }
-    ++slot;
   }
 }
 
 void ConsoleMqtt::persistRules(bool deny) {
-  const LogRule* list = deny ? _deny : _allow;
+  const char (*list)[kTagSize] = deny ? _deny : _allow;
   std::vector<String> patterns;
   for (size_t i = 0; i < kMaxRules; ++i) {
-    if (list[i].valid()) {
-      patterns.push_back(String(list[i].pattern()));
+    if (list[i][0] != '\0') {
+      patterns.push_back(String(list[i]));
     }
   }
   _cfg.setStringArray(deny ? kKeyDeny : kKeyAllow, patterns);
 }
 
-bool ConsoleMqtt::addRule(bool deny, const char* pattern, char* errBuf, size_t errBufSize) {
-  LogRule* list = deny ? _deny : _allow;
+bool ConsoleMqtt::addRule(bool deny, const char* tag, char* errBuf, size_t errBufSize) {
+  char (*list)[kTagSize] = deny ? _deny : _allow;
 
-  for (size_t i = 0; i < kMaxRules; ++i) {
-    if (list[i].valid()) {
-      continue;
+  if (tag == nullptr || tag[0] == '\0' || strlen(tag) >= kTagSize) {
+    if (errBuf != nullptr && errBufSize > 0) {
+      snprintf(errBuf, errBufSize, "tag must be 1..%u characters", (unsigned)(kTagSize - 1));
     }
-    if (!list[i].compile(pattern, errBuf, errBufSize)) {
+    return false;
+  }
+
+  // Правила в NVS могли лишитись від версії з регексами. Без цієї перевірки
+  // "\\[MQTT\\]" тихо ліг би як "тег", не збігався б ні з чим - і фільтр просто
+  // перестав би працювати, нічого не сказавши.
+  for (const char* c = tag; *c != '\0'; ++c) {
+    const bool ok = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+                    (*c >= '0' && *c <= '9') || *c == '.' || *c == '_' || *c == '-';
+    if (!ok) {
+      if (errBuf != nullptr && errBufSize > 0) {
+        snprintf(errBuf, errBufSize, "'%c' is not allowed - this takes a tag, not a regexp", *c);
+      }
       return false;
     }
+  }
+
+  for (size_t i = 0; i < kMaxRules; ++i) {
+    if (list[i][0] != '\0') {
+      continue;
+    }
+    strncpy(list[i], tag, kTagSize - 1);
+    list[i][kTagSize - 1] = '\0';
     persistRules(deny);
     return true;
   }
@@ -142,33 +134,27 @@ bool ConsoleMqtt::addRule(bool deny, const char* pattern, char* errBuf, size_t e
 }
 
 void ConsoleMqtt::clearRules(bool deny) {
-  LogRule* list = deny ? _deny : _allow;
+  char (*list)[kTagSize] = deny ? _deny : _allow;
   for (size_t i = 0; i < kMaxRules; ++i) {
-    list[i].reset();
+    list[i][0] = '\0';
   }
   _cfg.setStringArray(deny ? kKeyDeny : kKeyAllow, std::vector<String>{});
 }
 
-// Порядок правил: вбудований deny -> whitelist -> deny. Вбудований іде першим і
-// перекрити його не можна навмисно: це єдиний захист від того, щоб дзеркало
-// публікувало рядки, породжені власною ж публікацією.
-bool ConsoleMqtt::passesFilters(const char* line) const {
-  for (size_t i = 0; i < kBuiltinDenyCount; ++i) {
-    if (_builtin[i].matches(line)) {
-      return false;
-    }
-  }
-
-  // Порожній whitelist = пропускати все. Непорожній - рядок мусить зійтися
-  // хоч з одним правилом.
+// Порядок правил: whitelist -> deny. Вбудованих правил більше НЕМАЄ: вони
+// існували проти самогодування дзеркала, а з журналом кожен запис доходить
+// сюди рівно один раз (див. коментар у заголовку).
+bool ConsoleMqtt::passesFilters(const char* tag) const {
+  // Порожній whitelist = пропускати все. Непорожній - тег мусить зійтися хоч з
+  // одним правилом.
   bool hasAllow = false;
   bool allowed = false;
   for (size_t i = 0; i < kMaxRules; ++i) {
-    if (!_allow[i].valid()) {
+    if (_allow[i][0] == '\0') {
       continue;
     }
     hasAllow = true;
-    if (_allow[i].matches(line)) {
+    if (journalTagMatches(_allow[i], tag)) {
       allowed = true;
       break;
     }
@@ -178,15 +164,13 @@ bool ConsoleMqtt::passesFilters(const char* line) const {
   }
 
   for (size_t i = 0; i < kMaxRules; ++i) {
-    if (_deny[i].valid() && _deny[i].matches(line)) {
+    if (_deny[i][0] != '\0' && journalTagMatches(_deny[i], tag)) {
       return false;
     }
   }
 
   return true;
 }
-
-bool ConsoleMqtt::wouldPass(const char* line) const { return passesFilters(line); }
 
 bool ConsoleMqtt::takeToken(uint32_t now) {
   uint32_t elapsed = now - _lastRefillMs;  // коректно й через переповнення millis()
@@ -207,47 +191,33 @@ bool ConsoleMqtt::takeToken(uint32_t now) {
   return true;
 }
 
-size_t ConsoleMqtt::write(const uint8_t* buffer, size_t size) {
-  if (!_active || buffer == nullptr || size == 0) {
-    return size;
-  }
-
-  // Guard ставимо ДО всього іншого: далі йдуть regexec, publish і власний лог -
-  // будь-що з цього може народити новий рядок, який прийшов би сюди ж.
-  if (_busy.test_and_set(std::memory_order_acquire)) {
-    return size;
+bool ConsoleMqtt::deliver(const JournalEntry& entry) {
+  if (!_active) {
+    return true;
   }
 
   const uint32_t now = millis();
 
   do {
-    // Нічого не накопичуємо: поки з'єднання немає, рядок для дзеркала просто
+    // Нічого не накопичуємо: поки з'єднання немає, запис для дзеркала просто
     // не існує. Саме це й означає "без буферизації" - після конекту пачка
     // старих рядків не приїде.
     if (!_client.isConnected() || _client.isSuspended()) {
       break;
     }
-
-    char line[PrintQueue::kLineSize];
-    size_t length = (size < sizeof(line) - 1) ? size : sizeof(line) - 1;
-    memcpy(line, buffer, length);
-    line[length] = '\0';
-
-    // Хвостовий '\n' зрізаємо: тут один рядок = одне повідомлення, і підписник
-    // додає перенос сам - інакше в mosquitto_sub між рядками порожні рядки.
-    while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
-      line[--length] = '\0';
-    }
-    if (length == 0) {
+    if (!passesFilters(entry.tag)) {
       break;
     }
-
-    if (!passesFilters(line)) {
-      break;
-    }
-
     if (!takeToken(now)) {
       ++_droppedRate;
+      break;
+    }
+
+    // Той самий вигляд, що в моніторі: префікс + текст. БЕЗ '\n' - тут один
+    // запис = одне повідомлення, і підписник додає перенос сам, інакше в
+    // mosquitto_sub між рядками порожні рядки.
+    char line[JournalEntry::kTextSize + 16];
+    if (journalFormatLine(entry, line, sizeof(line)) == 0) {
       break;
     }
 
@@ -255,8 +225,8 @@ size_t ConsoleMqtt::write(const uint8_t* buffer, size_t size) {
     ++_published;
   } while (false);
 
-  // Звіт про зрізане лімітом. Іде під тим самим guard-ом, тому сам у дзеркало
-  // не потрапить (та й вбудоване правило "^\[.\]\[console" його зрізало б).
+  // Звіт про зрізане лімітом. Сам іде в журнал і повернеться сюди наступною
+  // помпою як звичайний запис - рівно один раз, без ризику лавини.
   if (_droppedRate > 0 && (now - _lastDropReportMs) >= kDropReportIntervalMs) {
     _logger.warn("rate limit dropped %u lines in the last %u s (%u lines/s)", (unsigned)_droppedRate,
                  (unsigned)(kDropReportIntervalMs / 1000), (unsigned)kRatePerSec);
@@ -264,8 +234,9 @@ size_t ConsoleMqtt::write(const uint8_t* buffer, size_t size) {
     _lastDropReportMs = now;
   }
 
-  _busy.clear(std::memory_order_release);
-  return size;
+  // Завжди true: приймач lossy, курсор має йти далі навіть коли рядок нікуди
+  // не пішов. Інакше дзеркало без мережі спинило б доставку решті.
+  return true;
 }
 
 void ConsoleMqtt::dumpStatus() const {
@@ -273,25 +244,21 @@ void ConsoleMqtt::dumpStatus() const {
   _logger.info("published = %u, dropped by rate limit = %u (limit %u lines/s, burst %u)",
                (unsigned)_published, (unsigned)_droppedRate, (unsigned)kRatePerSec, (unsigned)kBurst);
 
-  for (size_t i = 0; i < kBuiltinDenyCount; ++i) {
-    _logger.info("  deny  (built-in) %s", _builtin[i].valid() ? _builtin[i].pattern() : kBuiltinDeny[i]);
-  }
-
-  size_t userRules = 0;
+  size_t rules = 0;
   for (size_t i = 0; i < kMaxRules; ++i) {
-    if (_allow[i].valid()) {
-      _logger.info("  allow %s", _allow[i].pattern());
-      ++userRules;
+    if (_allow[i][0] != '\0') {
+      _logger.info("  allow %s", _allow[i]);
+      ++rules;
     }
   }
   for (size_t i = 0; i < kMaxRules; ++i) {
-    if (_deny[i].valid()) {
-      _logger.info("  deny  %s", _deny[i].pattern());
-      ++userRules;
+    if (_deny[i][0] != '\0') {
+      _logger.info("  deny  %s", _deny[i]);
+      ++rules;
     }
   }
-  if (userRules == 0) {
-    _logger.info("  (no user rules - everything except the built-in deny goes out)");
+  if (rules == 0) {
+    _logger.info("  (no tag rules - everything goes out)");
   }
 }
 

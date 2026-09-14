@@ -1,8 +1,9 @@
 #include "CommandResponse.hpp"
 
-#include <cstdio>
+#include <Arduino.h>
 
-#include <ScopedLogCapture.hpp>
+#include <cstdio>
+#include <cstring>
 
 namespace {
 // Запас під маркер обрізання - "...(truncated, 4294967295 more lines)\n".
@@ -13,49 +14,74 @@ CommandResponse::CommandResponse(std::shared_ptr<ResponseTarget> target) : _targ
 
 CommandResponse::~CommandResponse() { finish(); }
 
-size_t CommandResponse::write(uint8_t c) { return write(&c, 1); }
+bool CommandResponse::attach() {
+  if (_sub != kInvalidJournalSub) return true;
 
-size_t CommandResponse::write(const uint8_t* buffer, size_t size) {
-  if (_finished || !_target) {
-    return size;  // Print очікує кількість "записаних" байтів
+#if defined(ESP32)
+  _task = pcTaskGetName(nullptr);
+#else
+  _task = "loop";  // RTOS немає, тасків теж - усе живе в loop()
+#endif
+
+  // Точка відліку. Підписка в журналі навмисно починається з ХВОСТА кільця
+  // (щоб приймач, який щойно з'явився, не втратив уже залогованого - див.
+  // Journal::subscribe), і для дзеркал це правильно. Для відповіді на команду -
+  // ні: без цієї межі у відповідь спершу заїжджали всі 32 записи, що лежали в
+  // кільці ДО команди. На залізі це виглядало так: у reply-топік приходило
+  // чотири зайві порції зі станом мережі й ecoflow, і аж у п'ятій - луна
+  // команди та її власний вивід.
+  _from = Journal::instance().head();
+
+  _sub = Journal::instance().subscribe(
+      "cmd-reply", "", LogLevel::Verbose,
+      [this](const JournalEntry& entry) { return _deliver(entry); }, /*lossless=*/true);
+  return _sub != kInvalidJournalSub;
+}
+
+bool CommandResponse::_deliver(const JournalEntry& entry) {
+  if (_finished || !_target || entry.seq < _from) {
+    return true;
+  }
+  // Чужий таск - не наша відповідь. Порівнюємо рядки, а не вказівники:
+  // pcTaskGetName() повертає вказівник у TCB, і покладатись на його
+  // стабільність не варто.
+  if (entry.task == nullptr || strcmp(entry.task, _task) != 0) {
+    return true;
   }
 
-  for (size_t i = 0; i < size; ++i) {
-    const char c = static_cast<char>(buffer[i]);
-
-    // Ліміт вичерпано: далі лише рахуємо втрачені рядки, щоб сказати про це
-    // в маркері. Дає до kMaxChunks порцій тексту плюс короткий фінальний
-    // маркер - без цього команда, що зациклилась у виводі, забила б брокер.
-    if (_chunksSent >= kMaxChunks) {
-      if (c == '\n') {
-        ++_droppedLines;
-      }
-      continue;
-    }
-
-    // Місця не лишилось навіть під один символ (з резервом під '\0') - рвемо
-    // порцію тут. Спрацьовує лише для джерела з рядками, довшими за
-    // PrintQueueLineSize; для логера порцію рве гілка нижче, по межі рядка.
-    if (_length + 1 >= kChunkBytes) {
-      flushChunk(false);
-    }
-
-    _buffer[_length++] = c;
-
-    // Рвемо по межі рядка, поки в буфері ще гарантовано влазить наступний
-    // рядок логу - так жоден рядок не розрізається навпіл.
-    if (c == '\n' && full()) {
-      flushChunk(false);
-    }
+  // Ліміт вичерпано: далі лише рахуємо втрачені рядки, щоб сказати про це в
+  // маркері. Без цього команда, що зациклилась у виводі, забила б брокер.
+  if (_chunksSent >= kMaxChunks) {
+    ++_droppedLines;
+    return true;
   }
 
-  return size;
+  char line[kMaxLine];
+  const size_t length = journalFormatLine(entry, line, sizeof(line));
+  if (length == 0) return true;
+
+  memcpy(_buffer + _length, line, length);
+  _length += length;
+  _buffer[_length++] = '\n';
+
+  // Рвемо по межі рядка, поки в буфері ще гарантовано влазить наступний -
+  // так жоден рядок не розрізається навпіл.
+  if (full()) {
+    flushChunk(false);
+  }
+  return true;
 }
 
 void CommandResponse::finish() {
   if (_finished) {
     return;
   }
+
+  // Відписуємось ПЕРШИМ ділом: після цього виклику помпа гарантовано не
+  // всередині нашого _deliver() (див. Journal::unsubscribe), тож далі можна
+  // чіпати буфер без замка.
+  Journal::instance().unsubscribe(_sub);
+  _sub = kInvalidJournalSub;
   _finished = true;
 
   if (_droppedLines > 0) {
@@ -90,13 +116,10 @@ void CommandResponse::flushChunk(bool isFinal) {
 
   _buffer[_length] = '\0';
 
-  // Re-entrancy guard: доставка сама логує (напр. MqttClient::publish пише
-  // warn при переповненні черги), і без зняття захоплення ці рядки пішли б
-  // назад у цей самий буфер - нескінченна рекурсія.
-  {
-    ScopedLogCapture guard(nullptr);
-    _target->deliver(_buffer, _length, isFinal);
-  }
+  // Re-entrancy guard тут більше не потрібен: доставка логує з ЧУЖОГО таска
+  // (помпа - для проміжних порцій, loop() - для фінальної), і фільтр у
+  // _deliver() відкидає ці рядки сам.
+  _target->deliver(_buffer, _length, isFinal);
 
   _length = 0;
   ++_chunksSent;

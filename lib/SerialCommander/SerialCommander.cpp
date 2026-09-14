@@ -23,7 +23,11 @@ void SerialCommander::update() {
       String line = trim(buffer_);
       buffer_ = "";
       if (line.length() > 0) {
-        processLine(line);
+        if (lineHandler_) {
+          lineHandler_(line);
+        } else {
+          processLine(line);
+        }
       }
       // Обробили один рядок за виклик update() — достатньо для
       // відгуку в межах одного циклу loop(); за потреби можна
@@ -71,7 +75,7 @@ void SerialCommander::printUnknown(const String& name) {
 void SerialCommander::printList() {
   _logger.info("Commands:");
   for (const auto& cmd : commands_) {
-    _logger.info("  %-12s - %s", cmd.name.c_str(), cmd.description.c_str());
+    _logger.info("  %-15s - %s", cmd.name.c_str(), cmd.description.c_str());
   }
 }
 

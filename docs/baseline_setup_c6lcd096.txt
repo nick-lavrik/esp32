@@ -1,0 +1,144 @@
+rst:0xc (SW_CPU),boot:0x6c (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4001975a
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x40875730,len:0x1278
+load:0x4086b910,len:0xc58
+load:0x4086e610,len:0x31c0
+entry 0x4086b910
+[I][app    ] 
+[I][app    ] 
+[I][app    ] *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+[I][app    ]  ESP32-C6 (esp32-c6-lcd096)
+[I][app    ] *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+[I][app    ] 
+[I][app    ] free heap memory from scratch: 316940
+[I][app    ] SD (SPI): CS=4 SCK=7 MOSI=6 MISO=5
+[   280][W][sd_diskio.cpp:180] sdCommand(): no token received
+[   385][W][sd_diskio.cpp:180] sdCommand(): no token received
+[   490][W][sd_diskio.cpp:180] sdCommand(): no token received
+[   595][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[   621][W][sd_diskio.cpp:180] sdCommand(): no token received
+[   726][W][sd_diskio.cpp:180] sdCommand(): no token received
+[   831][W][sd_diskio.cpp:180] sdCommand(): no token received
+[   936][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[   942][W][sd_diskio.cpp:533] ff_sd_initialize(): GO_IDLE_STATE failed
+[   948][E][sd_diskio.cpp:838] sdcard_mount(): f_mount failed: (3) The physical drive cannot work
+[   957][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  1062][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  1167][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  1272][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  1379][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  1484][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  1589][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  1694][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  1720][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  1825][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  1930][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  2035][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  2041][W][sd_diskio.cpp:533] ff_sd_initialize(): GO_IDLE_STATE failed
+[  2047][E][sd_diskio.cpp:838] sdcard_mount(): f_mount failed: (3) The physical drive cannot work
+[  2056][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  2161][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  2266][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  2371][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  2478][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  2583][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  2688][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  2793][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  2819][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  2924][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  3029][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  3134][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  3140][W][sd_diskio.cpp:533] ff_sd_initialize(): GO_IDLE_STATE failed
+[  3146][E][sd_diskio.cpp:838] sdcard_mount(): f_mount failed: (3) The physical drive cannot work
+[  3155][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  3260][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  3365][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  3470][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[W][app    ] SD init fail @ 4000000 Hz
+[  3577][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  3682][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  3787][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  3892][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  3918][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4023][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4128][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4233][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  4239][W][sd_diskio.cpp:533] ff_sd_initialize(): GO_IDLE_STATE failed
+[  4245][E][sd_diskio.cpp:838] sdcard_mount(): f_mount failed: (3) The physical drive cannot work
+[  4254][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4360][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4465][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4570][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  4677][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4782][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4887][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  4992][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  5018][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  5123][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  5228][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  5333][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  5339][W][sd_diskio.cpp:533] ff_sd_initialize(): GO_IDLE_STATE failed
+[  5345][E][sd_diskio.cpp:838] sdcard_mount(): f_mount failed: (3) The physical drive cannot work
+[  5354][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  5460][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  5565][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  5670][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  5777][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  5882][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  5987][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  6092][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  6118][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  6223][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  6328][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  6433][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[  6439][W][sd_diskio.cpp:533] ff_sd_initialize(): GO_IDLE_STATE failed
+[  6445][E][sd_diskio.cpp:838] sdcard_mount(): f_mount failed: (3) The physical drive cannot work
+[  6454][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  6560][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  6665][W][sd_diskio.cpp:180] sdCommand(): no token received
+[  6770][E][sd_diskio.cpp:205] sdCommand(): Card Failed! cmd: 0x00
+[W][app    ] SD init fail @ 400000 Hz
+[E][app    ] SD init fail. Check: card inserted? FAT32/FAT16 (NOT exFAT, NOT >32GB)? pins?
+[I][app    ] LittleFS mounted successfully (done)
+[I][app    ] EventDispatcher setup done
+[I][app    ] ConfigStorage init done
+[I][app    ] SerialCommander setup done
+[I][tft    ] initSprite(160, 40, depth=16)
+[I][app    ] Display setup done.
+[I][app    ] TouchScreen not found (disabled)!
+[I][app    ] NetworkSupervisor started with 1 profile(s)
+[I][web    ] portal started on port 80, auth off, 2 module(s)
+[I][app    ] WebPortal setup done
+[I][jpeg   ] "/background-01-160x80.jpg" 160x80 (25600:24393 bytes) - free (171656)
+[I][jpeg   ] Loaded 160x80, depth: 16 bit, buffer: 25600 B, memory: RAM
+[  7812][E][Preferences.cpp:506] getString(): nvs_get_str len fail: mqtt.prefix NOT_FOUND
+[  7821][E][NetworkManager.cpp:138] hostByName(): DNS Failed for 'broker.hivemq.com' with error '-54'
+[I][mqtt   ] topic prefix = 'mykola-lavryk'
+[I][console] mirror on -> mykola-lavryk/console/mqtt-esp32-c6-lcd096
+[  7830][E][NetworkClient.cpp:252] connect(): connect on fd 48, errno: 118, "Host is unreachable"
+[I][mqtt   ] devices/+/light-sensor listen
+[I][mqtt   ] broker.hivemq.com:1883 (mqtt-esp32-c6-lcd096) lwt:mykola-lavryk/devices/esp32-c6-lcd096/status
+[  7831][E][Preferences.cpp:506] getString(): nvs_get_str len fail: ecoflow.auto NOT_FOUND
+[D][ecoflow] DBEBZ5XD9180271  DELTA mini
+[D][ecoflow] DCEBZ8ZF2230701  DELTA Pro (104)
+[D][ecoflow] DCEBZ8ZE9250273  DELTA Pro (xama)
+[D][ecoflow] R331ZEB4ZEBW0026 DELTA 2
+[I][mqtt   ] MQTT connect fail    [broker.hivemq.com:1883]
+[  7849][E][NetworkManager.cpp:138] hostByName(): DNS Failed for 'mqtt-e.ecoflow.com' with error '-54'
+[I][ecoflow] mqtt-e.ecoflow.com:8883 account=app-d60c0ab5fc0b466f8f02762e8011935f, subscriptions: 8
+[I][app    ] FlipButton GPIO PIN=9
+[I][dino   ] layout 160x80 ground=73 player=22x24 apex=34 kinds=2
+[I][app    ] Dino game setup done (hi 1647)
+[I][app    ] ================ Display 160x80
+[  7859][E][ssl_client.cpp:127] start_ssl_client(): connect on fd 48, errno: 118, "Host is unreachable"
+[I][app    ] ConfigStorage load done
+[I][app    ] 	- clock = ON
+[I][app    ] 	- auto-brightness = false
+[I][app    ] 	- brightness = 1
+[I][app    ] 
+[  7869][E][NetworkClientSecure.cpp:159] connect(): start_ssl_client: connect failed: -1
+[D][app    ] free heap memory: 155784
+[I][app    ] 
+[I][app    ] > Ready. Enter 'list' for comand list.

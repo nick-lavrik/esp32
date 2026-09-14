@@ -2,20 +2,17 @@
 
 #include <Arduino.h>
 
+#include <Journal.hpp>
 #include <Logger.hpp>
 #include <RwLock.hpp>
+#include <SerialSink.hpp>
 
 #include "Display.h"
 
 extern Display display;
 
-#include <ScreenLogTail.hpp>
-
 void setupSerial() {
-  // #if !defined(SCREEN_LOG_TAIL_LINES) || !SCREEN_LOG_TAIL_LINES
   rwlock::registerObject(Serial);
-  rwlock::registerObject(screenLogTail());
-  // #endif
 
   Serial.begin(115200);
 #if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_C3) // !defined(BOARD_ESP8266)
@@ -32,6 +29,12 @@ void setupSerial() {
   // цього методу не має.
   Serial.setTxTimeoutMs(0);
 #endif
+  // Журнал піднімаємо одразу після Serial.begin() і ДО першого Logger::info():
+  // рядки, залоговані раніше (під час C++ static-init), уже лежать у кільці -
+  // новий приймач починає з хвоста, тому вони не губляться.
+  SerialSink::attach();
+  Journal::instance().begin();
+
   delay(200);
   Logger::info("");
   Logger::info("");

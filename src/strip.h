@@ -3,6 +3,7 @@
 #if __has_include(<Adafruit_NeoPixel.h>)
 
 #include <Adafruit_NeoPixel.h>
+#include <Logger.hpp>
 
 #define LED_PIN     8  // Пін керування вбудованим RGB LED
 #define NUM_LEDS    1  // Кількість світлодіодів на платі
@@ -47,22 +48,22 @@ void loopRgbLed() {
   // Значення кольору задаються від 0 (вимкнено) до 255 (максимум)
 
   // 1. Світимо ЧЕРВОНИМ
-  Serial.println("rgbLedWrite('red')");
+  Logger::info("rgbLedWrite('red')");
   rgbLedWrite(LED_PIN, 64, 0, 0); // 64 — помірна яскравість, щоб не сліпило
   delay(1000);
 
   // 2. Світимо ЗЕЛЕНИМ
-  Serial.println("rgbLedWrite('blue')");
+  Logger::info("rgbLedWrite('blue')");
   rgbLedWrite(LED_PIN, 0, 64, 0);
   delay(1000);
 
   // 3. Світимо СИНІМ
-  Serial.println("rgbLedWrite('green')");
+  Logger::info("rgbLedWrite('green')");
   rgbLedWrite(LED_PIN, 0, 0, 64);
   delay(1000);
 
   // 4. Повністю ВИМИКАЄМО світлодіод
-  Serial.println("rgbLedWrite(OFF)");
+  Logger::info("rgbLedWrite(OFF)");
   rgbLedWrite(LED_PIN, 0, 0, 0);
   delay(1000);
 }

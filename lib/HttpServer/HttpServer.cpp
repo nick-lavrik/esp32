@@ -1,14 +1,12 @@
 #include "HttpServer.hpp"
 
-#include <LittleFS.h>
-
 #include "HttpServerStartedEvent.hpp"
 #include "HttpServerStoppedEvent.hpp"
 #include "IEventDispatcher.hpp"
 #include "IStaticSource.hpp"
-#include "StaticRequestHandler.hpp"
+#include "StaticSourceHandler.hpp"
 // ITemplateResolver ще не реалізований (наступний крок) - setTemplateProcessor()
-// підключимо до StaticRequestHandler/AsyncFileResponse пізніше.
+// підключимо до StaticSourceHandler/AsyncFileResponse пізніше.
 // #include "ITemplateResolver.hpp"
 
 HttpServer::HttpServer(const HttpServerConfig& config) : _config(config), _server(config.port) {}
@@ -25,24 +23,51 @@ void HttpServer::setEventDispatcher(IEventDispatcher* eventDispatcher) {
   _eventDispatcher = eventDispatcher;
 }
 
+void HttpServer::setAuth(const String& username, const String& password) {
+  _authEnabled = username.length() > 0 && password.length() > 0;
+  if (!_authEnabled) return;
+
+  _auth.setUsername(username.c_str());
+  _auth.setPassword(password.c_str());
+  _auth.setAuthType(AsyncAuthType::AUTH_BASIC);
+  _auth.setRealm("ESP32");
+  _auth.setAuthFailureMessage("Authentication required");
+}
+
+bool HttpServer::hasAuth() const { return _authEnabled; }
+
 bool HttpServer::begin() {
   if (_isRunning) {
     return true;
   }
 
-  if (_staticSource != nullptr) {
-    // addHandler бере вказівник у std::unique_ptr всередині AsyncWebServer -
-    // видаляти самостійно не потрібно.
-    _server.addHandler(new StaticRequestHandler(_staticSource));
+  if (!_handlersRegistered) {
+    // Auth - middleware рівня сервера, тобто накриває і статику, і всі роути,
+    // зареєстровані модулями через server(). Додається ПЕРШИМ: інакше
+    // запит устиг би дійти до handler-а до перевірки.
+    if (_authEnabled) {
+      _server.addMiddleware(&_auth);
+    }
+
+    if (_staticSource != nullptr) {
+      // addHandler бере вказівник у std::unique_ptr всередині AsyncWebServer -
+      // видаляти самостійно не потрібно.
+      //
+      // serveStatic(LittleFS) тут НЕ дублюємо: LittleFS - лише одне з
+      // можливих джерел, і воно підключається ззовні через
+      // LittleFsStaticSource. Дубль давав би два шляхи віддачі того самого
+      // файлу з різною поведінкою (зокрема повз ProgmemStaticSource-fallback).
+      _server.addHandler(new StaticSourceHandler(_staticSource));
+    }
+
+    // Без цього AsyncWebServer::_catchAllHandler віддає 500 для будь-якого
+    // запиту, для якого жоден handler не спрацював (canHandle() == false
+    // у всіх). Явний onNotFound перетворює це на очікуваний 404.
+    _server.onNotFound(
+        [](AsyncWebServerRequest* request) { request->send(404, "text/plain", "Not found"); });
+
+    _handlersRegistered = true;
   }
-
-  _server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-
-  // Без цього AsyncWebServer::_catchAllHandler віддає 500 для будь-якого
-  // запиту, для якого жоден handler не спрацював (canHandle() == false
-  // у всіх). Явний onNotFound перетворює це на очікуваний 404.
-  _server.onNotFound(
-      [](AsyncWebServerRequest* request) { request->send(404, "text/plain", "Not found"); });
 
   _server.begin();
   _isRunning = true;

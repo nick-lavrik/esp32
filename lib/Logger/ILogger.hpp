@@ -2,7 +2,9 @@
 #include <cstdarg>
 #include <Print.h>
 
-enum class LogLevel { Error = 0, Warn = 1, Info = 2, Debug = 3, Verbose = 4 };
+// LogLevel живе в lib/Journal: про нього знає і логер, і кожен приймач
+// журналу, а про логер приймачі знати не зобов'язані.
+#include <JournalEntry.hpp>
 
 class ILogger : public Print {
 public:

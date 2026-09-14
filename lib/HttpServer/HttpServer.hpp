@@ -103,6 +103,28 @@ public:
   // Pointer injection за прийнятим у проєкті паттерном (nullptr за замовчуванням + setter).
   void setEventDispatcher(IEventDispatcher* eventDispatcher);
 
+  // HTTP Basic auth на ВЕСЬ сервер (middleware, тобто і статика, і API).
+  // Порожній username або password - автентифікація вимкнена: саме так
+  // виглядає стан "пароль ще не заданий" після чистої прошивки.
+  //
+  // Чому Basic, а не Digest (дефолт бібліотеки): вебка ходить з fetch(), і
+  // Digest тут нічого не рятує - трафік однаково відкритий (TLS на цьому
+  // сервері немає). Basic же розуміє будь-який клієнт, включно з curl -u.
+  //
+  // Викликати ДО begin(): middleware додається саме там.
+  void setAuth(const String& username, const String& password);
+  bool hasAuth() const;
+
+  // Прямий доступ до AsyncWebServer для реєстрації власних роутів
+  // (JSON-API модулів - див. lib/WebPortal). Свідомо не загортаємо кожен
+  // метод AsyncWebServer у власний: тут немає що додати, а дублювання
+  // сигнатур (on/addHandler/onRequestBody/serveStatic з усіма перевантаженнями)
+  // лише розходилось би з бібліотекою при її оновленні.
+  //
+  // Роути реєструються ДО begin(); auth застосується й до них, бо це
+  // middleware рівня сервера.
+  AsyncWebServer& server() { return _server; }
+
   // Піднімає сервер (реєструє роути, викликає AsyncWebServer::begin()).
   bool begin();
 
@@ -117,5 +139,12 @@ private:
   IStaticSource* _staticSource = nullptr;
   ITemplateResolver* _templateResolver = nullptr;
   IEventDispatcher* _eventDispatcher = nullptr;
+  AsyncAuthenticationMiddleware _auth;
+  bool _authEnabled = false;
   bool _isRunning = false;
+
+  // Статичний handler і middleware реєструються рівно один раз: AsyncWebServer
+  // не має removeHandler(), тож повторний begin() після end() інакше додав би
+  // другий такий самий handler.
+  bool _handlersRegistered = false;
 };

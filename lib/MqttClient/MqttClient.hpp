@@ -264,7 +264,7 @@ private:
   std::vector<MqttListenerCallback> _dispatchScratch;
 
   // Ліміти черг (drop-oldest при переповненні) - та сама політика, що в
-  // PrintQueue/ScreenLogTail.
+  // кільці Journal.
   //
   // Без ліміту _incomingQueue росла безмежно: PicoMQTT-гілка підписується на
   // "#", тобто мережевий таск кладе в чергу КОЖНЕ повідомлення брокера, а

@@ -1,6 +1,8 @@
 #include <Arduino.h> // Видаліть або замініть на <cstdio>, <cstring>, <cmath> для чистого C++
 #include "DataType.h"
 
+#include <Logger.hpp>
+
 // Буфер, який ви зарезервували.
 // static - навмисно: глобальний символ із зовнішнім зв'язуванням і настільки
 // загальним іменем як "buf" рано чи пізно зіткнеться з таким самим у якійсь
@@ -191,14 +193,14 @@ void process_and_log(const uint8_t* payload, unsigned int length) {
   format_payload_data(detectedType, payload, length, buf, sizeof(buf));
 
   // 3. Тепер у змінній buf лежить готовий рядок. Виводимо його куди завгодно:
-  Serial.println(buf); 
+  Logger::info("%s", buf);
 }
 
 // === СТАНДАРТНІ ФУНКЦІЇ ARDUINO ДЛЯ ТЕСТУ ===
 
 void testGuessDataType() {
 
-  Serial.println("--- TYPE HASHER TESTING ---");
+  Logger::info("--- TYPE HASHER TESTING ---");
 
   // Тест 1: Короткий рядок кириличних букв (2 символи "ОК")
   uint8_t test1[] = {0xD0, 0x9E, 0xD0, 0x9A}; // "ОК" в UTF-8

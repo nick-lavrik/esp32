@@ -1,54 +1,12 @@
 #include "SerialLogger.hpp"
 
+#include <Journal.hpp>
+
 #include <cstdio>
 #include <cstring>
 
-#include "LogCaptureRegistry.hpp"
-#include "LogLevelManager.hpp"
-#include "LogMirror.hpp"
-#include "PrintQueueRegistry.hpp"
 
-#if SCREEN_LOG_TAIL_LINES > 0
-#include "PrintFanout.hpp"
-#include "ScreenLogTail.hpp"
-
-namespace {
-// Meyer's singleton: static локальна змінна гарантовано ініціалізується
-// при першому виклику (уникає static initialization order fiasco між
-// цим TU і ScreenLogTail.cpp/іншими глобальними об'єктами). Один спільний
-// fanout (Serial + tail) для всіх SerialLogger-інстансів без явного output.
-PrintFanout<2>& serialLoggerFanout() {
-  static PrintFanout<2> fanout{Serial, screenLogTail()};
-  return fanout;
-}
-}  // namespace
-
-Print& serialLoggerOutput() { return serialLoggerFanout(); }
-
-#else
-
-Print& serialLoggerOutput() { return Serial; }
-
-#endif
-
-SerialLogger::SerialLogger(const char* tag, Print& output) : ILogger(tag), _output(output) {}
-
-const char* SerialLogger::levelName(LogLevel level) {
-  switch (level) {
-    case LogLevel::Error:
-      return "E";
-    case LogLevel::Warn:
-      return "W";
-    case LogLevel::Info:
-      return "I";
-    case LogLevel::Debug:
-      return "D";
-    case LogLevel::Verbose:
-      return "V";
-    default:
-      return "?";
-  }
-}
+SerialLogger::SerialLogger(const char* tag) : ILogger(tag) {}
 
 namespace {
 
@@ -69,67 +27,53 @@ size_t utf8Backtrack(const char* s, size_t pos, size_t floor) {
 }  // namespace
 
 void SerialLogger::log(LogLevel level, const char* fmt, va_list args) const {
-  if (level > LogLevelManager::instance().getLevel(_tag)) {
+  // Фільтр рівня живе в журналі (раніше - окремий LogLevelManager): там же,
+  // де матчинг тегів для приймачів, однією ієрархічною функцією на дві задачі.
+  // Перевірка тут, а не в publish(), навмисно: відкинутий рядок не доходить
+  // навіть до vsnprintf().
+  if (!Journal::instance().accepts(level, _tag)) {
     return;
   }
 
-  static constexpr size_t BUF_SIZE = PrintQueue::kLineSize;
+  // Рядок збирається так само, як до Journal - разом із префіксом і в один
+  // буфер, щоб обрізання довгих повідомлень лишилось тим самим до байта
+  // (критерій приймання етапу 1, docs/journal_plan.md). У журнал іде лише
+  // ТЕКСТ, без префікса: префікс додасть кожен приймач сам.
+  static constexpr size_t BUF_SIZE = JournalEntry::kTextSize;
   char line[BUF_SIZE];
 
-  // Префікс і повідомлення формуються в ОДИН буфер.
-  //
-  // Раніше буферів було два по BUF_SIZE: спершу vsnprintf() у buf, потім
-  // snprintf("[%s][%-5s] %s\n") у line. Через це довгий текст різався ДВІЧІ,
-  // причому друге обрізання враховувало ще й префікс — тобто фактичний ліміт
-  // був не BUF_SIZE, а BUF_SIZE мінус довжина префікса, і друге обрізання
-  // затирало кінець першого. Обидва рази — по сирому байту, без огляду на
-  // межі UTF-8.
-  const int prefixLen = snprintf(line, sizeof(line), "[%s][%-7s] ", levelName(level), _tag);
-  if (prefixLen < 0 || static_cast<size_t>(prefixLen) >= sizeof(line) - 2) {
+  const size_t prefixLen = journalFormatPrefix(level, _tag, line, sizeof(line));
+  if (prefixLen == 0 || prefixLen >= sizeof(line) - 2) {
     return;  // префікс не влазить — писати нічого (не має статись)
   }
 
-  // Місце під сам текст: лишаємо 2 байти на '\n' і '\0'.
-  const size_t avail = sizeof(line) - static_cast<size_t>(prefixLen) - 2;
+  // Місце під сам текст. Два зарезервовані байти зараз нікуди не пишуться -
+  // у кільце йде лише текст, без '\n' і без термінатора. Резерв лишений
+  // навмисно: він визначає, де саме обрізається довгий рядок, і прибрати його
+  // означало б зсунути межу обрізання на два символи проти еталона (критерій
+  // приймання етапу 1).
+  const size_t avail = sizeof(line) - prefixLen - 2;
   const int msgLen = vsnprintf(line + prefixLen, avail + 1, fmt, args);
   if (msgLen < 0) {
     return;  // помилка форматування
   }
 
   const bool truncated = static_cast<size_t>(msgLen) > avail;
-  size_t end = static_cast<size_t>(prefixLen) + (truncated ? avail : static_cast<size_t>(msgLen));
+  size_t end = prefixLen + (truncated ? avail : static_cast<size_t>(msgLen));
 
   if (truncated) {
     // Звільнити місце під маркер "..." і відкотитись до межі символу, щоб
     // не лишити обірваний UTF-8 перед маркером.
     static constexpr size_t kMarkLen = 3;
-    size_t cut = (end >= static_cast<size_t>(prefixLen) + kMarkLen) ? end - kMarkLen : static_cast<size_t>(prefixLen);
-    cut = utf8Backtrack(line, cut, static_cast<size_t>(prefixLen));
+    size_t cut = (end >= prefixLen + kMarkLen) ? end - kMarkLen : prefixLen;
+    cut = utf8Backtrack(line, cut, prefixLen);
     memcpy(line + cut, "...", kMarkLen);
     end = cut + kMarkLen;
   }
 
-  line[end] = '\n';
-  line[end + 1] = '\0';
-
-  // Якщо в цьому таску активний ScopedLogCapture - той самий рядок іде ще й
-  // туди (напр. у відповідь на MQTT-команду). Дублювання, а не перенаправлення:
-  // консоль лишається повною. Робимо ДО черги, бо PrintQueue може відкласти
-  // запис, а порядок рядків у відповіді має відповідати порядку виклику log().
-  if (Print* capture = LogCaptureRegistry::instance().current()) {
-    capture->write(reinterpret_cast<const uint8_t*>(line), end + 1);  // з '\n', без '\0'
-  }
-
-  // Глобальне дзеркало (lib/ConsoleMqtt) - на відміну від capture вище, воно
-  // НЕ прив'язане до таска: сенс саме в тому, щоб віддалено бачити весь потік,
-  // включно з мережевими тасками. Два механізми незалежні - рядок може піти і
-  // у відповідь на команду, і в дзеркало.
-  if (Print* mirror = LogMirror::current()) {
-    mirror->write(reinterpret_cast<const uint8_t*>(line), end + 1);
-  }
-
-  // Пряме write з таймаутом 10мс; якщо _output зайнятий - рядок піде
-  // в per-output чергу (PrintQueueRegistry) і буде відправлений пізніше
-  // наступним log()-викликом або періодичним PrintQueue::flush().
-  PrintQueueRegistry::instance().forOutput(_output).tryWrite(line, /*timeoutMs=*/10);
+  // Далі - ЛИШЕ публікація в кільце: один memcpy під мьютексом. Ні Serial, ні
+  // дзеркала, ні захоплення виводу команди звідси більше не викликаються -
+  // кожен із них став приймачем журналу (етапи 1, 3 і 5). Саме тому логування
+  // з "mqtt-net" чи з таска AsyncTCP більше нічого не чекає.
+  Journal::instance().publish(level, _tag, line + prefixLen, end - prefixLen);
 }
