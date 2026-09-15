@@ -363,8 +363,10 @@ NVS, а файли — це «те, що ви поклали з компа».
 
 ```cpp
 inline constexpr WifiNetworkInfo kWifiNetworks[] = {
-    {"Asus ", WIFI_PASSWORD, 100},
-    // {"Asus_5G", WIFI_PASSWORD_5G, 90},
+    {.ssid = "Asus ",          .password = WIFI5_PASSWORD, .priority = 100},
+    {.ssid = "5G.nick.lavrik", .password = WIFI5_PASSWORD, .priority = 100},
+    // seed — останнім рядком, див. нижче
+    {.ssid = WIFI_SSID_SEED,   .password = WIFI_PASSWORD_SEED, .priority = 0},
 };
 ```
 
@@ -374,9 +376,18 @@ inline constexpr WifiNetworkInfo kWifiNetworks[] = {
 * **SSID пишуться відкрито, паролі — тільки макросом.** `secrets.ini` у
   `.gitignore`, а `src/WifiNetworks.hpp` — ні. SSID і так світяться в ефірі,
   пароль у git потрапити не має.
-* **`WIFI_SSID` більше не існує.** Після появи таблиці build-flag був другим
-  описом тієї самої мережі; ключ `wifi_ssid` у `secrets.ini` тепер не читається.
-  Лишився тільки `wifi_password` → `WIFI_PASSWORD`.
+* **Два різні типи записів.** Іменовані рядки — постійні мережі, однакові для
+  всіх плат, лежать у git зі спільним паролем `WIFI5_PASSWORD`
+  (`secrets.wifi5_password`). Останній рядок — «мережа тут і зараз»:
+  `WIFI_SSID_SEED`/`WIFI_PASSWORD_SEED` з `secrets.wifi_ssid`/`wifi_password`,
+  тобто її можна підмінити без правки коду, і кожна плата має свою.
+  Пріоритет `0` у неї саме тому — це запасний варіант, який не повинен
+  відтісняти постійні мережі.
+* **Seed стоїть у таблиці ОСТАННІМ, і це не косметика.** `seedConnections()`
+  пропускає SSID, який у списку вже є, тож при дублі виграє той запис, що йде
+  раніше. У `secrets.ini` лежать закоментовані `"Asus "` і `"5G.nick.lavrik"` —
+  досить розкоментувати одну, і при seed-рядку зверху мережа мовчки дістала б
+  пріоритет `0` замість `100` та пароль з іншого ключа.
 * **Засів іде на кожному старті, але додає лише відсутні SSID.** Тому нова
   мережа в таблиці доїжджає на плату звичайною перепрошивкою, а не через
   `erase-flash`, і при цьому жоден `net connection modify` не відкочується.
@@ -398,6 +409,8 @@ inline constexpr WifiNetworkInfo kWifiNetworks[] = {
 * **`"Asus "` — з пробілом на кінці.** Тут він пишеться звичайним рядковим
   літералом і нікуди не гине, на відміну від файлів (де потрібна байтова форма,
   див. нижче) і консолі (де потрібні лапки: `net connection add ssid "Asus "`).
+  У `secrets.ini` значення теж береться в лапки (`wifi_ssid = "Asus "`) —
+  PlatformIO їх знімає при підстановці, у прошивку йде чистий рядок.
 
 ### Як спорядити плату мережами з компа
 
