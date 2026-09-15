@@ -167,6 +167,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #if HAS_WEB_PORTAL
 #include <WebCommandsModule.hpp>
 #include <WebConsoleModule.hpp>
+#include <WebFilesModule.hpp>
 #include <WebNvsModule.hpp>
 #include <WebPortal.hpp>
 #include <WebWifiModule.hpp>
@@ -414,6 +415,13 @@ WebCommandsModule webCommandsModule(commandHandler,
                                    [](const char* line) { return commandQueue.submit(line); },
                                    configStorage);
 WebNvsModule webNvsModule(configStorage);
+// Місткість розділу окремим замиканням: usedBytes()/totalBytes() є в
+// LittleFSFS, але не в fs::FS, через яке модуль дивиться на файлову систему.
+WebFilesModule webFilesModule(LittleFS, "LittleFS", [](size_t& used, size_t& total) {
+  used = LittleFS.usedBytes();
+  total = LittleFS.totalBytes();
+  return total > 0;
+});
 WebPortal webPortal(httpServer, configStorage);
 #endif
 
@@ -4221,6 +4229,7 @@ void setupWebPortal() {
   webPortal.addModule(&webConsoleModule);
   webPortal.addModule(&webCommandsModule);
   webPortal.addModule(&webNvsModule);
+   webPortal.addModule(&webFilesModule);
 
   if (!webPortal.begin()) {
     Logger::error("WebPortal setup failed");

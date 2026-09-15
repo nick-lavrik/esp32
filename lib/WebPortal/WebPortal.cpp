@@ -104,7 +104,10 @@ void WebPortal::_registerCoreRoutes() {
 }
 
 bool WebPortal::begin() {
-  // LittleFS - основне джерело, вшита сторінка - останній рубіж.
+  // Вшита сторінка - звичайне джерело; LittleFS стоїть ПЕРЕД нею, щоб при
+  // потребі можна було перекрити її кастомною статикою (див. .readme.md у
+  // data/www). Порядок той самий, що й був, - змінилось лише те, який із двох
+  // варіантів типовий.
   _staticSources.addSource(&_fsSource, 100);
   _staticSources.addSource(&_builtinSource, -100);
   _httpServer.setStaticSource(&_staticSources);
@@ -127,8 +130,11 @@ bool WebPortal::begin() {
 
   _logger.info("portal started on port 80, auth %s, %u module(s)",
                _httpServer.hasAuth() ? "on" : "off", (unsigned)_modules.size());
-  if (!LittleFS.exists(WEB_PORTAL_FS_ROOT "/index.html")) {
-    _logger.warn("no " WEB_PORTAL_FS_ROOT "/index.html in LittleFS, serving built-in page");
+  // Мовчимо, коли все звичайно (сторінка з прошивки), і кажемо, коли ні:
+  // кастомна сторінка в LittleFS перекриває вшиту, і побачити це в лозі треба
+  // саме тоді, коли портал раптом виглядає не так, як очікують.
+  if (LittleFS.exists(WEB_PORTAL_FS_ROOT "/index.html")) {
+    _logger.info("custom page in " WEB_PORTAL_FS_ROOT " overrides the built-in one");
   }
   return true;
 }

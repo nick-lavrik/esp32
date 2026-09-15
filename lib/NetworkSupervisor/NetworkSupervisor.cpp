@@ -1397,7 +1397,7 @@ void NetworkSupervisor::_notifyWpsPinGenerated(const std::string& pin) {
 }
 
 // Див. коментар у NetworkSupervisor.hpp. Назви станів - ті, що історично
-// друкує 'scan'; веб-портал перейшов на них (data/www/index.html).
+// друкує 'scan'; веб-портал перейшов на них (assets/www/index.html).
 // Формула платформи не стосується - тому поза #if, на відміну від таблиці
 // режимів автентифікації нижче.
 int wifiSignalQuality(long rssi) {

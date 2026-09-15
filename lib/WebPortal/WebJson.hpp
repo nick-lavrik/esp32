@@ -56,7 +56,7 @@ inline String boolean(bool value) { return value ? String("true") : String("fals
 inline String error(const char* message) { return String("{\"error\":") + quote(message) + "}"; }
 
 // {"ok":<bool>,"message":"..."} - єдиний формат результату задачі WebJobQueue.
-// Саме його розбирає сторінка (`runAction()` в data/www/index.html), тому
+// Саме його розбирає сторінка (`runAction()` в assets/www/index.html), тому
 // формат спільний для всіх модулів, а не власний у кожного.
 inline String ok(const char* message) {
   return String("{\"ok\":true,\"message\":") + quote(message) + "}";

@@ -123,21 +123,46 @@ textarea { background: var(--bg); border: 1px solid var(--line); color: var(--te
 textarea:focus { outline: 1px solid var(--accent); }
 /* Поле значення - окремий рядок під ключем і типом, а не впритул до них. */
 #nvs-value { margin-top: 10px; }
-#nvs-view { background: #0e1116; border: 1px solid var(--line); border-radius: 6px;
+#nvs-view, #fs-view { background: #0e1116; border: 1px solid var(--line); border-radius: 6px;
   padding: 10px; overflow-x: auto; overflow-y: auto; max-height: 50vh; white-space: pre;
   margin-top: 8px;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-#nvs-table td { vertical-align: baseline; }
+#nvs-table td, #fs-table td { vertical-align: baseline; }
 /* Клікабельний увесь рядок - як у переліку команд: клік відкриває View, і
    цілитись у маленьку кнопку не треба. Рядки-заглушки ("Loading…", "Nothing
    matches.") атрибута не мають, тому не підсвічуються й не клікаються. */
-#nvs-table tbody tr[data-nvs-view] { cursor: pointer; }
-#nvs-table tbody tr[data-nvs-view]:hover > td { background: #ffffff0f; }
+#nvs-table tbody tr[data-nvs-view],
+#fs-table tbody tr[data-fs-open], #fs-table tbody tr[data-fs-view] { cursor: pointer; }
+#nvs-table tbody tr[data-nvs-view]:hover > td,
+#fs-table tbody tr[data-fs-open]:hover > td,
+#fs-table tbody tr[data-fs-view]:hover > td { background: #ffffff0f; }
 /* Редактор і переглядач значення липнуть до верху: таблиця ключів довша за
    екран, і без цього кожна правка - це скрол угору по формі й назад. */
-#tab-nvs .col + .col { position: sticky; top: 16px; }
-@media (max-width: 900px) { #tab-nvs .col + .col { position: static; } }
-#nvs-table td.val { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+#tab-nvs .col + .col, #tab-files .col + .col { position: sticky; top: 16px; }
+/* Чому Files потребує ще й стелі висоти, а NVS - ні: sticky прилипає лише
+   тоді, коли елемент НИЖЧИЙ за видиму область. Редактор файла росте до 24
+   рядків, під ним підказка й переглядач на 50vh - разом це вище за екран, і
+   колонка просто їхала вгору разом зі сторінкою. Стеля робить її коротшою за
+   вікно, а зайве ховається у власний скрол. */
+#tab-files .col + .col { max-height: calc(100vh - 32px); overflow-y: auto; }
+@media (max-width: 900px) {
+  #tab-nvs .col + .col, #tab-files .col + .col { position: static; }
+  #tab-files .col + .col { max-height: none; overflow-y: visible; }
+}
+/* Хлібні крихти шляху: клік по будь-якому сегменту піднімає на його рівень -
+   окрема кнопка "вгору" потрібна лише для одного кроку. */
+#fs-crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }
+#fs-crumbs button { background: none; border: none; color: var(--accent); font: inherit;
+  cursor: pointer; padding: 2px 3px; border-radius: 4px; }
+#fs-crumbs button:hover { background: #ffffff12; }
+#fs-crumbs .sep { color: var(--muted); }
+#fs-content { margin-top: 10px; }
+/* Картинку показує браузер із /api/fs/raw - у переглядачі вона просто
+   вписується в ширину колонки. Шахівниця під нею потрібна для PNG і SVG з
+   прозорістю: на темному тлі порталу прозоре від чорного не відрізниш. */
+#fs-view img { display: block; max-width: 100%; height: auto;
+  background: repeating-conic-gradient(#2a2f37 0% 25%, #1c2027 0% 50%) 50% / 16px 16px; }
+#nvs-table td.val, #fs-table td.n { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 @media (max-width: 560px) { dl { grid-template-columns: 1fr; } th.opt, td.opt { display: none; } }
 </style>
@@ -155,6 +180,7 @@ textarea:focus { outline: 1px solid var(--accent); }
   <button data-tab="wifi" class="active">Wi-Fi</button>
   <button data-tab="commands">Commands</button>
   <button data-tab="nvs">NVS</button>
+  <button data-tab="files">Files</button>
   <button data-tab="console">Console</button>
 </nav>
 
@@ -192,7 +218,8 @@ textarea:focus { outline: 1px solid var(--accent); }
   <div class="col">
   <h2>Run</h2>
   <form class="row" id="run-form">
-    <input id="run-cmd" list="cmd-list" autocomplete="off" placeholder="command with arguments, e.g. net device wifi list">
+    <input id="run-cmd" list="cmd-list" autocomplete="off"
+           placeholder="command with arguments, e.g. net device wifi list">
     <button class="act" type="submit">Run</button>
     <button class="act ghost" type="button" id="btn-save-shortcut">Save as shortcut</button>
   </form>
@@ -227,7 +254,8 @@ textarea:focus { outline: 1px solid var(--accent); }
   </div>
 
   <div class="col">
-  <h2>Add or update <span id="nvs-ro" class="muted" style="font-size:.75em; font-weight:400" hidden>read-only namespace</span></h2>
+  <h2>Add or update
+    <span id="nvs-ro" class="muted" style="font-size:.75em; font-weight:400" hidden>read-only namespace</span></h2>
   <form id="nvs-form">
     <div class="row">
       <input id="nvs-key" maxlength="15" autocomplete="off" placeholder="key (max 15 chars)">
@@ -250,10 +278,50 @@ textarea:focus { outline: 1px solid var(--accent); }
     </div>
     <textarea id="nvs-value" rows="2" spellcheck="false" placeholder="value"></textarea>
   </form>
-  <p class="muted" id="nvs-hint">JSON strings are pretty-printed for editing and stored minified. Blob values (arrays, structs, floats) are read-only: their layout is not stored in NVS, so there is nothing safe to edit them against — “View” shows them as a hex dump.</p>
+  <p class="muted" id="nvs-hint">JSON strings are pretty-printed for editing and stored minified.
+    Blob values (arrays, structs, floats) are read-only: their layout is not stored in NVS, so there
+    is nothing safe to edit them against — “View” shows them as a hex dump.</p>
 
-  <h2 id="nvs-view-title" hidden>Value <span id="nvs-view-meta" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <h2 id="nvs-view-title" hidden>Value
+    <span id="nvs-view-meta" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
   <div id="nvs-view" hidden></div>
+  </div>
+ </div>
+</section>
+
+<section id="tab-files">
+ <div class="cols">
+  <div class="col">
+  <h2>Files <span id="fs-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <div class="row">
+    <div id="fs-crumbs" style="flex:1"></div>
+    <button class="act ghost" id="fs-mkdir">New folder</button>
+    <button class="act ghost" id="fs-new">New file</button>
+  </div>
+  <table id="fs-table">
+    <thead><tr><th>Name</th><th class="opt num">Size</th><th></th></tr></thead>
+    <tbody><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
+  </table>
+  </div>
+
+  <div class="col">
+  <h2>Editor <span id="fs-edit-meta" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <form id="fs-form">
+    <div class="row">
+      <input id="fs-file" autocomplete="off" spellcheck="false" placeholder="/path/to/file">
+      <button class="act" type="submit">Save</button>
+      <button class="act ghost" type="button" id="fs-clear">Clear</button>
+    </div>
+    <textarea id="fs-content" rows="8" spellcheck="false" placeholder="file contents"></textarea>
+  </form>
+  <p class="muted" id="fs-hint">Text files up to 4 KB can be edited here. Everything else is read-only:
+    images are shown as images, other binaries as a hex dump. Previews cover the whole file, not just
+    its beginning. Uploading whole files is not supported yet — use “pio run -t uploadfs”. Removing
+    /www leaves the portal on its built-in page, so it stays reachable.</p>
+
+  <h2 id="fs-view-title" hidden>Preview
+    <span id="fs-view-meta" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <div id="fs-view" hidden></div>
   </div>
  </div>
 </section>
@@ -330,6 +398,8 @@ document.querySelectorAll("nav button").forEach((btn) => {
     // Саме nvsData.namespace, а не типове значення: інакше повернення на
     // вкладку скидало б обраний namespace на власний.
     if (btn.dataset.tab === "nvs") refreshNvs(nvsData.namespace);
+    // Так само, як із namespace NVS: повертаємось у той каталог, де були.
+    if (btn.dataset.tab === "files") refreshFiles(fsData.path);
   };
 });
 
@@ -401,7 +471,8 @@ function renderScan(networks) {
       <td class="opt">${n.security}</td>
       <td class="opt num">ch ${n.channel}</td>
       <td>${signal(n.rssi, n.quality)}</td>
-      <td class="num">${n.hidden ? "" : `<button class="act ghost" data-join="${escapeHtml(n.ssid)}" data-open="${n.security === "OPEN"}">Join</button>`}</td>
+      <td class="num">${n.hidden ? "" : `<button class="act ghost" data-join="${escapeHtml(n.ssid)}"
+                                                 data-open="${n.security === "OPEN"}">Join</button>`}</td>
     </tr>`).join("");
 }
 
@@ -541,13 +612,15 @@ function renderShortcuts(list) {
   }
   box.innerHTML = list.map((s) => `
     <span class="chip">
-      <button class="act ghost" data-run="${escapeHtml(s.command)}" title="${escapeHtml(s.command)}">${escapeHtml(s.name)}</button>
+      <button class="act ghost" data-run="${escapeHtml(s.command)}"
+              title="${escapeHtml(s.command)}">${escapeHtml(s.name)}</button>
       <button class="act ghost" data-drop-shortcut="${s.index}" title="Remove shortcut">×</button>
     </span>`).join("");
 }
 
 async function refreshShortcuts() {
-  try { renderShortcuts(await api("/api/commands/shortcuts")); } catch (e) { /* наступне відкриття вкладки спробує знову */ }
+  // Помилку ковтаємо: наступне відкриття вкладки спробує знову.
+  try { renderShortcuts(await api("/api/commands/shortcuts")); } catch (e) { /* ignored */ }
 }
 
 // Команда виконується не тут, а в loop() пристрою, тому відповіді "готово"
@@ -841,15 +914,22 @@ $("#nvs-form").onsubmit = async (ev) => {
 };
 
 // Дамп у форматі xxd: зсув, 16 байтів двома групами по 8, ASCII-панель.
-// Складається тут, а не на пристрої: з дроту йде лише hex, а розкладка - це
-// текст, який браузер зробить утричі дешевше.
-function nvsHexDump(hex) {
-  const bytes = [];
-  for (let i = 0; i + 1 < hex.length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16));
+// Складається тут, а не на пристрої: розкладка - це текст, який браузер
+// зробить утричі дешевше. Спільний для блобів NVS і бінарних файлів - формат
+// той самий, і друга копія розійшлася б із першою.
+//
+// На вході байти: блоб NVS приїжджає hex-рядком у JSON (hexToBytes нижче), а
+// файл - як ArrayBuffer із /api/fs/raw, тобто вже байтами.
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return bytes;
+}
 
+function hexDump(bytes) {
   const lines = [];
   for (let off = 0; off < bytes.length; off += 16) {
-    const row = bytes.slice(off, off + 16);
+    const row = Array.from(bytes.subarray(off, off + 16));
     const cells = row.map((b) => b.toString(16).padStart(2, "0"));
     while (cells.length < 16) cells.push("  ");
     const ascii = row.map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".")).join("");
@@ -890,7 +970,7 @@ async function showNvsView(key) {
     if (!r || r.ok === false) { box.textContent = (r && r.message) || "Cannot read blob"; return; }
     $("#nvs-view-meta").textContent = key + " · blob · " + r.size + " bytes" +
       (r.truncated ? " (first " + (r.hex.length / 2) + " shown)" : "");
-    box.textContent = nvsHexDump(r.hex);
+    box.textContent = hexDump(hexToBytes(r.hex));
   } catch (e) {
     box.textContent = e.message;
   }
@@ -941,6 +1021,333 @@ $("#tab-nvs").addEventListener("click", async (ev) => {
   // Клік по рядку - те саме, що клік по View: атрибут висить і на <tr>.
   const view = ev.target.closest("[data-nvs-view]");
   if (view) { showNvsView(view.dataset.nvsView); return; }
+});
+
+/* ---------------- files ---------------- */
+
+// Останній знімок каталогу. Як і в NVS, тримаємо його, щоб перемальовувати
+// список без повторного запиту (черга задач на пристрої - чотири слоти).
+let fsData = { path: "/", entries: [] };
+
+function fsJoin(dir, name) {
+  return dir === "/" ? "/" + name : dir + "/" + name;
+}
+
+function fsParent(path) {
+  const cut = path.lastIndexOf("/");
+  return cut <= 0 ? "/" : path.substring(0, cut);
+}
+
+// Що показувати картинкою. Перелік розширень, а не спроба вгадати за вмістом:
+// тип однаково вирішує браузер за Content-Type, який пристрій виводить із того
+// самого розширення, тож друга схема розпізнавання тут нічого б не додала.
+const FS_IMAGES = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "svg", "ico", "avif"];
+
+function fsIsImage(path) {
+  const dot = path.lastIndexOf(".");
+  return dot > 0 && FS_IMAGES.includes(path.substring(dot + 1).toLowerCase());
+}
+
+function fsSize(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+// Крихти замість поля вводу: шлях тут не набирають, по ньому ходять, а один
+// клік замінює і кнопку "вгору", і повернення в корінь.
+function renderFsCrumbs() {
+  const parts = fsData.path.split("/").filter((p) => p.length);
+  const crumbs = [`<button data-fs-cd="/">${escapeHtml(fsData.label || "root")}</button>`];
+  let acc = "";
+  for (const part of parts) {
+    acc += "/" + part;
+    crumbs.push('<span class="sep">/</span>');
+    crumbs.push(`<button data-fs-cd="${escapeHtml(acc)}">${escapeHtml(part)}</button>`);
+  }
+  $("#fs-crumbs").innerHTML = crumbs.join("");
+}
+
+function fsActions(e, path) {
+  const p = escapeHtml(path);
+  const hidden = [`<button data-fs-rename="${p}">Rename</button>`,
+                  `<button class="danger" data-fs-drop="${p}">Delete</button>`];
+  // Каталог не звантажити й не відкрити в редакторі - для нього лишаються
+  // тільки перейменування й видалення.
+  if (!e.dir) {
+    hidden.unshift(`<button data-fs-edit="${p}">Edit</button>`);
+    hidden.unshift(`<button data-fs-get="${p}">Download</button>`);
+  }
+
+  const main = e.dir ? `<button class="act ghost" data-fs-open="${p}">Open</button>`
+                     : `<button class="act ghost" data-fs-view="${p}">View</button>`;
+  return `<span class="menu-wrap">
+      <span class="chip">${main}<button class="act ghost" data-fs-menu="${p}" title="More actions">▾</button></span>
+      <div class="menu" hidden>${hidden.join("")}</div>
+    </span>`;
+}
+
+function renderFs() {
+  renderFsCrumbs();
+
+  // Каталоги вгорі, далі за іменем: порядок у LittleFS - це порядок запису,
+  // тобто для того, хто шукає файл, випадковий.
+  const list = fsData.entries.slice().sort((a, b) =>
+    a.dir !== b.dir ? (a.dir ? -1 : 1) : a.name.localeCompare(b.name));
+
+  const usage = fsData.total
+    ? " · " + fsSize(fsData.used) + " of " + fsSize(fsData.total) + " used"
+    : "";
+  $("#fs-count").textContent = list.length + " item(s)" +
+    (fsData.truncated ? " — list truncated" : "") + usage;
+
+  const body = $("#fs-table tbody");
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="3" class="muted">Directory is empty.</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map((e) => {
+    const path = fsJoin(fsData.path, e.name);
+    // Головна дія рядка залежить від типу: каталог відкривається, файл
+    // показується. Атрибут той самий, що й на кнопці - обробник один.
+    const attr = e.dir ? "data-fs-open" : "data-fs-view";
+    return `
+    <tr ${attr}="${escapeHtml(path)}">
+      <td class="n" title="${escapeHtml(path)}">${e.dir ? "📁 " : ""}${escapeHtml(e.name)}</td>
+      <td class="opt num muted">${e.dir ? "" : fsSize(e.size)}</td>
+      <td class="num">${fsActions(e, path)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function closeFsMenus(except) {
+  document.querySelectorAll("#tab-files .menu").forEach((m) => {
+    if (m !== except) m.hidden = true;
+  });
+}
+
+async function refreshFiles(path) {
+  try {
+    const r = await job("/api/fs/list?path=" + encodeURIComponent(path || "/"));
+    if (!r || !r.ok) { toast((r && r.message) || "Cannot read directory", "err"); return; }
+    fsData = r;
+    renderFs();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+document.addEventListener("click", (ev) => {
+  if (!ev.target.closest("#tab-files")) closeFsMenus();
+});
+
+// Один запит на два сценарії: переглянути і відкрити в редакторі. Різниця
+// лише в тому, куди лягає прочитане, - другого роуту для цього не треба.
+// Розмір, за яким перегляд питає підтвердження. Не обмеження пристрою - він
+// однаково віддає файл потоком, - а межа розсудливості браузера: дамп 256 КБ
+// це понад 16 тисяч рядків і мегабайт тексту у вкладці. Показати їх можна,
+// але мовчки робити це на кожен клік не варто.
+const FS_BIG_PREVIEW = 256 * 1024;
+
+// Чи це текст. Та сама ознака, що була на пристрої: керівні байти, а не
+// "все < 0x80" - UTF-8 у файлі цілком законний, а 0x00 у текстовому - ні.
+function fsIsTextual(bytes) {
+  for (let i = 0; i < bytes.length; i++) {
+    const c = bytes[i];
+    if (c === 9 || c === 10 || c === 13) continue;
+    if (c < 0x20 || c === 0x7f) return false;
+  }
+  return true;
+}
+
+// Перегляд файла ЦІЛКОМ. Усе читання йде одним fetch по /api/fs/raw - тим
+// самим потоком, яким браузер тягне будь-яку статику, - а розпізнавання типу,
+// декодування UTF-8 і xxd-дамп робляться тут. Пристрій у цьому не бере участі
+// нічим, крім відкритого File: ні буфера в heap'і, ні hex у JSON, ні стель
+// показу (через них раніше було видно лише перші 4 КБ).
+async function fsRead(path, intoEditor) {
+  const box = $("#fs-view");
+  const show = (text, meta) => {
+    box.hidden = $("#fs-view-title").hidden = false;
+    $("#fs-view-meta").textContent = meta === undefined ? path : meta;
+    box.textContent = text;
+  };
+
+  const entry = fsData.entries.find((e) => fsJoin(fsData.path, e.name) === path);
+  const size = entry ? entry.size : 0;
+  const sized = (extra) => path + " · " + fsSize(size) + (extra || "");
+  const url = "/api/fs/raw?path=" + encodeURIComponent(path);
+
+  // Картинку віддаємо браузеру як є - він її і декодує, і масштабує.
+  if (fsIsImage(path)) {
+    show("", sized());
+    const img = document.createElement("img");
+    // Помилку декодування показуємо текстом: порожня рамка не пояснює нічого,
+    // а битий JPEG у флеші - цілком буденна річ.
+    img.onerror = () => show("Cannot display this image", sized());
+    img.src = url;
+    box.appendChild(img);
+    if (intoEditor) toast("Images are read-only", "err");
+    return;
+  }
+
+  // Редактор відмовляє ДО читання: розмір відомий зі списку, і тягнути 276 КБ
+  // заради того, щоб потім сказати "завеликий", безглуздо. Стеля та сама, що
+  // приймає роут запису (WEB_FS_MAX_WRITE).
+  if (intoEditor && size > 4096) {
+    toast("File is too large to edit", "err");
+    intoEditor = false;
+  }
+
+  if (size > FS_BIG_PREVIEW &&
+      !confirm("This file is " + fsSize(size) + ". Render the whole preview?")) {
+    return;
+  }
+
+  // У режимі правки переглядач мовчить, поки не виявиться, що показувати таки
+  // є що (бінарник або помилка): інакше той самий текст стояв би в редакторі й
+  // під ним другою копією.
+  if (!intoEditor) show("reading…", sized());
+
+  try {
+    const res = await fetch(url);
+    if (res.status === 401) { toast("Authentication required", "err"); return; }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      show((body && body.error) || ("HTTP " + res.status), sized());
+      return;
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // Розмір беремо з відповіді, а не зі списку: список міг застаріти.
+    const meta = path + " · " + fsSize(bytes.length);
+
+    if (!fsIsTextual(bytes)) {
+      show(hexDump(bytes), meta + " · binary");
+      if (intoEditor) toast("Binary file is read-only", "err");
+      return;
+    }
+    // fatal: false - зіпсований UTF-8 стає U+FFFD замість винятку: у флеші
+    // трапляється й недописаний файл, і показати його краще, ніж помилку.
+    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+
+    if (!intoEditor) { show(bytes.length === 0 ? "(empty)" : text, meta); return; }
+
+    box.hidden = $("#fs-view-title").hidden = true;
+    $("#fs-file").value = path;
+    $("#fs-content").value = text;
+    fsSyncEditor();
+    $("#fs-content").focus();
+  } catch (e) {
+    show(e.message, sized());
+  }
+}
+
+function fsSyncEditor() {
+  const box = $("#fs-content");
+  box.rows = Math.min(24, Math.max(8, box.value.split("\n").length));
+  $("#fs-edit-meta").textContent = box.value.length ? box.value.length + " byte(s)" : "";
+}
+
+$("#fs-content").oninput = fsSyncEditor;
+
+$("#fs-clear").onclick = () => {
+  $("#fs-file").value = "";
+  $("#fs-content").value = "";
+  $("#fs-view").hidden = $("#fs-view-title").hidden = true;
+  fsSyncEditor();
+  $("#fs-file").focus();
+};
+
+// Новий файл - це та сама форма з підставленим каталогом: окремий діалог
+// створення не потрібен, бо запис і перезапис на пристрої - одна дія.
+$("#fs-new").onclick = () => {
+  $("#fs-file").value = fsJoin(fsData.path, "");
+  $("#fs-content").value = "";
+  fsSyncEditor();
+  $("#fs-file").focus();
+};
+
+$("#fs-mkdir").onclick = async () => {
+  const name = prompt("New folder in " + fsData.path);
+  if (!name) return;
+  try {
+    const r = await job("/api/fs/mkdir", form({ path: fsJoin(fsData.path, name.trim()) }));
+    toast((r && r.message) || "Created", r && r.ok === false ? "err" : "ok");
+  } catch (e) { toast(e.message, "err"); }
+  refreshFiles(fsData.path);
+};
+
+$("#fs-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const path = $("#fs-file").value.trim();
+  if (!path || path.endsWith("/")) { toast("Enter a file path", "err"); return; }
+
+  try {
+    const r = await job("/api/fs/file", form({ path, content: $("#fs-content").value }));
+    toast((r && r.message) || "Saved", r && r.ok === false ? "err" : "ok");
+  } catch (e) { toast(e.message, "err"); }
+  // Каталог збереженого файла може бути не тим, що показано зараз - тоді
+  // список просто лишиться на місці.
+  refreshFiles(fsData.path);
+};
+
+$("#tab-files").addEventListener("click", async (ev) => {
+  const menuBtn = ev.target.closest("[data-fs-menu]");
+  if (menuBtn) {
+    const menu = menuBtn.closest(".menu-wrap").querySelector(".menu");
+    closeFsMenus(menu);
+    menu.hidden = !menu.hidden;
+    return;
+  }
+  closeFsMenus();
+
+  const cd = ev.target.closest("[data-fs-cd]");
+  if (cd) { refreshFiles(cd.dataset.fsCd); return; }
+
+  // Звантаження - звичайне посилання, а не fetch: файл іде повз чергу задач
+  // потоком, і збирати його в памʼяті вкладки заради цього не треба.
+  const get = ev.target.closest("[data-fs-get]");
+  if (get) {
+    window.location.href = "/api/fs/raw?download=1&path=" + encodeURIComponent(get.dataset.fsGet);
+    return;
+  }
+
+  const edit = ev.target.closest("[data-fs-edit]");
+  if (edit) { fsRead(edit.dataset.fsEdit, true); return; }
+
+  const ren = ev.target.closest("[data-fs-rename]");
+  if (ren) {
+    const to = prompt("Rename to (absolute path)", ren.dataset.fsRename);
+    if (!to || to === ren.dataset.fsRename) return;
+    try {
+      const r = await job("/api/fs/rename", form({ from: ren.dataset.fsRename, to: to.trim() }));
+      toast((r && r.message) || "Renamed", r && r.ok === false ? "err" : "ok");
+    } catch (e) { toast(e.message, "err"); }
+    refreshFiles(fsData.path);
+    return;
+  }
+
+  // Delete і решта рідкісних дій - ДО головної: рядок таблиці теж несе
+  // data-fs-open / data-fs-view, і closest() від кнопки знайшов би його.
+  const drop = ev.target.closest("[data-fs-drop]");
+  if (drop) {
+    if (!confirm("Delete “" + drop.dataset.fsDrop + "”?")) return;
+    try {
+      const r = await job("/api/fs/remove?path=" + encodeURIComponent(drop.dataset.fsDrop),
+                          { method: "DELETE" });
+      toast((r && r.message) || "Removed", r && r.ok === false ? "err" : "ok");
+    } catch (e) { toast(e.message, "err"); }
+    refreshFiles(fsData.path);
+    return;
+  }
+
+  const open = ev.target.closest("[data-fs-open]");
+  if (open) {
+    $("#fs-view").hidden = $("#fs-view-title").hidden = true;
+    refreshFiles(open.dataset.fsOpen);
+    return;
+  }
+
+  const view = ev.target.closest("[data-fs-view]");
+  if (view) { fsRead(view.dataset.fsView, false); return; }
 });
 
 /* ---------------- console ---------------- */
