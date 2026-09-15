@@ -128,6 +128,15 @@ textarea:focus { outline: 1px solid var(--accent); }
   margin-top: 8px;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #nvs-table td { vertical-align: baseline; }
+/* Клікабельний увесь рядок - як у переліку команд: клік відкриває View, і
+   цілитись у маленьку кнопку не треба. Рядки-заглушки ("Loading…", "Nothing
+   matches.") атрибута не мають, тому не підсвічуються й не клікаються. */
+#nvs-table tbody tr[data-nvs-view] { cursor: pointer; }
+#nvs-table tbody tr[data-nvs-view]:hover > td { background: #ffffff0f; }
+/* Редактор і переглядач значення липнуть до верху: таблиця ключів довша за
+   екран, і без цього кожна правка - це скрол угору по формі й назад. */
+#tab-nvs .col + .col { position: sticky; top: 16px; }
+@media (max-width: 900px) { #tab-nvs .col + .col { position: static; } }
 #nvs-table td.val { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 @media (max-width: 560px) { dl { grid-template-columns: 1fr; } th.opt, td.opt { display: none; } }
@@ -679,7 +688,7 @@ function renderNvs() {
     return;
   }
   body.innerHTML = list.map((e) => `
-    <tr>
+    <tr data-nvs-view="${escapeHtml(e.key)}">
       <td>${escapeHtml(e.key)}</td>
       <td class="opt muted">${escapeHtml(e.type)}</td>
       <td class="val" title="${escapeHtml(e.value)}">${escapeHtml(e.value)}</td>
@@ -846,7 +855,7 @@ function nvsHexDump(hex) {
     const ascii = row.map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".")).join("");
     lines.push(off.toString(16).padStart(8, "0") + "  " +
                cells.slice(0, 8).join(" ") + "  " + cells.slice(8).join(" ") +
-               "  |" + ascii + "|");
+               "  " + ascii);
   }
   return lines.join("\n");
 }
@@ -915,18 +924,23 @@ $("#tab-nvs").addEventListener("click", async (ev) => {
     return;
   }
 
-  const view = ev.target.closest("[data-nvs-view]");
-  if (view) { showNvsView(view.dataset.nvsView); return; }
-
+  // Delete перевіряється ДО View: сам рядок таблиці теж несе data-nvs-view,
+  // тож інакше клік по Delete відкрив би переглядач замість видалення.
   const drop = ev.target.closest("[data-nvs-drop]");
-  if (drop && confirm("Delete key “" + drop.dataset.nvsDrop + "”?")) {
+  if (drop) {
+    if (!confirm("Delete key “" + drop.dataset.nvsDrop + "”?")) return;
     try {
       const r = await job("/api/nvs/entry?key=" + encodeURIComponent(drop.dataset.nvsDrop),
                           { method: "DELETE" });
       toast((r && r.message) || "Removed", r && r.ok === false ? "err" : "ok");
     } catch (e) { toast(e.message, "err"); }
     refreshNvs(nvsData.namespace);
+    return;
   }
+
+  // Клік по рядку - те саме, що клік по View: атрибут висить і на <tr>.
+  const view = ev.target.closest("[data-nvs-view]");
+  if (view) { showNvsView(view.dataset.nvsView); return; }
 });
 
 /* ---------------- console ---------------- */
