@@ -171,6 +171,9 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <WebNvsModule.hpp>
 #include <WebPortal.hpp>
 #include <WebWifiModule.hpp>
+#if HAS_SCREEN_MIRROR
+#include <WebScreenModule.hpp>
+#endif
 #endif
 
 // HAS_ECOFLOW_CLIENT приходить з build_flags (див. platformio.ini, env з
@@ -422,6 +425,12 @@ WebFilesModule webFilesModule(LittleFS, "LittleFS", [](size_t& used, size_t& tot
   total = LittleFS.totalBytes();
   return total > 0;
 });
+#if HAS_SCREEN_MIRROR
+// Дзеркало екрана. Плата без спрайта кадру (esp32-c3) або з 1bpp-панеллю
+// (esp8266) віддавати браузеру нічого не може - там розділу просто немає
+// (див. HAS_SCREEN_MIRROR у src/Display.h).
+WebScreenModule webScreenModule;
+#endif
 WebPortal webPortal(httpServer, configStorage);
 #endif
 
@@ -4230,6 +4239,9 @@ void setupWebPortal() {
   webPortal.addModule(&webCommandsModule);
   webPortal.addModule(&webNvsModule);
    webPortal.addModule(&webFilesModule);
+#if HAS_SCREEN_MIRROR
+  webPortal.addModule(&webScreenModule);
+#endif
 
   if (!webPortal.begin()) {
     Logger::error("WebPortal setup failed");
@@ -4282,9 +4294,13 @@ void drawSystemInfo() {
   char buf[120] = "";
   uint8_t row = 0;
   #if BOARD_ESP32_C6_LCD096
-  uint8_t space = 2;
+  constexpr uint8_t space = 2;
+  constexpr uint8_t top = 2; // space
+  constexpr uint8_t left = 2; // space
   #else
-  uint8_t space = 5;
+  constexpr uint8_t space = 5;
+  constexpr uint8_t top = 10; // space * 2
+  constexpr uint8_t left = 10; // space * 2
   #endif
   // img.fillRect(0, 30, 320, 65, BG_COLOR);
 
@@ -4297,7 +4313,7 @@ void drawSystemInfo() {
   display.setTextColor(TFT_DARKGREY);
 
 #if defined(ESP32)
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.setCursor(left, top + row++ * (space + display.fontHeight()));
   // %u + (unsigned): uint32_t на RISC-V (C6) це "long unsigned int", тобто під
   // %d він не підходить (varargs типи мусять збігатися). Каст робить рядок
   // однаковим і для Xtensa, і для RISC-V.
@@ -4340,15 +4356,15 @@ void drawSystemInfo() {
   }
 
 #elif BOARD_ESP32_C6_LCD096
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.setCursor(left, top + row++ * (space + display.fontHeight()));
   snprintf(buf, sizeof(buf), "CPU: %u MHz", (unsigned)cpuFreq);
   display.print(buf);
 
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.setCursor(left, top + row++ * (space + display.fontHeight()));
   snprintf(buf, sizeof(buf), "Loop rate: %u/s", (unsigned)display.loopFrameRate());
   display.print(buf);
 #else
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.setCursor(left, top + row++ * (space + display.fontHeight()));
   snprintf(buf, sizeof(buf), "CPU: %u MHz   Loop rate: %u/s", (unsigned)cpuFreq,
            (unsigned)display.loopFrameRate());
   display.print(buf);
@@ -4361,7 +4377,7 @@ void drawSystemInfo() {
   // display.printf("Heap free: %d KB", freeHeap / 1024);
 #else
   uint32_t totalHeap = ESP.getHeapSize();
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.setCursor(left, top + row++ * (space + display.fontHeight()));
   // %u + (unsigned) - див. коментар біля "Uptime" вище.
   // Порядок множення теж важливий: freeHeap * 100 для ~320 KB купи ще влазить
   // у 32 біти, але запас невеликий - рахуємо через 64-бітний проміжок.
@@ -4373,7 +4389,7 @@ void drawSystemInfo() {
 #if defined(ESP32)
   char* dumpPingStr = dumpPingStatsStr();
   if (dumpPingStr) {
-    display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+    display.setCursor(left, top + row++ * (space + display.fontHeight()));
     display.print(dumpPingStr);  // було: повторний виклик dumpPingStatsStr()
   }
 
@@ -4384,23 +4400,23 @@ void drawSystemInfo() {
   #else
   snprintf(buf, sizeof(buf), "WiFi: %s (%d dBm / %d%%)", WiFi.SSID().c_str(), WiFi.RSSI(), wifiSignalQuality(WiFi.RSSI()));
   #endif
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.setCursor(left, top + row++ * (space + display.fontHeight()));
   display.print(buf);
 
 
   snprintf(buf, sizeof(buf), "IP: %s", WiFi.localIP().toString().c_str());
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.setCursor(left, top + row++ * (space + display.fontHeight()));
   display.print(buf);
 
   snprintf(buf, sizeof(buf), "Brightness: %d%% %s", display.brightness(), isAutoBrightness ? "(auto)" : "");
-  display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+  display.setCursor(left, top + row++ * (space + display.fontHeight()));
   display.print(buf);
 
   #if LIGHT_SENSOR_PIN > 0
     // display.setTextSize(1);
     // display.setTextColor(TFT_DARKGREY);
     // display.setCursor(10, display.height() - 1 * (5 + display.fontHeight()));
-    display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
+    display.setCursor(left, top + row++ * (space + display.fontHeight()));
     display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
   #endif
 

@@ -164,6 +164,12 @@ textarea:focus { outline: 1px solid var(--accent); }
   background: repeating-conic-gradient(#2a2f37 0% 25%, #1c2027 0% 50%) 50% / 16px 16px; }
 #nvs-table td.val, #fs-table td.n { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+/* Дзеркало екрана. Згладжування тут шкідливе: масштаб цілочисельний, і
+   інтерполяція показала б піксели, яких на панелі немає. Тло рамки те саме,
+   що в стрічки логу, - це теж "вікно в пристрій", а не елемент сторінки. */
+#scr-frame { display: inline-block; max-width: 100%; padding: 10px; background: #0e1116;
+  border: 1px solid var(--line); border-radius: 6px; }
+#scr-canvas { display: block; max-width: 100%; background: #000; image-rendering: pixelated; }
 @media (max-width: 560px) { dl { grid-template-columns: 1fr; } th.opt, td.opt { display: none; } }
 </style>
 </head>
@@ -181,6 +187,7 @@ textarea:focus { outline: 1px solid var(--accent); }
   <button data-tab="commands">Commands</button>
   <button data-tab="nvs">NVS</button>
   <button data-tab="files">Files</button>
+  <button data-tab="screen">Screen</button>
   <button data-tab="console">Console</button>
 </nav>
 
@@ -326,6 +333,36 @@ textarea:focus { outline: 1px solid var(--accent); }
  </div>
 </section>
 
+<section id="tab-screen">
+  <h2>Display <span id="scr-stat" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <div class="row" id="scr-controls">
+    <button class="act" id="scr-run">Pause</button>
+    <select id="scr-rate" title="How often the browser asks for the next strip">
+      <option value="25">Live</option>
+      <option value="100">10 / s</option>
+      <option value="200" selected>5 / s</option>
+      <option value="1000">1 / s</option>
+    </select>
+    <select id="scr-fmt" title="Pixel format on the wire">
+      <option value="332" selected>Fast color (8-bit)</option>
+      <option value="565">Exact color (16-bit)</option>
+    </select>
+    <select id="scr-zoom" title="Zoom">
+      <option value="1">1&times;</option>
+      <option value="2">2&times;</option>
+      <option value="3" selected>3&times;</option>
+      <option value="4">4&times;</option>
+      <option value="0">Fit width</option>
+    </select>
+    <button class="act ghost" id="scr-save">Save PNG</button>
+  </div>
+  <div id="scr-frame"><canvas id="scr-canvas" width="16" height="16"></canvas></div>
+  <p class="muted" id="scr-hint">The device draws a frame in horizontal strips and never keeps a
+     whole frame in RAM, so the browser collects them here - one strip per request. "Live" already
+     matches the rate the device itself redraws at; a moving picture may show a seam between strips,
+     because neighbouring strips come from different device frames.</p>
+</section>
+
 <section id="tab-console">
   <h2>Log <span id="feed" class="muted" style="font-size:.75em; font-weight:400; cursor:pointer"></span></h2>
   <div id="log"></div>
@@ -395,6 +432,7 @@ document.querySelectorAll("nav button").forEach((btn) => {
     // поки не настане наступний тік.
     if (btn.dataset.tab === "wifi") refreshWifi();
     if (btn.dataset.tab === "commands") refreshShortcuts();
+    if (btn.dataset.tab === "screen") screenOpen();
     // Саме nvsData.namespace, а не типове значення: інакше повернення на
     // вкладку скидало б обраний namespace на власний.
     if (btn.dataset.tab === "nvs") refreshNvs(nvsData.namespace);
@@ -1507,6 +1545,176 @@ $("#cmd").onkeydown = (ev) => {
   historyPos += ev.key === "ArrowUp" ? -1 : 1;
   historyPos = Math.max(0, Math.min(history.length, historyPos));
   ev.target.value = history[historyPos] || "";
+};
+
+/* ---------------- screen ---------------- */
+
+// Дзеркало фізичного екрана. Пристрій повного кадру в RAM не тримає - він
+// малює смугами (DISPLAY_SPLIT_COUNT) і віддає ту смугу, яку щойно виштовхнув
+// у панель. Повний екран збирається ТУТ: кожна смуга лягає в canvas зі зсувом
+// index * splitHeight, тобто сторінка дублює display.flush() пристрою.
+//
+// Темп задає браузер: наступний запит іде лише після того, як приїхав
+// попередній (poller), а плата знімає смугу рівно на запит. Тому "оновлювати
+// кожен XX кадр" ніде не налаштовується - воно виходить саме собою, а Pause
+// означає, що для вкладки пристрій не робить узагалі нічого.
+const scr = { info: null, poll: null, ctx: null, paused: false,
+              frames: 0, strips: 0, bytes: 0, since: 0 };
+
+// Розтягування 2/3/5/6 бітів у повний байт. Таблиці, а не ділення в циклі:
+// пікселів тут десятки тисяч на секунду.
+const SCR_L2 = [0, 85, 170, 255];
+const SCR_L3 = [0, 36, 73, 109, 146, 182, 219, 255];
+const SCR_L5 = Array.from({ length: 32 }, (_, i) => Math.round((i * 255) / 31));
+const SCR_L6 = Array.from({ length: 64 }, (_, i) => Math.round((i * 255) / 63));
+
+const onScreenTab = () => $("#tab-screen").classList.contains("active");
+
+function scrZoom() {
+  const zoom = +$("#scr-zoom").value;
+  const canvas = $("#scr-canvas");
+  // Fit width - для вузького вікна; решта значень цілочисельні, бо пікселі
+  // панелі мають лишатись квадратами, а не розмитим градієнтом.
+  canvas.style.width = zoom ? canvas.width * zoom + "px" : "100%";
+}
+
+async function scrLoadInfo() {
+  const info = await api("/api/screen/info");
+  scr.info = info;
+  if (!info.available) {
+    $("#scr-controls").hidden = true;
+    $("#scr-frame").hidden = true;
+    $("#scr-hint").textContent = "This board builds no frame buffer, so there is nothing to mirror.";
+    return false;
+  }
+  const canvas = $("#scr-canvas");
+  canvas.width = info.width;
+  canvas.height = info.height;
+  scr.ctx = canvas.getContext("2d");
+  scr.ctx.fillStyle = "#000";
+  scr.ctx.fillRect(0, 0, canvas.width, canvas.height);
+  scrZoom();
+  return true;
+}
+
+// Смуга -> пікселі canvas. Формат приїжджає заголовком, бо порядок байтів
+// RGB565 залежить від графічного бекенда плати (LovyanGFX тримає старший
+// байт першим), і вгадувати його на клієнті не можна.
+function scrDraw(bytes, head) {
+  const w = head.width, h = head.height;
+  if (!w || !h || !scr.ctx) return;
+  const img = scr.ctx.createImageData(w, h);
+  const px = img.data;
+  const count = w * h;
+
+  if (head.format === "332") {
+    for (let i = 0, o = 0; i < count; i++, o += 4) {
+      const v = bytes[i];
+      px[o] = SCR_L3[v >> 5];
+      px[o + 1] = SCR_L3[(v >> 2) & 7];
+      px[o + 2] = SCR_L2[v & 3];
+      px[o + 3] = 255;
+    }
+  } else {
+    const big = head.format === "565be";
+    for (let i = 0, o = 0; i < count; i++, o += 4) {
+      const lo = bytes[i * 2], hi = bytes[i * 2 + 1];
+      const c = big ? (lo << 8) | hi : (hi << 8) | lo;
+      px[o] = SCR_L5[c >>> 11];
+      px[o + 1] = SCR_L6[(c >>> 5) & 63];
+      px[o + 2] = SCR_L5[c & 31];
+      px[o + 3] = 255;
+    }
+  }
+  scr.ctx.putImageData(img, 0, head.index * h);
+}
+
+// fps тут - ПОВНІ екрани за секунду, і рахуються вони не діленням смуг на
+// splitCount (це було б оцінкою), а по факту: плата віддає смуги по колу, тож
+// прихід ОСТАННЬОЇ смуги означає, що екран щойно оновився цілком. Поруч -
+// смуги за секунду, щоб було видно, з чого ті кадри складаються: "3 fps ·
+// 12 strips/s" на екрані з чотирьох смуг - це рівно 12 запитів, а не 3.
+function scrStat(now) {
+  if (!scr.since) { scr.since = now; return; }
+  const dt = (now - scr.since) / 1000;
+  if (dt < 1) return;
+  $("#scr-stat").textContent = (scr.frames / dt).toFixed(1) + " fps · " +
+                               (scr.strips / dt).toFixed(0) + " strips/s · " +
+                               (scr.bytes / dt / 1024).toFixed(0) + " KB/s";
+  scr.frames = 0;
+  scr.strips = 0;
+  scr.bytes = 0;
+  scr.since = now;
+}
+
+async function scrTick() {
+  const res = await fetch("/api/screen/strip?fmt=" + $("#scr-fmt").value);
+  if (res.status === 401) { toast("Authentication required", "err"); throw new Error("unauthorized"); }
+  // 204 - смугу ще не знято (перший запит після паузи або зміни формату).
+  // Це не збій: відступ poller'а тут якраз зашкодив би. Лічильник усе одно
+  // оновлюємо, інакше при повільній платі цифри в шапці просто застигли б.
+  if (res.status === 204) { scrStat(Date.now()); return; }
+  if (!res.ok) throw new Error("HTTP " + res.status);
+
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const index = +res.headers.get("X-Screen-Index");
+  scrDraw(bytes, {
+    width: +res.headers.get("X-Screen-Width"),
+    height: +res.headers.get("X-Screen-Height"),
+    index: index,
+    format: res.headers.get("X-Screen-Format"),
+  });
+  scr.strips++;
+  scr.bytes += bytes.length;
+  // Остання смуга кола - екран зібрано цілком.
+  if (index === ((scr.info && scr.info.splitCount) || 1) - 1) scr.frames++;
+  scrStat(Date.now());
+}
+
+function scrStop() {
+  if (scr.poll) scr.poll.stop();
+  scr.poll = null;
+  $("#scr-run").textContent = "Resume";
+  $("#scr-stat").textContent = "paused";
+}
+
+function scrStart() {
+  if (scr.poll) scr.poll.stop();
+  scr.frames = 0;
+  scr.strips = 0;
+  scr.bytes = 0;
+  scr.since = 0;
+  scr.poll = poller(scrTick, +$("#scr-rate").value, onScreenTab);
+  $("#scr-run").textContent = "Pause";
+}
+
+// Відкриття вкладки: геометрія береться один раз, далі летять лише смуги.
+// Паузу вкладка памʼятає - перемикання вкладок не має її скидати.
+async function screenOpen() {
+  try {
+    if (!scr.info && !(await scrLoadInfo())) return;
+    if (!scr.poll && !scr.paused) scrStart();
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+$("#scr-run").onclick = () => {
+  scr.paused = !scr.paused;
+  if (scr.paused) scrStop(); else scrStart();
+};
+
+// Період і формат міняються на льоту - перезапускаємо опитувальник, бо його
+// період фіксується при створенні.
+$("#scr-rate").onchange = () => { if (scr.poll) scrStart(); };
+$("#scr-fmt").onchange = () => { if (scr.poll) scrStart(); };
+$("#scr-zoom").onchange = scrZoom;
+
+$("#scr-save").onclick = () => {
+  const link = document.createElement("a");
+  link.download = "screen.png";
+  link.href = $("#scr-canvas").toDataURL("image/png");
+  link.click();
 };
 
 /* ---------------- boot ---------------- */

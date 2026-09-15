@@ -310,6 +310,12 @@ class TFT_eSprite {
     _tft->draw16bitRGBBitmap(x, y, _canvas->getFramebuffer(), _canvas->width(), _canvas->height());
   }
 
+  // Прямий доступ до пікселів канви (RGB565, рідний порядок байтів) -
+  // потрібен дзеркалу екрана у веб-порталі (lib/ScreenMirror). Ім'я збігається
+  // з TFT_eSprite::getPointer() справжнього TFT_eSPI, тому Display.cpp не
+  // розгалужується на бекенди.
+  void *getPointer() { return _canvas ? static_cast<void *>(_canvas->getFramebuffer()) : nullptr; }
+
   void setCursor(int32_t x, int32_t y) {
     if (_canvas) _canvas->setCursor(x, y);
   }

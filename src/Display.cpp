@@ -4,6 +4,10 @@
 #include <stdarg.h>  // Обов'язково для роботи з трикрапкою (...)
 #include <stdlib.h>  // malloc/free для тимчасового рядкового буфера в pushImage8bpp (BOARD_ESP32_C6)
 
+#if HAS_SCREEN_MIRROR
+#include <ScreenMirror.hpp>
+#endif
+
 #if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_S3_LCD147) || defined(BOARD_TTGO_T1) || defined(BOARD_ST7789)
 // Arduino_Canvas (Arduino_GFX) не має 8bpp-режиму - канва завжди 16-біт
 // RGB565 (див. Setup_JD9853_C6.h::TFT_eSprite::setColorDepth() - no-op).
@@ -18,6 +22,28 @@ static inline uint16_t rgb332to565(uint8_t c) {
   return (uint16_t)((r5 << 11) | (g6 << 5) | b5);
 }
 #endif
+
+#if HAS_SCREEN_MIRROR
+// Пікселі активної смуги - те, що дзеркало екрана віддає у веб-портал.
+// Ім'я методу в бекендів різне, вміст - однаковий: RGB565, рядок за рядком.
+static inline const uint16_t* spritePixels(TFT_eSprite& sprite) {
+#if defined(BOARD_4848S040)
+  return static_cast<const uint16_t*>(sprite.getBuffer());  // LovyanGFX
+#else
+  return static_cast<const uint16_t*>(sprite.getPointer());  // TFT_eSPI і шими Arduino_GFX
+#endif
+}
+
+// LovyanGFX тримає 16-бітний спрайт у swap565 (старший байт першим),
+// TFT_eSPI і Arduino_Canvas - у рідному порядку. Клієнту цей порядок
+// повідомляється заголовком відповіді, тому перевертати байти на платі
+// не треба - вистачає сказати, які вони.
+#if defined(BOARD_4848S040)
+constexpr bool kSpriteSwapped565 = true;
+#else
+constexpr bool kSpriteSwapped565 = false;
+#endif
+#endif  // HAS_SCREEN_MIRROR
 
 // Глобальний об'єкт "tft" створюється рівно в одному файлі на середовище:
 //   env:esp32-st7789      -> src/TftInstance_ST7789.cpp
@@ -47,6 +73,11 @@ void Display::init() {
 
 #if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT
   initSprite();
+#endif
+
+#if HAS_SCREEN_MIRROR
+  ScreenMirror::instance().begin((uint16_t)width_, (uint16_t)height_, splitCount(),
+                                 (uint16_t)splitHeight(), kSpriteSwapped565);
 #endif
 
   sprite().setSwapBytes(true);
@@ -191,6 +222,11 @@ void Display::flush() {
   int x = 0, y = 0;
   y = y + (_activeSplitBlock * (height() / DISPLAY_SPLIT_COUNT));
   sprite().pushSprite(x, y);
+#if HAS_SCREEN_MIRROR
+  // Рівно та сама смуга, що поїхала в панель - але лише якщо її хтось просив.
+  // У звичайному режимі (вкладку Screen ніхто не відкрив) це один atomic load.
+  ScreenMirror::instance().capture(spritePixels(sprite()), (uint8_t)_activeSplitBlock);
+#endif
 #endif
   // unbuffered режим: pushImage()/drawX() і так пишуть напряму в tft_,
   // немає накопиченого кадру, який треба "вивести" — no-op.
