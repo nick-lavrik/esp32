@@ -25,7 +25,7 @@
 
 ### 0.1 Передумови
 
-- `secrets.ini` у корені (не в git). Мінімум: `wifi_ssid`, `wifi_password`, `mqtt_host`,
+- `secrets.ini` у корені (не в git). Мінімум: `wifi_password`, `mqtt_host`,
   `mqtt_port`, `mqtt_client_id`, `mqtt_lwt_topic`, `mqtt_topic_prefix`.
   `mqtt_client_id = "mqtt-${PIOENV}"` і `mqtt_lwt_topic = "devices/${PIOENV}/status"` —
   ідентичність плати підставляється автоматично з імені env.

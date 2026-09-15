@@ -185,6 +185,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include "setup.h"
 #include "wifi.h"
 #include "netcli.h"  // після wifi.h: netcli викликає WiFi_scan()
+#include "WifiNetworks.hpp"
 #include "journalcli.h"
 #include "strip.h"
 
@@ -4204,18 +4205,17 @@ void setupNetworkSupervisor() {
     }
   }
 
-  // Остання лінія оборони: мережа з secrets.ini, щоб пристрій не лишився без
-  // зв'язку після чистої прошивки з порожнім LittleFS. Далі build-flag
-  // більше нічого не перевизначає - запис редагується через 'net'.
-  if (netSupervisor.connections().empty()) {
-    WifiConnection seed;
-    seed.ssid = ssid;
-    seed.password = password;
-    seed.priority = 10;
-    netSupervisor.addConnection(seed);
-    netSupervisor.saveConfig();
-    Logger::info("NetworkSupervisor seeded with build-time SSID '%s'", ssid);
-  }
+  // Остання лінія оборони: прошитий перелік (src/WifiNetworks.hpp), щоб пристрій
+  // не лишився без зв'язку після чистої прошивки з порожнім LittleFS.
+  //
+  // Свідомо на КОЖНОМУ старті, а не лише на порожній список: інакше додана в
+  // таблицю мережа доїжджала б на плату тільки через erase-flash, а зміна
+  // пароля в secrets.ini мовчки не мала б жодного ефекту. seedConnections()
+  // додає лише відсутні SSID і не чіпає вже збережені - тому 'net connection
+  // modify' не відкочується. Виняток один: видалену командою 'net connection
+  // delete' прошиту мережу наступний ребут поверне; щоб вимкнути її назовсім -
+  // 'net connection modify <id> connection.autoconnect no'.
+  if (netSupervisor.seedConnections(kWifiNetworks) > 0) netSupervisor.saveConfig();
 
   // lastConnected інакше рахувався б від millis() і обнулявся на кожному
   // ребуті - тоді збережений порядок "останній вдалий першим" після рестарту

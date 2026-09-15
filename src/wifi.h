@@ -13,12 +13,10 @@
 #include <vector>
 
 // --- WiFi ---
-// Креденшели з build flags (secrets.ini). Це вже НЕ робоча конфігурація
-// пристрою, а лише "заводський" запис: NetworkSupervisor засіває ним свій
-// список при першому старті (див. setupNetworkSupervisor() у main.cpp), далі
-// список живе в NVS і редагується командою 'net'.
-const char* ssid = WIFI_SSID;
-const char* password = WIFI_PASSWORD;
+// Глобальні ssid/password із build flags тут більше не живуть: "заводський"
+// перелік мереж переїхав у src/WifiRegistry (одна мережа на макрос описувала
+// лише половину того, що знає розробник). Пароль так само лишається в
+// secrets.ini - реєстр бере його через WIFI_PASSWORD.
 
 // Налаштування радіо (WIFI_STA, обмеження до 802.11b/g/n, повний скан по
 // каналах) переїхало в NetworkSupervisor::_applyStaRadioConfig(): його треба

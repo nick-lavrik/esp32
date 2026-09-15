@@ -93,6 +93,23 @@ class NetworkSupervisor {
   // Не зберігає автоматично — викличте saveConfig() за потреби.
   uint16_t addConnection(const WifiConnection& conn);
 
+  // Засіває список прошитим переліком мереж: додає лише ті SSID, яких у
+  // списку ще немає. Повертає кількість доданих. Як і addConnection(), сам
+  // НЕ зберігає — saveConfig() за викликачем.
+  //
+  // Профіль із уже відомим SSID НЕ чіпається, навіть якщо пароль у таблиці
+  // інший: після першого старту джерело істини — NVS, а не прошивка (інакше
+  // кожен ребут відкочував би те, що зроблено через 'net'). Розбіжність
+  // пароля не мовчазна — про неї пишеться warn.
+  size_t seedConnections(const WifiNetworkInfo* table, size_t count);
+
+  // Та сама функція для масиву відомого розміру: рахувати елементи руками на
+  // кожному виклику — зайвий шанс розійтись.
+  template <size_t N>
+  size_t seedConnections(const WifiNetworkInfo (&table)[N]) {
+    return seedConnections(table, N);
+  }
+
   // Видаляє з'єднання за connectionId. Повертає false якщо не знайдено.
   bool removeConnection(uint16_t connectionId);
 

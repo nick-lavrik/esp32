@@ -20,6 +20,16 @@
 //   Об'єкт не містить методів серіалізації — це відповідальність NetworkSupervisor.
 //   JSON-ключі відповідають іменам полів (camelCase).
 
+// Один запис прошитого ("заводського") переліку мереж — те, чим
+// NetworkSupervisor::seedConnections() засіває порожній список при першому
+// старті. Окремий POD, а не WifiConnection: у того поля std::string, тож
+// constexpr-таблиці в прошивці з нього не зробиш.
+struct WifiNetworkInfo {
+  const char* ssid;
+  const char* password;
+  int8_t priority = 0;  // вищий = пробується раніше
+};
+
 struct WifiConnection {
   // ---- ідентифікація ----
   uint16_t connectionId = 0;  // opaque, призначається NetworkSupervisor при addConnection()

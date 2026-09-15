@@ -108,6 +108,50 @@ uint16_t NetworkSupervisor::addConnection(const WifiConnection& conn) {
   return c.connectionId;
 }
 
+size_t NetworkSupervisor::seedConnections(const WifiNetworkInfo* table, size_t count) {
+  if (!table) return 0;
+
+  // Один замок на весь засів: перевірка "чи вже є такий SSID" і вставка мають
+  // бути атомарні. Мʼютекс рекурсивний, тож addConnection() всередині бере
+  // його вдруге без дедлоку.
+  Lock lock(_mutex);
+
+  size_t added = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const WifiNetworkInfo& net = table[i];
+    if (!net.ssid || !net.ssid[0]) continue;
+
+    const WifiConnection* existing = nullptr;
+    for (const auto& c : _connections) {
+      if (c.ssid == net.ssid) {
+        existing = &c;
+        break;
+      }
+    }
+
+    if (existing) {
+      // Найтихіша з можливих пасток: пароль змінили в secrets.ini, плату
+      // перепрошили, а вона далі ходить зі старим із NVS і не конектиться.
+      // Лікується руками: 'net connection modify <id> wifi-security.psk <p>'.
+      const char* pass = net.password ? net.password : "";
+      if (existing->password != pass) {
+        _logger.warn("profile '%s' kept from storage; built-in password differs", net.ssid);
+      }
+      continue;
+    }
+
+    WifiConnection conn;
+    conn.ssid = net.ssid;
+    conn.password = net.password ? net.password : "";
+    conn.priority = net.priority;
+    addConnection(conn);
+    ++added;
+    // SSID у лапках: інакше кінцевий пробіл ("Asus ") у логу не побачити.
+    _logger.info("seeded built-in profile '%s' (priority %d)", net.ssid, (int)net.priority);
+  }
+  return added;
+}
+
 bool NetworkSupervisor::removeConnection(uint16_t connectionId) {
   Lock lock(_mutex);
   for (auto it = _connections.begin(); it != _connections.end(); ++it) {
