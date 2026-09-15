@@ -206,6 +206,8 @@ const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 const char* CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix";
 // runtime-override для ECOFLOW_AUTOCONNECT: "1"/"0"; порожнє -> build-time дефолт
 const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
+// dump ecoflow device status each minute
+const char* CFG_ECOFLOW_ENABLE_CRON = "ecoflow.cron";
 // Останні випущені app-креденшели (команда 'ecoflow-login'). Зберігаються
 // як резервна копія й журнал: застосувати їх з NVS на льоту не можна - MqttConfig
 // копіює вказівники в конструкторі глобального EcoflowClient, тобто до setup().
@@ -1082,7 +1084,7 @@ void setupEcoflow() {
     ecoflow.syncSnapshotsAsync();
   });
 
-  scheduler.addCronTask(60 * 1000UL, []() {
+  const TaskId ecoflowShowCronTaskId = scheduler.addCronTask(60 * 1000UL, []() {
     if (!queueCommand("ecoflow")) _logger.warn("command queue full, cron 'ecoflow' skipped");
   });
 
@@ -1155,6 +1157,27 @@ void setupEcoflow() {
     }
     _logger.info("");
   });
+
+  // command: ecoflow-cron
+  commandHandler.registerCommand("ecoflow-cron", "enable/disable ecoflow cron task (show device table)",
+    [ecoflowShowCronTaskId](const String args) {
+      if (scheduler.isPaused(ecoflowShowCronTaskId)) {
+        scheduler.resume(ecoflowShowCronTaskId);
+        configStorage.setBool(CFG_ECOFLOW_ENABLE_CRON, true);
+        _logger.info("ecoflow cron task - active");
+      } else {
+        scheduler.pause(ecoflowShowCronTaskId);
+        configStorage.setBool(CFG_ECOFLOW_ENABLE_CRON, false);
+        _logger.info("ecoflow cron task - pause");
+      }
+    }
+  );
+
+  // enable/disable ecoflow cron task (show device table)
+  if (!configStorage.getBool(CFG_ECOFLOW_ENABLE_CRON, true)) {
+    scheduler.pause(ecoflowShowCronTaskId);
+    _logger.warn("ecoflow cron task disabled");
+  }
 
   // Обидві REST-команди йдуть у власний таск: TLS-хендшейк не вміщується
   // комфортно в стек головного loopTask, а пауза MQTT на час запиту заблокувала
