@@ -55,4 +55,15 @@ inline String boolean(bool value) { return value ? String("true") : String("fals
 // {"error":"..."} - єдиний формат помилки для всіх роутів порталу.
 inline String error(const char* message) { return String("{\"error\":") + quote(message) + "}"; }
 
+// {"ok":<bool>,"message":"..."} - єдиний формат результату задачі WebJobQueue.
+// Саме його розбирає сторінка (`runAction()` в data/www/index.html), тому
+// формат спільний для всіх модулів, а не власний у кожного.
+inline String ok(const char* message) {
+  return String("{\"ok\":true,\"message\":") + quote(message) + "}";
+}
+
+inline String fail(const char* message) {
+  return String("{\"ok\":false,\"message\":") + quote(message) + "}";
+}
+
 }  // namespace webjson

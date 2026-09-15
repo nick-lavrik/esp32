@@ -75,7 +75,7 @@ void WebConsoleModule::loop() {
 }
 
 void WebConsoleModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
-  (void)portal;  // консоль більше не користується WebJobQueue - команди йдуть у CommandQueue
+  (void)portal;  // стрічка логу нічого не мутує - черга задач тут не потрібна
   // ---- стрічка логу через SSE ----
   _events.onConnect([this](AsyncEventSourceClient* client) { _seekForClient(client); });
   server.addHandler(&_events);
@@ -127,50 +127,5 @@ void WebConsoleModule::registerRoutes(AsyncWebServer& server, WebPortal& portal)
     json += "]}";
 
     request->send(200, "application/json", json);
-  });
-
-  // ---- список зареєстрованих команд ----
-  server.on("/api/console/commands", HTTP_GET, [this](AsyncWebServerRequest* request) {
-    String json = "[";
-    for (size_t i = 0; i < _commander.commandCount(); ++i) {
-      if (i > 0) json += ',';
-      json += "{\"name\":";
-      json += webjson::quote(_commander.commandName(i));
-      json += ",\"description\":";
-      json += webjson::quote(_commander.commandDescription(i));
-      json += "}";
-    }
-    json += "]";
-    request->send(200, "application/json", json);
-  });
-
-  // ---- запуск команди ----
-  server.on("/api/console/exec", HTTP_POST, [this](AsyncWebServerRequest* request) {
-    if (!request->hasParam("cmd", true)) {
-      request->send(400, "application/json", webjson::error("Missing 'cmd' parameter"));
-      return;
-    }
-
-    const String cmd = request->getParam("cmd", true)->value();
-    if (cmd.length() == 0) {
-      request->send(400, "application/json", webjson::error("Empty command"));
-      return;
-    }
-
-    // Відлуння введеного рядка - щоб у консолі було видно, ЩО саме виконали,
-    // як у терміналі. Іде звичайним логом: власного буфера в модуля більше
-    // немає, тож рядок бачать усі приймачі, і serial теж. Це навіть корисно: у
-    // моніторі видно, що команду запустили з браузера.
-    //
-    // Логуємо ДО submit(): при повній черзі в стрічці має лишитись слід, що
-    // команду вводили, а не тиша.
-    _logger.info("> %s", cmd.c_str());
-
-    if (!_submit || !_submit(cmd.c_str())) {
-      request->send(503, "application/json", webjson::error("Command queue is full, try again"));
-      return;
-    }
-
-    request->send(202, "application/json", String("{\"queued\":") + webjson::quote(cmd) + "}");
   });
 }

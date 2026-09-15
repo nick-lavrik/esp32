@@ -165,6 +165,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #endif
 
 #if HAS_WEB_PORTAL
+#include <WebCommandsModule.hpp>
 #include <WebConsoleModule.hpp>
 #include <WebPortal.hpp>
 #include <WebWifiModule.hpp>
@@ -407,8 +408,10 @@ NetworkEventLogger networkEventLogger;
 // потрібна найбільше. Тому httpServer.begin() робиться один раз на старті і
 // не гаситься при зміні стану мережі.
 WebWifiModule webWifiModule(netSupervisor);
-WebConsoleModule webConsoleModule(commandHandler,
-                                 [](const char* line) { return commandQueue.submit(line); });
+WebConsoleModule webConsoleModule;
+WebCommandsModule webCommandsModule(commandHandler,
+                                   [](const char* line) { return commandQueue.submit(line); },
+                                   configStorage);
 WebPortal webPortal(httpServer, configStorage);
 #endif
 
@@ -4240,6 +4243,7 @@ void setupNetworkSupervisor() {
 void setupWebPortal() {
   webPortal.addModule(&webWifiModule);
   webPortal.addModule(&webConsoleModule);
+  webPortal.addModule(&webCommandsModule);
 
   if (!webPortal.begin()) {
     Logger::error("WebPortal setup failed");

@@ -74,26 +74,37 @@ void CommandQueue::runNow(const char* line, std::shared_ptr<ResponseTarget> repl
     return;
   }
 
+  const uint32_t startedMs = millis();
+
   if (!reply) {
     _executor(line);
-    return;
+  } else {
+    // Хендлери команд нічого не знають про відповідь: увесь їхній вивід іде
+    // через TLogger, а CommandResponse підписаний у журналі на записи ЦЬОГО
+    // таска (див. lib/CommandResponse).
+    CommandResponse response(std::move(reply));
+    if (!response.attach()) {
+      _logger.error("no free journal slot - '%s' runs without a reply", line);
+    }
+
+    // Луна команди - вже ПІСЛЯ підписки, щоб потрапила і в консоль, і у
+    // відповідь: підписник reply-топіка бачить лише вивід і без неї не знав би,
+    // на що саме цей вивід.
+    _logger.info("> %s", line);
+    _executor(line);
+
+    response.finish();
   }
 
-  // Хендлери команд нічого не знають про відповідь: увесь їхній вивід іде
-  // через TLogger, а CommandResponse підписаний у журналі на записи ЦЬОГО
-  // таска (див. lib/CommandResponse).
-  CommandResponse response(std::move(reply));
-  if (!response.attach()) {
-    _logger.error("no free journal slot - '%s' runs without a reply", line);
-  }
-
-  // Луна команди - вже ПІСЛЯ підписки, щоб потрапила і в консоль, і у
-  // відповідь: підписник reply-топіка бачить лише вивід і без неї не знав би,
-  // на що саме цей вивід.
-  _logger.info("> %s", line);
-  _executor(line);
-
-  response.finish();
+  // Явний кінець команди, парний до луни "> ...". Потрібен не для краси:
+  // вивід команди йде звичайним логом, упереміш із рядками фонових тасків і
+  // крону, і ззовні неможливо сказати, де він закінчився. Веб-портал саме по
+  // цьому рядку перестає дописувати панель Output (див. lib/WebPortal), а в
+  // serial-моніторі видно, скільки команда справді працювала.
+  //
+  // ПІСЛЯ response.finish() навмисно: у відповідь на MQTT чи в лист має піти
+  // рівно вивід команди, без нашої службової позначки.
+  _doneLogger.info("< %s (%u ms)", line, (unsigned)(millis() - startedMs));
 }
 
 size_t CommandQueue::pending() const {

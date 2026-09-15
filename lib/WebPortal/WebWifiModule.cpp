@@ -25,10 +25,6 @@ const char* stateName(NetworkSupervisorState state) {
   return "unknown";
 }
 
-String jobOk(const char* message) { return String("{\"ok\":true,\"message\":") + webjson::quote(message) + "}"; }
-
-String jobFail(const char* message) { return String("{\"ok\":false,\"message\":") + webjson::quote(message) + "}"; }
-
 }  // namespace
 
 WebWifiModule::WebWifiModule(NetworkSupervisor& supervisor) : _supervisor(supervisor) {
@@ -126,7 +122,7 @@ String WebWifiModule::_scanJob() {
   // дають WIFI_SCAN_FAILED (те саме застереження, що в NetworkSupervisor::scan()).
   const NetworkSupervisorState state = _supervisor.state();
   if (state == NetworkSupervisorState::SCANNING || state == NetworkSupervisorState::CONNECTING) {
-    return jobFail("Supervisor is busy, try again in a moment");
+    return webjson::fail("Supervisor is busy, try again in a moment");
   }
 
   // Точку доступу на час скану не гасимо (AP_STA): інакше клієнт, який сидить
@@ -138,7 +134,7 @@ String WebWifiModule::_scanJob() {
 
   const int16_t found = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/true);
   if (found < 0) {
-    return jobFail("Scan failed");
+    return webjson::fail("Scan failed");
   }
 
   const String activeSsid = WiFi.isConnected() ? WiFi.SSID() : String();
@@ -249,14 +245,14 @@ void WebWifiModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
 
           _supervisor.saveConfig();
 
-          if (!connectNow) return jobOk("Profile saved");
+          if (!connectNow) return webjson::ok("Profile saved");
 
           // Явне підключення скасовує попередній ручний disconnect - інакше
           // FSM підключився б і лишився без нагляду (та сама логіка, що в
           // 'net device wifi connect').
           _supervisor.setAutoReconnect(true);
-          if (!_supervisor.connectTo(id)) return jobFail("Profile vanished");
-          return jobOk("Connecting");
+          if (!_supervisor.connectTo(id)) return webjson::fail("Profile vanished");
+          return webjson::ok("Connecting");
         });
 
     if (jobId == 0) {
@@ -275,9 +271,9 @@ void WebWifiModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
 
     const uint16_t id = (uint16_t)strtoul(request->getParam("id")->value().c_str(), nullptr, 10);
     const uint32_t jobId = portal.jobs().submit([this, id]() -> String {
-      if (!_supervisor.removeConnection(id)) return jobFail("No such profile");
+      if (!_supervisor.removeConnection(id)) return webjson::fail("No such profile");
       _supervisor.saveConfig();
-      return jobOk("Profile removed");
+      return webjson::ok("Profile removed");
     });
 
     if (jobId == 0) {
@@ -297,8 +293,8 @@ void WebWifiModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
     const uint16_t id = (uint16_t)strtoul(request->getParam("id", true)->value().c_str(), nullptr, 10);
     const uint32_t jobId = portal.jobs().submit([this, id]() -> String {
       _supervisor.setAutoReconnect(true);
-      if (!_supervisor.connectTo(id)) return jobFail("No such profile");
-      return jobOk("Connecting");
+      if (!_supervisor.connectTo(id)) return webjson::fail("No such profile");
+      return webjson::ok("Connecting");
     });
 
     if (jobId == 0) {
@@ -316,10 +312,10 @@ void WebWifiModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
     const uint32_t jobId = portal.jobs().submit([this, stop]() -> String {
       if (stop) {
         _supervisor.stopAp();
-        return jobOk("Hotspot stopped");
+        return webjson::ok("Hotspot stopped");
       }
       _supervisor.startAp();
-      return jobOk("Hotspot started");
+      return webjson::ok("Hotspot started");
     });
 
     if (jobId == 0) {
@@ -334,7 +330,7 @@ void WebWifiModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
     const uint32_t jobId = portal.jobs().submit([this]() -> String {
       _supervisor.setAutoReconnect(true);
       _supervisor.reconnect();
-      return jobOk("Reconnecting");
+      return webjson::ok("Reconnecting");
     });
 
     if (jobId == 0) {

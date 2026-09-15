@@ -106,4 +106,8 @@ private:
 #endif
 
   const TLogger _logger{"cmd.reply"};
+
+  // Позначка кінця команди йде під тегом виконавця, а не відповіді: вона
+  // стосується КОЖНОЇ команди, у тому числі тих, у яких reply немає.
+  const TLogger _doneLogger{"cmd"};
 };

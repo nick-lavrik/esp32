@@ -43,12 +43,31 @@ input:focus, select:focus { outline: 1px solid var(--accent); }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
 dt { color: var(--muted); }
 dd { margin: 0; }
-#log { background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
-  height: 55vh; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+/* Дві однакові стрічки: повний лог на Console і вивід команди на Commands. */
+#log, #run-out { background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+  overflow-y: auto; white-space: pre-wrap; word-break: break-word;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-#log .e { color: var(--err); } #log .w { color: var(--warn); }
-#log .d { color: var(--muted); } #log .cmd { color: var(--accent); }
-#cmd { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#log { height: 55vh; }
+#run-out { height: 22vh; }
+#log .e, #run-out .e { color: var(--err); } #log .w, #run-out .w { color: var(--warn); }
+#log .d, #run-out .d { color: var(--muted); } #log .cmd, #run-out .cmd { color: var(--accent); }
+#cmd, #run-cmd { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#cmd-filter { width: 100%; }
+/* Перелік команд: 70 рядків, тому щільно і під власним скролом, а не на всю
+   сторінку. Клікабельний увесь рядок - кнопка на кожному додавала б 70 рамок. */
+#cmd-box { max-height: 34vh; overflow-y: auto; margin-top: 8px;
+  border: 1px solid var(--line); border-radius: 6px; }
+#cmd-table td { padding: 2px 10px; border-bottom: none; vertical-align: baseline; }
+#cmd-table tr { cursor: pointer; }
+#cmd-table tr:hover { background: #ffffff0f; }
+#cmd-table td.n { width: 1%; white-space: nowrap; color: var(--accent);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#cmd-table td.d { color: var(--muted); font-size: 12px; }
+/* Пара "запустити / видалити" виглядає й поводиться як одна кнопка. */
+.chip { display: inline-flex; }
+.chip button:first-child { border-radius: 6px 0 0 6px; }
+.chip button:last-child { border-radius: 0 6px 6px 0; border-left: none;
+  padding: 7px 10px; color: var(--muted); }
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel);
   border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px;
   padding: 10px 14px; max-width: 60vw; display: none; }
@@ -66,6 +85,7 @@ dd { margin: 0; }
 
 <nav>
   <button data-tab="wifi" class="active">Wi-Fi</button>
+  <button data-tab="commands">Commands</button>
   <button data-tab="console">Console</button>
 </nav>
 
@@ -90,6 +110,25 @@ dd { margin: 0; }
     <thead><tr><th>SSID</th><th class="opt">Priority</th><th class="opt">Signal</th><th>State</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
+</section>
+
+<section id="tab-commands">
+  <h2>Run</h2>
+  <form class="row" id="run-form">
+    <input id="run-cmd" list="cmd-list" autocomplete="off" placeholder="command with arguments, e.g. net device wifi list">
+    <button class="act" type="submit">Run</button>
+    <button class="act ghost" type="button" id="btn-save-shortcut">Save as shortcut</button>
+  </form>
+
+  <h2>Shortcuts</h2>
+  <div class="row" id="shortcuts"></div>
+
+  <h2>Output <span id="run-state" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <div id="run-out"></div>
+
+  <h2>Available commands <span id="cmd-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <input id="cmd-filter" placeholder="filter…" autocomplete="off">
+  <div id="cmd-box"><table id="cmd-table"><tbody></tbody></table></div>
 </section>
 
 <section id="tab-console">
@@ -160,6 +199,7 @@ document.querySelectorAll("nav button").forEach((btn) => {
     // Свіжий знімок одразу при відкритті - щоб вкладка не показувала старе,
     // поки не настане наступний тік.
     if (btn.dataset.tab === "wifi") refreshWifi();
+    if (btn.dataset.tab === "commands") refreshShortcuts();
   };
 });
 
@@ -316,26 +356,214 @@ document.addEventListener("click", (ev) => {
   }
 });
 
+/* ---------------- commands ---------------- */
+
+// Перелік команд не міняється між перезавантаженнями пристрою, тому
+// вантажиться один раз на старті сторінки, а фільтр працює локально: слати
+// запит на кожну натиснуту літеру заради двох десятків рядків - зайва робота
+// для плати.
+let commands = [];
+
+function renderCommands() {
+  const q = $("#cmd-filter").value.trim().toLowerCase();
+  const list = q
+    ? commands.filter((c) => (c.name + " " + c.description).toLowerCase().includes(q))
+    : commands;
+
+  $("#cmd-count").textContent = q ? list.length + " of " + commands.length : commands.length + " total";
+
+  const body = $("#cmd-table tbody");
+  if (!list.length) {
+    body.innerHTML = '<tr><td class="d">Nothing matches.</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map((c) => `
+    <tr data-pick="${escapeHtml(c.name)}">
+      <td class="n">${escapeHtml(c.name)}</td>
+      <td class="d">${escapeHtml(c.description)}</td>
+    </tr>`).join("");
+}
+
+async function loadCommands() {
+  try {
+    commands = await api("/api/commands/list");
+    // Той самий список - ще й автодоповненням для обох полів вводу.
+    $("#cmd-list").innerHTML = commands
+      .map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.description)}</option>`)
+      .join("");
+    $("#cmd-hint").textContent =
+      commands.length + " commands registered. Output appears in the log above. History: ↑ / ↓.";
+    renderCommands();
+  } catch (e) { /* необов'язкове */ }
+}
+
+function renderShortcuts(list) {
+  const box = $("#shortcuts");
+  if (!list.length) {
+    box.innerHTML = '<span class="muted">No shortcuts yet — type a command above and press “Save as shortcut”.</span>';
+    return;
+  }
+  box.innerHTML = list.map((s) => `
+    <span class="chip">
+      <button class="act ghost" data-run="${escapeHtml(s.command)}" title="${escapeHtml(s.command)}">${escapeHtml(s.name)}</button>
+      <button class="act ghost" data-drop-shortcut="${s.index}" title="Remove shortcut">×</button>
+    </span>`).join("");
+}
+
+async function refreshShortcuts() {
+  try { renderShortcuts(await api("/api/commands/shortcuts")); } catch (e) { /* наступне відкриття вкладки спробує знову */ }
+}
+
+// Команда виконується не тут, а в loop() пристрою, тому відповіді "готово"
+// не буде й бути не може: результат - це рядки, які приїдуть у стрічку логу.
+// Тоста про "queued" немає навмисно: вивід і так з'являється на очах - і в
+// панелі Output, і в консолі. Лишились тільки помилки.
+async function runCommand(cmd) {
+  // Вивід збираємо з тієї самої стрічки, що й консоль: другого каналу для
+  // відповіді на пристрої немає і не треба. Вмикаємо ПЕРЕД запитом - відлуння
+  // "> cmd" приходить першим рядком і має потрапити в панель.
+  //
+  // trim() тут не косметика: позначку кінця ми звіряємо з рядком команди
+  // посимвольно, а пристрій свій рядок обрізає.
+  cmd = cmd.trim();
+  $("#run-out").textContent = "";
+  $("#run-state").textContent = "running: " + cmd;
+  captureCmd = cmd;
+  captureOutput = true;
+  armCaptureTimeout();
+
+  try {
+    await api("/api/commands/exec", form({ cmd }));
+    // Під SSE підганяти не треба: вивід приїде сам, і то швидше.
+    if (sse === null || sse.readyState !== EventSource.OPEN) setTimeout(pollLog, 200);
+  } catch (e) {
+    endCapture("");
+    toast(e.message, "err");
+  }
+}
+
+// Панель виводу збирає рядки від запуску команди й до її КІНЦЯ - не "до
+// тиші". Кінець приходить у самій стрічці: CommandQueue друкує парний до луни
+// рядок "< <команда> (N ms)" після того, як команда відпрацювала. Без нього
+// панель дописувала б усе, що трапиться далі, - крон, телеметрію, мережеві
+// події - під заголовком нашої команди.
+//
+// Таймаут лишається лише як страховка: якщо позначка не прийде (пристрій
+// перезавантажився на 'reboot', стрічка обірвалась), збирання не має тривати
+// вічно.
+const CAPTURE_TIMEOUT_MS = 60000;
+
+// Рядок журналу: "[I][cmd    ] < heap (12 ms)".
+const END_MARKER = /^\[.\]\[[^\]]*\] < (.*) \((\d+) ms\)$/;
+
+let captureOutput = false;
+let captureCmd = "";
+let captureTimer = null;
+
+function endCapture(label) {
+  captureOutput = false;
+  clearTimeout(captureTimer);
+  $("#run-state").textContent = label;
+}
+
+function armCaptureTimeout() {
+  clearTimeout(captureTimer);
+  captureTimer = setTimeout(() => endCapture("stopped: no end marker"), CAPTURE_TIMEOUT_MS);
+}
+
+$("#cmd-filter").oninput = renderCommands;
+
+$("#run-form").onsubmit = (ev) => {
+  ev.preventDefault();
+  const cmd = $("#run-cmd").value.trim();
+  if (cmd) runCommand(cmd);
+};
+
+$("#btn-save-shortcut").onclick = async () => {
+  const cmd = $("#run-cmd").value.trim();
+  if (!cmd) { toast("Type a command first", "err"); return; }
+  const name = prompt("Shortcut name:", cmd.split(" ")[0]);
+  if (name === null) return;
+  try {
+    const r = await job("/api/commands/shortcuts", form({ name, command: cmd }));
+    toast((r && r.message) || "Saved", r && r.ok === false ? "err" : "ok");
+  } catch (e) { toast(e.message, "err"); }
+  refreshShortcuts();
+};
+
+$("#tab-commands").addEventListener("click", async (ev) => {
+  // Клік по назві команди не запускає її: майже всі беруть аргументи, тому
+  // назва лише потрапляє в поле вводу, а запуск - окремою дією.
+  const pick = ev.target.closest("[data-pick]");
+  if (pick) {
+    const input = $("#run-cmd");
+    input.value = pick.dataset.pick + " ";
+    input.focus();
+    return;
+  }
+
+  const run = ev.target.closest("[data-run]");
+  if (run) { runCommand(run.dataset.run); return; }
+
+  const drop = ev.target.closest("[data-drop-shortcut]");
+  if (drop && confirm("Remove this shortcut?")) {
+    try {
+      const r = await job("/api/commands/shortcuts?index=" + drop.dataset.dropShortcut,
+                          { method: "DELETE" });
+      toast((r && r.message) || "Removed", r && r.ok === false ? "err" : "ok");
+    } catch (e) { toast(e.message, "err"); }
+    refreshShortcuts();
+  }
+});
+
 /* ---------------- console ---------------- */
 
 let logCursor = null;
 const history = [];
 let historyPos = 0;
 
-function appendLog(lines) {
-  const box = $("#log");
+// Рядок журналу приходить як "[I][tag    ] text"; відлуння команди - як
+// "[I][web    ] > cmd". Саме його і підсвічуємо акцентом.
+function lineClass(line) {
+  if (/^\[.\]\[[^\]]*\] > /.test(line)) return "cmd";
+  if (line.startsWith("[E]")) return "e";
+  if (line.startsWith("[W]")) return "w";
+  if (line.startsWith("[D]")) return "d";
+  return "";
+}
+
+// Скрол лишається внизу, лише якщо він там і був: інакше сторінка висмикувала б
+// з-під пальця рядок, який зараз читають.
+function appendTo(box, lines, limit) {
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   for (const line of lines) {
     const div = document.createElement("div");
     div.textContent = line;
-    if (line.startsWith("> ")) div.className = "cmd";
-    else if (line.startsWith("[E]")) div.className = "e";
-    else if (line.startsWith("[W]")) div.className = "w";
-    else if (line.startsWith("[D]")) div.className = "d";
+    div.className = lineClass(line);
     box.appendChild(div);
   }
-  while (box.childElementCount > 500) box.removeChild(box.firstChild);
+  while (box.childElementCount > limit) box.removeChild(box.firstChild);
   if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function appendLog(lines) {
+  appendTo($("#log"), lines, 500);
+  if (!captureOutput) return;
+
+  // У панель Output іде все до позначки кінця включно - і ні рядка після неї.
+  // Чужі рядки, що встигли вклинитись ДО кінця команди, лишаються: вони
+  // справді були в стрічці, поки команда працювала, і в serial видно те саме.
+  const mine = [];
+  let doneMs = null;
+  for (const line of lines) {
+    mine.push(line);
+    const m = END_MARKER.exec(line);
+    if (m && m[1] === captureCmd) { doneMs = m[2]; break; }
+  }
+
+  appendTo($("#run-out"), mine, 200);
+  if (doneMs !== null) endCapture("done in " + doneMs + " ms");
+  else armCaptureTimeout();
 }
 
 async function pollLog() {
@@ -435,11 +663,7 @@ $("#cmd-form").onsubmit = async (ev) => {
   input.value = "";
   history.push(cmd);
   historyPos = history.length;
-  try {
-    await api("/api/console/exec", form({ cmd }));
-    // Під SSE підганяти не треба: вивід приїде сам, і то швидше.
-    if (sse === null || sse.readyState !== EventSource.OPEN) setTimeout(pollLog, 200);
-  } catch (e) { toast(e.message, "err"); }
+  runCommand(cmd);
 };
 
 $("#cmd").onkeydown = (ev) => {
@@ -450,17 +674,6 @@ $("#cmd").onkeydown = (ev) => {
   historyPos = Math.max(0, Math.min(history.length, historyPos));
   ev.target.value = history[historyPos] || "";
 };
-
-async function loadCommands() {
-  try {
-    const list = await api("/api/console/commands");
-    $("#cmd-list").innerHTML = list
-      .map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.description)}</option>`)
-      .join("");
-    $("#cmd-hint").textContent =
-      list.length + " commands registered. Output appears in the log above. History: ↑ / ↓.";
-  } catch (e) { /* необов'язкове */ }
-}
 
 /* ---------------- boot ---------------- */
 
@@ -473,6 +686,7 @@ async function pollStatus() {
 
 refreshWifi();
 loadCommands();
+refreshShortcuts();
 startStream();
 
 // Стан мережі - лише поки відкрита вкладка Wi-Fi; купа - раз на 10 с.

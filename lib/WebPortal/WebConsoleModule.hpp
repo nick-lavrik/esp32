@@ -1,6 +1,6 @@
 #pragma once
 
-// Розділ "console": потік логу в браузер і запуск serial-команд звідти.
+// Розділ "console": потік логу в браузер.
 //
 // Потік логу. Власного буфера тут НЕМАЄ - модуль читає кільце журналу
 // (lib/Journal) напряму, за тим самим наскрізним seq. До етапу 4 поруч жив
@@ -33,22 +33,13 @@
 // Logger/TLogger. Прямі Serial.print* з коду в нього не заходять - у
 // веб-консолі їх не буде, хоча в serial-моніторі вони є (етап 7 плану).
 //
-// Запуск команд. POST /api/console/exec виконує команду НЕ одразу, а кладе її
-// в CommandQueue - той самий вхід, що для serial, MQTT і cron; виконає її
-// loop(). Команда може друкувати сотні рядків, лізти на шину дисплея або
-// блокувати на секунди, і в таску сервера їй не місце.
-//
-// Черга скінченна, тому відмова тут ЯВНА: 503 з поясненням, а не тиха втрата.
-//
-// Окремої "відповіді команди" не потрібно: вивід і так з'явиться у стрічці
-// логу, яку вкладка вже читає.
+// Команд тут НЕМАЄ - ні переліку, ні запуску. І те, і те живе в
+// WebCommandsModule (POST /api/commands/exec), куди поле вводу консолі шле
+// свій рядок. Два маршрути "виконати рядок" розійшлись би на першій же зміні
+// валідації; вивід усе одно приходить сюди, у стрічку логу.
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
-
-#include <functional>
-#include <SerialCommander.hpp>
-#include <TLogger.hpp>
 
 #include "IWebModule.hpp"
 
@@ -87,12 +78,6 @@ public:
   static constexpr size_t kSseMaxQueued = WEB_CONSOLE_SSE_MAX_QUEUED;
   static constexpr uint32_t kSseIntervalMs = WEB_CONSOLE_SSE_INTERVAL_MS;
 
-  // submit - CommandQueue::submit(); повертає false, якщо черга повна.
-  using Submit = std::function<bool(const char* line)>;
-
-  WebConsoleModule(SerialCommander& commander, Submit submit)
-      : _commander(commander), _submit(std::move(submit)) {}
-
   const char* name() const override { return "console"; }
   void registerRoutes(AsyncWebServer& server, WebPortal& portal) override;
 
@@ -104,8 +89,6 @@ private:
   // виконується в таску AsyncTCP (див. коментар у .cpp).
   void _seekForClient(AsyncEventSourceClient* client);
 
-  SerialCommander& _commander;
-  Submit _submit;
   AsyncEventSource _events{"/api/console/stream"};
 
   // seq наступного запису, який піде в SSE. Поки підписників немає - тримаємо
@@ -113,6 +96,4 @@ private:
   // кільце застарілих рядків.
   uint32_t _cursor = 0;
   uint32_t _lastSseMs = 0;
-
-  const TLogger _logger{"web"};
 };
