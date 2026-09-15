@@ -62,6 +62,10 @@ void WebWifiModule::_refreshSnapshot() {
   status += webjson::quote(_supervisor.localIp());
   status += ",\"rssi\":";
   status += _supervisor.isConnected() ? (int)WiFi.RSSI() : 0;
+  // Відсоток рахує пристрій, а не сторінка: та сама шкала, що в 'status sys'
+  // і на екрані плати (wifiSignalQuality() в NetworkSupervisor).
+  status += ",\"quality\":";
+  status += _supervisor.isConnected() ? wifiSignalQuality(WiFi.RSSI()) : 0;
   status += ",\"mac\":";
   status += webjson::quote(WiFi.macAddress());
   status += ",\"autoReconnect\":";
@@ -98,6 +102,14 @@ void WebWifiModule::_refreshSnapshot() {
     connections += c.lastConnected;
     connections += ",\"rssi\":";
     connections += c.rssi;
+    connections += ",\"quality\":";
+    connections += c.rssi != 0 ? wifiSignalQuality(c.rssi) : 0;
+    // До якого профілю підключені ЗАРАЗ. Вирішує пристрій: він єдиний знає
+    // і поточний SSID, і стан зʼєднання, а сторінці довелося б звіряти два
+    // окремі запити й вгадувати, який із них свіжіший.
+    connections += ",\"active\":";
+    connections += webjson::boolean(_supervisor.isConnected() &&
+                                    _supervisor.currentSsid() == c.ssid);
     connections += ",\"staticIp\":";
     connections += webjson::boolean(c.staticIp);
     connections += ",\"ip\":";
@@ -150,6 +162,8 @@ String WebWifiModule::_scanJob() {
     json += webjson::boolean(ssid.length() == 0);
     json += ",\"rssi\":";
     json += (int)WiFi.RSSI(i);
+    json += ",\"quality\":";
+    json += wifiSignalQuality(WiFi.RSSI(i));
     json += ",\"channel\":";
     json += (int)WiFi.channel(i);
     json += ",\"security\":";

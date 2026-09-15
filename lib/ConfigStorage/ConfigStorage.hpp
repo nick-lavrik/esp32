@@ -92,8 +92,40 @@ public:
   // видаляє ВСІ ключі в поточному namespace
   void clearAll();
 
-  // перелік записів у поточному namespace
-  std::vector<Entry> listEntries();
+  // Видаляє один ключ. false — ключа не було (або сховище не відкрите).
+  bool remove(const char* key);
+
+  // Ім'я namespace, відкритого в begin(). Потрібне тим, хто показує вміст
+  // сховища назовні (serial-дамп, веб-редактор): без нього незрозуміло, чий
+  // саме список видно.
+  const char* namespaceName() const { return namespaceName_.c_str(); }
+
+  // Текстове подання значення за його типом NVS.
+  //
+  // Живе тут, а не в місцях виводу: і 'config dump' у serial, і веб-редактор
+  // показують ті самі рядки, а типів у NVS десяток — дві копії switch'а
+  // розійшлись би на першому ж додаванні.
+  //
+  // NVS_TYPE_U8 у ВЛАСНОМУ namespace подається як "true"/"false": однобайтові
+  // записи там створює лише setBool() (Preferences::putBool -> putUChar),
+  // інших джерел u8 в ConfigStorage немає. У чужому namespace (ns != nullptr)
+  // таке припущення неправдиве - там u8 буває звичайним переліченням, - тому
+  // значення показується числом.
+  //
+  // BLOB повертається як "<N bytes>": вміст блоба не самоописовий — там і
+  // float (Preferences::putFloat пише саме blob), і масиви, і довільні
+  // структури, тож інтерпретувати його без схеми нічим.
+  String getAsString(const char* key, nvs_type_t type, const char* ns = nullptr);
+
+  // Перелік записів. ns == nullptr - поточний namespace; інакше ЧУЖИЙ, у тому
+  // самому розділі і лише для читання (записувати кудись, крім свого,
+  // ConfigStorage не вміє і не має).
+  std::vector<Entry> listEntries(const char* ns = nullptr);
+
+  // Імена namespace'ів у розділі. Крім власного, там живуть чужі - стан
+  // WiFi-стека, калібрування радіо, внутрішнє господарство бібліотек, - і
+  // побачити їх корисно рівно для діагностики.
+  std::vector<String> listNamespaces();
 
   // тип конкретного ключа (NVS_TYPE_ANY якщо не знайдено)
   nvs_type_t getType(const char* key);
@@ -142,6 +174,15 @@ public:
   // читає лише заголовок блоба без розпакування даних
   bool peekStructHeader(const char* key, BlobHeader& outHeader);
 
+  // Сирі байти blob-значення та його довжина.
+  //
+  // Публічні, бо блоб доводиться читати й тим, хто його схеми не знає: hex-view
+  // у веб-редакторі NVS показує вміст як є. Для СВОЇХ структур є
+  // getStruct()/setStruct() з перевіркою magic і версії - читати їх звідси
+  // означало б повторювати ту перевірку в кожному місці виклику.
+  size_t readBlob(const char* key, void* outData, size_t maxLen, const char* ns = nullptr);
+  size_t blobLength(const char* key, const char* ns = nullptr);
+
 private:
 #if defined(ESP32)
   Preferences prefs_;
@@ -151,17 +192,16 @@ private:
 
   static void warnInvalidKey(const char* key, const char* methodName);
 
-  // --- уніфіковані blob-примітиви (для setStruct/getStruct/масивів) ---
-  // ESP32:   зберігається одним NVS-ключем (putBytes/getBytes).
+  // --- уніфікований запис blob'а (для setStruct/масивів) ---
+  // ESP32:   зберігається одним NVS-ключем (putBytes).
   // ESP8266: зберігається у файлі "<key>.bin" в каталозі namespace.
+  // Читання - readBlob()/blobLength() вище, вони публічні.
   size_t writeBlob(const char* key, const void* data, size_t len);
-  size_t readBlob(const char* key, void* outData, size_t maxLen);
-  size_t blobLength(const char* key);
 
 #if defined(ESP8266)
   // допоміжні методи файлової реалізації
-  String pathFor(const char* key, const char* ext) const;
-  String namespaceDir() const;
+  String pathFor(const char* key, const char* ext, const char* ns = nullptr) const;
+  String namespaceDir(const char* ns = nullptr) const;
   bool ensureNamespaceDir() const;
   bool writeFile(const String& path, const void* data, size_t len);
   size_t readFile(const String& path, void* outData, size_t maxLen);

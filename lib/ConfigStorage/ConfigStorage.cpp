@@ -120,12 +120,116 @@ size_t ConfigStorage::getFloatArray(const char* key, float* outArr, size_t maxCo
 
 void ConfigStorage::clearAll() { prefs_.clear(); }
 
-std::vector<ConfigStorage::Entry> ConfigStorage::listEntries() {
+bool ConfigStorage::remove(const char* key) {
+  if (!isKeyValid(key)) {
+    warnInvalidKey(key, "remove");
+    return false;
+  }
+  return prefs_.remove(key);
+}
+
+String ConfigStorage::getAsString(const char* key, nvs_type_t type, const char* ns) {
+  if (!isKeyValid(key)) {
+    warnInvalidKey(key, "getAsString");
+    return String();
+  }
+
+  // Читаємо через власний хендл, а не через prefs_, саме щоб ця функція була
+  // ОДНА на свій і чужий namespace: інакше версія "для чужого" стала б другою
+  // копією switch'а на десять типів. Хендл відкривається на кожен ключ - за
+  // списком у півтора десятка записів це дешевше, ніж окремий кеш, а кличеться
+  // воно все одно з loop().
+  nvs_handle_t handle;
+  if (nvs_open_from_partition(partitionLabel_.c_str(), ns ? ns : namespaceName_.c_str(),
+                              NVS_READONLY, &handle) != ESP_OK) {
+    return String();
+  }
+
+  String out;
+  switch (type) {
+    // Кожен тип читається СВОЇМ nvs_get_*: воно звіряє тип і при розбіжності
+    // повертає помилку. Один геттер на всі цілі показував би 0 там, де
+    // насправді лежить число іншої ширини, і виглядало б це як значення.
+    case NVS_TYPE_U8: {
+      uint8_t v = 0;
+      nvs_get_u8(handle, key, &v);
+      // У СВОЄМУ namespace однобайтові записи створює лише setBool()
+      // (Preferences::putBool -> putUChar), тому там u8 - це bool. У чужому
+      // це просто байт: nvs.net80211 тримає в u8 і перелічення (sta.sort_method),
+      // і "true"/"false" з них зробило б неправду.
+      out = ns == nullptr ? (v ? "true" : "false") : String((uint32_t)v);
+      break;
+    }
+    case NVS_TYPE_I8: {
+      int8_t v = 0;
+      nvs_get_i8(handle, key, &v);
+      out = String((int32_t)v);
+      break;
+    }
+    case NVS_TYPE_U16: {
+      uint16_t v = 0;
+      nvs_get_u16(handle, key, &v);
+      out = String((uint32_t)v);
+      break;
+    }
+    case NVS_TYPE_I16: {
+      int16_t v = 0;
+      nvs_get_i16(handle, key, &v);
+      out = String((int32_t)v);
+      break;
+    }
+    case NVS_TYPE_U32: {
+      uint32_t v = 0;
+      nvs_get_u32(handle, key, &v);
+      out = String(v);
+      break;
+    }
+    case NVS_TYPE_I32: {
+      int32_t v = 0;
+      nvs_get_i32(handle, key, &v);
+      out = String(v);
+      break;
+    }
+    case NVS_TYPE_U64: {
+      uint64_t v = 0;
+      nvs_get_u64(handle, key, &v);
+      out = String((unsigned long long)v);
+      break;
+    }
+    case NVS_TYPE_I64: {
+      int64_t v = 0;
+      nvs_get_i64(handle, key, &v);
+      out = String((long long)v);
+      break;
+    }
+    case NVS_TYPE_STR: {
+      size_t len = 0;
+      if (nvs_get_str(handle, key, nullptr, &len) == ESP_OK && len > 0) {
+        std::vector<char> buf(len);
+        if (nvs_get_str(handle, key, buf.data(), &len) == ESP_OK) out = buf.data();
+      }
+      break;
+    }
+    case NVS_TYPE_BLOB: {
+      size_t len = 0;
+      nvs_get_blob(handle, key, nullptr, &len);
+      out = String("<") + (uint32_t)len + " bytes>";
+      break;
+    }
+    default:
+      break;
+  }
+
+  nvs_close(handle);
+  return out;
+}
+
+std::vector<ConfigStorage::Entry> ConfigStorage::listEntries(const char* ns) {
   std::vector<Entry> result;
 
   nvs_iterator_t it = nullptr;
-  esp_err_t res =
-      nvs_entry_find(partitionLabel_.c_str(), namespaceName_.c_str(), NVS_TYPE_ANY, &it);
+  esp_err_t res = nvs_entry_find(partitionLabel_.c_str(), ns ? ns : namespaceName_.c_str(),
+                                 NVS_TYPE_ANY, &it);
 
   while (res == ESP_OK) {
     nvs_entry_info_t info;
@@ -136,6 +240,35 @@ std::vector<ConfigStorage::Entry> ConfigStorage::listEntries() {
     entry.type = info.type;
     entry.typeName = typeToString(info.type);
     result.push_back(entry);
+
+    res = nvs_entry_next(&it);
+  }
+  nvs_release_iterator(it);
+
+  return result;
+}
+
+std::vector<String> ConfigStorage::listNamespaces() {
+  std::vector<String> result;
+
+  // nullptr замість імені namespace - ітератор іде по ВСЬОМУ розділу, і в
+  // nvs_entry_info_t приїжджає ще й namespace_name. Окремого API "перелічити
+  // namespace'и" в NVS немає, тому вибираємо унікальні імена самі.
+  nvs_iterator_t it = nullptr;
+  esp_err_t res = nvs_entry_find(partitionLabel_.c_str(), nullptr, NVS_TYPE_ANY, &it);
+
+  while (res == ESP_OK) {
+    nvs_entry_info_t info;
+    nvs_entry_info(it, &info);
+
+    bool seen = false;
+    for (const String& known : result) {
+      if (known == info.namespace_name) {
+        seen = true;
+        break;
+      }
+    }
+    if (!seen) result.push_back(info.namespace_name);
 
     res = nvs_entry_next(&it);
   }
@@ -182,21 +315,46 @@ size_t ConfigStorage::writeBlob(const char* key, const void* data, size_t len) {
   return prefs_.putBytes(key, data, len);
 }
 
-size_t ConfigStorage::readBlob(const char* key, void* outData, size_t maxLen) {
-  return prefs_.getBytes(key, outData, maxLen);
+// Свій namespace читається через Preferences (той самий хендл, що й запис),
+// чужий - через власний read-only хендл. Це не дублювання логіки, а різниця в
+// доступі: спільного тут лише виклик nvs_get_blob під капотом.
+size_t ConfigStorage::readBlob(const char* key, void* outData, size_t maxLen, const char* ns) {
+  if (ns == nullptr) return prefs_.getBytes(key, outData, maxLen);
+
+  nvs_handle_t handle;
+  if (nvs_open_from_partition(partitionLabel_.c_str(), ns, NVS_READONLY, &handle) != ESP_OK) {
+    return 0;
+  }
+  size_t len = maxLen;
+  const esp_err_t err = nvs_get_blob(handle, key, outData, &len);
+  nvs_close(handle);
+  return err == ESP_OK ? len : 0;
 }
 
-size_t ConfigStorage::blobLength(const char* key) { return prefs_.getBytesLength(key); }
+size_t ConfigStorage::blobLength(const char* key, const char* ns) {
+  if (ns == nullptr) return prefs_.getBytesLength(key);
+
+  nvs_handle_t handle;
+  if (nvs_open_from_partition(partitionLabel_.c_str(), ns, NVS_READONLY, &handle) != ESP_OK) {
+    return 0;
+  }
+  size_t len = 0;
+  const esp_err_t err = nvs_get_blob(handle, key, nullptr, &len);
+  nvs_close(handle);
+  return err == ESP_OK ? len : 0;
+}
 
 // =====================================================================================
 // ESP8266 — LittleFS, кожен параметр = окремий файл "/.nvs/<namespace>/<key>.<type>"
 // =====================================================================================
 #elif defined(ESP8266)
 
-String ConfigStorage::namespaceDir() const { return "/.nvs/" + namespaceName_; }
+String ConfigStorage::namespaceDir(const char* ns) const {
+  return "/.nvs/" + (ns ? String(ns) : namespaceName_);
+}
 
-String ConfigStorage::pathFor(const char* key, const char* ext) const {
-  return namespaceDir() + "/" + key + "." + ext;
+String ConfigStorage::pathFor(const char* key, const char* ext, const char* ns) const {
+  return namespaceDir(ns) + "/" + key + "." + ext;
 }
 
 bool ConfigStorage::ensureNamespaceDir() const {
@@ -371,9 +529,67 @@ void ConfigStorage::clearAll() {
   }
 }
 
-std::vector<ConfigStorage::Entry> ConfigStorage::listEntries() {
+bool ConfigStorage::remove(const char* key) {
+  if (!isKeyValid(key)) {
+    warnInvalidKey(key, "remove");
+    return false;
+  }
+  // Тип зберігається в розширенні файлу, а ключ приходить без нього — тому
+  // знімаємо всі можливі представлення. Їх і не буває більше одного: set*
+  // пишуть у свій ext, а перезапис іншим типом лишив би два файли з одним
+  // ключем, і listEntries() показав би дублікат.
+  static const char* kExts[] = {"str", "i32", "u32", "f32", "bool", "bin"};
+  bool removed = false;
+  for (const char* ext : kExts) {
+    String path = pathFor(key, ext);
+    if (LittleFS.exists(path) && LittleFS.remove(path)) removed = true;
+  }
+  return removed;
+}
+
+std::vector<String> ConfigStorage::listNamespaces() {
+  // На ESP8266 namespace - це каталог у /.nvs, тому "перелічити namespace'и"
+  // означає буквально перелічити каталоги.
+  std::vector<String> result;
+  Dir dir = LittleFS.openDir("/.nvs");
+  while (dir.next()) {
+    if (dir.isDirectory()) result.push_back(dir.fileName());
+  }
+  return result;
+}
+
+String ConfigStorage::getAsString(const char* key, nvs_type_t type, const char* ns) {
+  if (!isKeyValid(key)) {
+    warnInvalidKey(key, "getAsString");
+    return String();
+  }
+  switch (type) {
+    case NVS_TYPE_STR: {
+      String path = pathFor(key, "str", ns);
+      if (!LittleFS.exists(path)) return String();
+      File f = LittleFS.open(path, "r");
+      if (!f) return String();
+      String value = f.readString();
+      f.close();
+      return value;
+    }
+    case NVS_TYPE_U32:
+    case NVS_TYPE_I32: {
+      int32_t value = 0;
+      return readFile(pathFor(key, "i32", ns), &value, sizeof(value)) == sizeof(value)
+                 ? String(value)
+                 : String();
+    }
+    case NVS_TYPE_BLOB:
+      return String("<") + (uint32_t)blobLength(key, ns) + " bytes>";
+    default:
+      return String();
+  }
+}
+
+std::vector<ConfigStorage::Entry> ConfigStorage::listEntries(const char* ns) {
   std::vector<Entry> result;
-  Dir dir = LittleFS.openDir(namespaceDir());
+  Dir dir = LittleFS.openDir(namespaceDir(ns));
   while (dir.next()) {
     String fname = dir.fileName();
     int dotPos = fname.lastIndexOf('.');
@@ -422,12 +638,12 @@ size_t ConfigStorage::writeBlob(const char* key, const void* data, size_t len) {
   return writeFile(pathFor(key, "bin"), data, len) ? len : 0;
 }
 
-size_t ConfigStorage::readBlob(const char* key, void* outData, size_t maxLen) {
-  return readFile(pathFor(key, "bin"), outData, maxLen);
+size_t ConfigStorage::readBlob(const char* key, void* outData, size_t maxLen, const char* ns) {
+  return readFile(pathFor(key, "bin", ns), outData, maxLen);
 }
 
-size_t ConfigStorage::blobLength(const char* key) {
-  String path = pathFor(key, "bin");
+size_t ConfigStorage::blobLength(const char* key, const char* ns) {
+  String path = pathFor(key, "bin", ns);
   if (!LittleFS.exists(path)) return 0;
   File f = LittleFS.open(path, "r");
   if (!f) return 0;

@@ -167,6 +167,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #if HAS_WEB_PORTAL
 #include <WebCommandsModule.hpp>
 #include <WebConsoleModule.hpp>
+#include <WebNvsModule.hpp>
 #include <WebPortal.hpp>
 #include <WebWifiModule.hpp>
 #endif
@@ -412,6 +413,7 @@ WebConsoleModule webConsoleModule;
 WebCommandsModule webCommandsModule(commandHandler,
                                    [](const char* line) { return commandQueue.submit(line); },
                                    configStorage);
+WebNvsModule webNvsModule(configStorage);
 WebPortal webPortal(httpServer, configStorage);
 #endif
 
@@ -1727,14 +1729,6 @@ void setupSD() {
   return;
 }
 
-int getWiFiQuality(long rssi) {
-  if (rssi >= -50) return 100;
-  if (rssi <= -100) return 0;
-  
-  // Лінійна інтерполяція між -100 dBm (0%) та -50 dBm (100%)
-  return map(rssi, -100, -50, 0, 100); 
-}
-
 void dumpSystemInfo() {
   Logger::info("======== ESP32 CHIP INFO ==================================");
 
@@ -1798,7 +1792,7 @@ void dumpSystemInfo() {
   Logger::info("Uptime: %02u:%02u:%02u", (unsigned)(uptimeSec / 3600),
                  (unsigned)((uptimeSec / 60) % 60), (unsigned)(uptimeSec % 60));
 
-  Logger::info("WiFi SSID: %s (%d dBm / %d%%)", WiFi.SSID().c_str(), WiFi.RSSI(), getWiFiQuality(WiFi.RSSI()));
+  Logger::info("WiFi SSID: %s (%d dBm / %d%%)", WiFi.SSID().c_str(), WiFi.RSSI(), wifiSignalQuality(WiFi.RSSI()));
   if (WiFi.status() == WL_CONNECTED) {
     Logger::info("WiFi   IP: %s", WiFi.localIP().toString().c_str());
   } else {
@@ -1821,30 +1815,12 @@ void dumpConfigStorage() {
     Logger::info("(empty.)");
   }
 
+  // Форматування значення за типом живе в ConfigStorage::getAsString(): той
+  // самий рядок показує і веб-редактор NVS (WebNvsModule), а тримати два
+  // switch'и на десяток типів - рівно те дублювання, що розходиться першим.
   for (const auto& e : entries) {
-    switch (e.type) {
-      case NVS_TYPE_U8:
-        Logger::info("  key: %-16s type: %-4s value: %s", e.key.c_str(), e.typeName.c_str(),
-                     configStorage.getBool(e.key.c_str()) ? "true" : "false");
-        break;
-      case NVS_TYPE_I8:
-      case NVS_TYPE_U16:
-      case NVS_TYPE_I16:
-      case NVS_TYPE_U32:
-      case NVS_TYPE_I32:
-      case NVS_TYPE_U64:
-      case NVS_TYPE_I64:
-        Logger::info("  key: %-16s type: %-4s value: %d", e.key.c_str(), e.typeName.c_str(),
-                     configStorage.getInt(e.key.c_str()));
-        break;
-      case NVS_TYPE_STR:
-        Logger::info("  key: %-16s type: %-4s value: %s", e.key.c_str(), e.typeName.c_str(),
-                     configStorage.getString(e.key.c_str()).c_str());
-        break;
-      default:
-        Logger::info("  key: %-16s type: %-4s", e.key.c_str(), e.typeName.c_str());
-        break;
-    }
+    Logger::info("  key: %-16s type: %-4s value: %s", e.key.c_str(), e.typeName.c_str(),
+                 configStorage.getAsString(e.key.c_str(), e.type).c_str());
   }
 
   Logger::info("");
@@ -4244,6 +4220,7 @@ void setupWebPortal() {
   webPortal.addModule(&webWifiModule);
   webPortal.addModule(&webConsoleModule);
   webPortal.addModule(&webCommandsModule);
+  webPortal.addModule(&webNvsModule);
 
   if (!webPortal.begin()) {
     Logger::error("WebPortal setup failed");
@@ -4392,11 +4369,11 @@ void drawSystemInfo() {
   }
 
   #if BOARD_ESP32_C6_LCD096
-  // Вузький екран (160px) - без відсотків, тому й getWiFiQuality() тут не
+  // Вузький екран (160px) - без відсотків, тому й wifiSignalQuality() тут не
   // рахуємо (раніше передавався третім, зайвим аргументом на два %-специфікатори).
   snprintf(buf, sizeof(buf), "WiFi: %s (%d dBm)", WiFi.SSID().c_str(), WiFi.RSSI());
   #else
-  snprintf(buf, sizeof(buf), "WiFi: %s (%d dBm / %d%%)", WiFi.SSID().c_str(), WiFi.RSSI(), getWiFiQuality(WiFi.RSSI()));
+  snprintf(buf, sizeof(buf), "WiFi: %s (%d dBm / %d%%)", WiFi.SSID().c_str(), WiFi.RSSI(), wifiSignalQuality(WiFi.RSSI()));
   #endif
   display.setCursor(space * 2, space * 2 + row++ * (space + display.fontHeight()));
   display.print(buf);

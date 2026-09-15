@@ -10,12 +10,18 @@
   --muted: #8b94a3; --accent: #4da3ff; --ok: #4cc38a; --warn: #e0a33e; --err: #e5534b;
 }
 * { box-sizing: border-box; }
+/* Атрибут hidden ховає елемент лише через display:none з UA-стилю, і будь-який
+   авторський display його перемагає - на .menu з display:flex саме так і
+   вийшло: приховані меню всіх рядків малювались одночасно. */
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
 header h1 { font-size: 15px; margin: 0; font-weight: 600; }
 header .spacer { flex: 1; }
+header #uptime, header #heap { font-variant-numeric: tabular-nums; }
+header #uptime + #heap { margin-left: 12px; }
 #devstate { color: var(--muted); font-size: 12px; }
 nav { display: flex; gap: 4px; padding: 8px 16px 0; }
 nav button { background: none; border: 1px solid transparent; border-bottom: none;
@@ -25,9 +31,22 @@ main { padding: 0 16px 24px; }
 section { display: none; background: var(--panel); border: 1px solid var(--line);
   border-radius: 0 8px 8px 8px; padding: 16px; }
 section.active { display: block; }
-h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
-  color: var(--muted); margin: 20px 0 8px; font-weight: 600; }
-h2:first-child { margin-top: 0; }
+h2 { font-size: 16px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text); margin: 24px 0 10px; font-weight: 600; }
+h2:first-child, .col > h2:first-child { margin-top: 0; }
+/* Підпис усередині заголовка - це дані, а не назва розділу: ім'я namespace,
+   лічильники, стан стрічки. Регістр у них значущий (namespace в NVS
+   регістрозалежний), тому uppercase заголовка на них не поширюється. */
+h2 span { text-transform: none; letter-spacing: 0; }
+/* Дві колонки на широкому екрані, одна - на вузькому. Ділиться не вміст
+   вкладки навпіл, а те, що читають ПАРАЛЕЛЬНО: список профілів поруч зі
+   сканом, перелік команд поруч із полем вводу, таблиця NVS поруч із
+   редактором. Інакше половина роботи - це скрол туди-сюди. */
+.cols { display: flex; gap: 24px; align-items: flex-start; }
+/* min-width:0 обов'язковий: без нього flex-елемент не стискається нижче
+   ширини свого вмісту, і довгий рядок у таблиці розпирає колонку. */
+.col { flex: 1 1 0; min-width: 0; }
+@media (max-width: 900px) { .cols { display: block; } .col + .col { margin-top: 20px; } }
 button.act { background: var(--accent); border: none; color: #06121f; padding: 7px 14px;
   border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; }
 button.act.ghost { background: none; border: 1px solid var(--line); color: var(--text); font-weight: 400; }
@@ -35,7 +54,11 @@ button.act:disabled { opacity: .5; cursor: default; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-th { color: var(--muted); font-weight: 500; font-size: 12px; }
+/* Заголовки стовпчиків - того ж кегля, що й вміст таблиці: менший шрифт
+   робив із них підпис дрібним шрифтом, який око пропускає. Від даних вони
+   відрізняються кольором і регістром, а не розміром. */
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase;
+  letter-spacing: .04em; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 input, select { background: var(--bg); border: 1px solid var(--line); color: var(--text);
   padding: 7px 10px; border-radius: 6px; font: inherit; }
@@ -47,7 +70,12 @@ dd { margin: 0; }
 #log, #run-out { background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
   overflow-y: auto; white-space: pre-wrap; word-break: break-word;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-#log { height: 55vh; }
+#log { flex: 1; min-height: 200px; }
+/* Консоль - єдина вкладка, що займає екран цілком: поле вводу має бути видно
+   без скролу, як у терміналі. Тому висота рахується від вікна, а стрічка
+   забирає весь залишок. 128px - це шапка з навігацією і відступи main. */
+#tab-console.active { display: flex; flex-direction: column;
+  height: calc(100vh - 128px); min-height: 360px; }
 #run-out { height: 22vh; }
 #log .e, #run-out .e { color: var(--err); } #log .w, #run-out .w { color: var(--warn); }
 #log .d, #run-out .d { color: var(--muted); } #log .cmd, #run-out .cmd { color: var(--accent); }
@@ -68,10 +96,40 @@ dd { margin: 0; }
 .chip button:first-child { border-radius: 6px 0 0 6px; }
 .chip button:last-child { border-radius: 0 6px 6px 0; border-left: none;
   padding: 7px 10px; color: var(--muted); }
+/* Дії над записом NVS: основна (View) - кнопка, рідші - під стрілкою.
+   Три кнопки в кожному з півтора десятка рядків перетворювали стовпчик на
+   частокіл, у якому Delete стоїть рівно там, куди цілиться палець. */
+.menu-wrap { position: relative; display: inline-flex; }
+.menu-wrap > .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px;
+  min-width: 130px; display: flex; flex-direction: column; box-shadow: 0 6px 20px #0009; }
+.menu button { background: none; border: none; color: var(--text); font: inherit;
+  text-align: left; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+.menu button:hover { background: #ffffff12; }
+.menu button.danger { color: var(--err); }
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel);
   border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px;
   padding: 10px 14px; max-width: 60vw; display: none; }
 .muted { color: var(--muted); }
+/* Профіль, до якого підключені зараз. Підсвічуємо рядок цілком, а не одну
+   комірку: у таблиці з п'яти стовпчиків значок у крайньому лівому губиться. */
+tr.active > td { background: #4cc38a14; }
+tr.active > td:first-child { box-shadow: inset 2px 0 0 var(--ok); font-weight: 600; }
+/* Редактор значення NVS: те саме поле і для короткого рядка, і для JSON на
+   пів кілобайта, тому висота росте, а не зʼявляється другий контрол. */
+textarea { background: var(--bg); border: 1px solid var(--line); color: var(--text);
+  padding: 7px 10px; border-radius: 6px; width: 100%; resize: vertical;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+textarea:focus { outline: 1px solid var(--accent); }
+/* Поле значення - окремий рядок під ключем і типом, а не впритул до них. */
+#nvs-value { margin-top: 10px; }
+#nvs-view { background: #0e1116; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; overflow-x: auto; overflow-y: auto; max-height: 50vh; white-space: pre;
+  margin-top: 8px;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#nvs-table td { vertical-align: baseline; }
+#nvs-table td.val { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 @media (max-width: 560px) { dl { grid-template-columns: 1fr; } th.opt, td.opt { display: none; } }
 </style>
 </head>
@@ -80,17 +138,21 @@ dd { margin: 0; }
   <h1>ESP32 portal</h1>
   <span id="devstate">connecting…</span>
   <span class="spacer"></span>
+  <span id="uptime" class="muted"></span>
   <span id="heap" class="muted"></span>
 </header>
 
 <nav>
   <button data-tab="wifi" class="active">Wi-Fi</button>
   <button data-tab="commands">Commands</button>
+  <button data-tab="nvs">NVS</button>
   <button data-tab="console">Console</button>
 </nav>
 
 <main>
 <section id="tab-wifi" class="active">
+ <div class="cols">
+  <div class="col">
   <h2>Status</h2>
   <dl id="wifi-status"></dl>
 
@@ -104,15 +166,21 @@ dd { margin: 0; }
 
   <h2>Networks in range</h2>
   <table id="scan-table"><tbody><tr><td class="muted">Press “Scan networks”.</td></tr></tbody></table>
+  </div>
 
+  <div class="col">
   <h2>Saved profiles</h2>
   <table id="profiles">
     <thead><tr><th>SSID</th><th class="opt">Priority</th><th class="opt">Signal</th><th>State</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
+  </div>
+ </div>
 </section>
 
 <section id="tab-commands">
+ <div class="cols">
+  <div class="col">
   <h2>Run</h2>
   <form class="row" id="run-form">
     <input id="run-cmd" list="cmd-list" autocomplete="off" placeholder="command with arguments, e.g. net device wifi list">
@@ -125,10 +193,60 @@ dd { margin: 0; }
 
   <h2>Output <span id="run-state" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
   <div id="run-out"></div>
+  </div>
 
+  <div class="col">
   <h2>Available commands <span id="cmd-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
   <input id="cmd-filter" placeholder="filter…" autocomplete="off">
   <div id="cmd-box"><table id="cmd-table"><tbody></tbody></table></div>
+  </div>
+ </div>
+</section>
+
+<section id="tab-nvs">
+ <div class="cols">
+  <div class="col">
+  <h2>Records <span id="nvs-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <div class="row">
+    <select id="nvs-ns"></select>
+    <input id="nvs-filter" placeholder="filter keys…" autocomplete="off" style="flex:1">
+  </div>
+  <table id="nvs-table">
+    <thead><tr><th>Key</th><th class="opt">Type</th><th>Value</th><th></th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+  </table>
+  </div>
+
+  <div class="col">
+  <h2>Add or update <span id="nvs-ro" class="muted" style="font-size:.75em; font-weight:400" hidden>read-only namespace</span></h2>
+  <form id="nvs-form">
+    <div class="row">
+      <input id="nvs-key" maxlength="15" autocomplete="off" placeholder="key (max 15 chars)">
+      <select id="nvs-type">
+        <option value="string">string</option>
+        <option value="i32">integer</option>
+        <option value="bool">boolean</option>
+      </select>
+      <select id="nvs-bool" style="display:none">
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+      <span class="spacer" style="flex:1"></span>
+      <span id="nvs-json" class="muted" style="display:none">JSON
+        <button class="act ghost" type="button" id="nvs-pretty">Format</button>
+        <button class="act ghost" type="button" id="nvs-minify">Minify</button>
+      </span>
+      <button class="act" type="submit">Save</button>
+      <button class="act ghost" type="button" id="nvs-clear">Clear</button>
+    </div>
+    <textarea id="nvs-value" rows="2" spellcheck="false" placeholder="value"></textarea>
+  </form>
+  <p class="muted" id="nvs-hint">JSON strings are pretty-printed for editing and stored minified. Blob values (arrays, structs, floats) are read-only: their layout is not stored in NVS, so there is nothing safe to edit them against — “View” shows them as a hex dump.</p>
+
+  <h2 id="nvs-view-title" hidden>Value <span id="nvs-view-meta" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <div id="nvs-view" hidden></div>
+  </div>
+ </div>
 </section>
 
 <section id="tab-console">
@@ -200,15 +318,23 @@ document.querySelectorAll("nav button").forEach((btn) => {
     // поки не настане наступний тік.
     if (btn.dataset.tab === "wifi") refreshWifi();
     if (btn.dataset.tab === "commands") refreshShortcuts();
+    // Саме nvsData.namespace, а не типове значення: інакше повернення на
+    // вкладку скидало б обраний namespace на власний.
+    if (btn.dataset.tab === "nvs") refreshNvs(nvsData.namespace);
   };
 });
 
 /* ---------------- wi-fi ---------------- */
 
-function signal(rssi) {
+// Відсоток приходить з пристрою (wifiSignalQuality() в NetworkSupervisor) - тим
+// самим числом підписані екран плати і 'status sys'. Формулу сюди не
+// переносимо: дві шкали, що розходяться на кілька відсотків, помітні рівно
+// тоді, коли дивишся на плату й на сторінку одночасно.
+function signal(rssi, quality) {
   if (!rssi) return "–";
   const bars = rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -80 ? 2 : 1;
-  return "▮".repeat(bars) + "▯".repeat(4 - bars) + " " + rssi + " dBm";
+  return "▮".repeat(bars) + "▯".repeat(4 - bars) + " " + rssi + " dBm" +
+         (quality === undefined ? "" : " · " + quality + "%");
 }
 
 function renderStatus(s) {
@@ -219,7 +345,7 @@ function renderStatus(s) {
     ["State", s.state],
     ["SSID", s.ssid || "–"],
     ["IP address", s.ip || "–"],
-    ["Signal", s.connected ? signal(s.rssi) : "–"],
+    ["Signal", s.connected ? signal(s.rssi, s.quality) : "–"],
     ["MAC", s.mac],
     ["Auto reconnect", s.autoReconnect ? "on" : "off"],
     ["Hotspot", ap.active ? ap.ssid + " · " + ap.ip + " · " + ap.clients + " client(s)" : "off"],
@@ -238,10 +364,11 @@ function renderProfiles(list) {
     return;
   }
   body.innerHTML = list.map((c) => `
-    <tr>
-      <td>${escapeHtml(c.ssid)}${c.hasPassword ? "" : ' <span class="muted">(open)</span>'}</td>
+    <tr class="${c.active ? "active" : ""}">
+      <td>${escapeHtml(c.ssid)}${c.hasPassword ? "" : ' <span class="muted">(open)</span>'}
+          ${c.active ? ' <span style="color:var(--ok)">connected</span>' : ""}</td>
       <td class="num opt">${c.priority}</td>
-      <td class="opt">${c.rssi ? signal(c.rssi) : '<span class="muted">not in range</span>'}</td>
+      <td class="opt">${c.rssi ? signal(c.rssi, c.quality) : '<span class="muted">not in range</span>'}</td>
       <td>${c.enabled ? "enabled" : '<span class="muted">disabled</span>'}</td>
       <td class="num">
         <button class="act ghost" data-connect="${c.id}">Connect</button>
@@ -264,7 +391,7 @@ function renderScan(networks) {
           ${n.known ? ' <span class="muted">saved</span>' : ""}</td>
       <td class="opt">${n.security}</td>
       <td class="opt num">ch ${n.channel}</td>
-      <td>${signal(n.rssi)}</td>
+      <td>${signal(n.rssi, n.quality)}</td>
       <td class="num">${n.hidden ? "" : `<button class="act ghost" data-join="${escapeHtml(n.ssid)}" data-open="${n.security === "OPEN"}">Join</button>`}</td>
     </tr>`).join("");
 }
@@ -516,6 +643,292 @@ $("#tab-commands").addEventListener("click", async (ev) => {
   }
 });
 
+/* ---------------- nvs ---------------- */
+
+// Типів у NVS десяток, а форма приймає три: рядок, ціле, булеве. Решта
+// цілочисельних (u8 поза bool, i16, u32...) редагується як i32 - інакше
+// довелося б тримати в UI повний перелік і звіряти його з пристроєм.
+function nvsFormType(type) {
+  if (type === "string") return "string";
+  if (type === "u8") return "bool";
+  return "i32";
+}
+
+// Останній знімок списку. Фільтр працює по ньому локально - так само, як на
+// вкладці Commands: слати запит на кожну натиснуту літеру заради двох десятків
+// рядків плата не має.
+let nvsData = { namespace: "", writable: true, entries: [] };
+
+function renderNvs() {
+  const q = $("#nvs-filter").value.trim().toLowerCase();
+  // Сортуємо за ключем: порядок у NVS - це порядок запису, тобто випадковий
+  // для того, хто шукає конкретний ключ. Нічого від нього не залежить -
+  // listEntries() і так віддає що знайде.
+  const all = nvsData.entries.slice().sort((a, b) => a.key.localeCompare(b.key));
+  const list = q ? all.filter((e) => e.key.toLowerCase().includes(q)) : all;
+
+  $("#nvs-count").textContent =
+    (q ? list.length + " of " + all.length : all.length + " key(s)") +
+    (nvsData.truncated ? " — list truncated" : "") +
+    (nvsData.writable ? "" : " · read-only");
+
+  const body = $("#nvs-table tbody");
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="4" class="muted">' +
+      (all.length ? "Nothing matches." : "Namespace is empty.") + "</td></tr>";
+    return;
+  }
+  body.innerHTML = list.map((e) => `
+    <tr>
+      <td>${escapeHtml(e.key)}</td>
+      <td class="opt muted">${escapeHtml(e.type)}</td>
+      <td class="val" title="${escapeHtml(e.value)}">${escapeHtml(e.value)}</td>
+      <td class="num">${nvsActions(e)}</td>
+    </tr>`).join("");
+}
+
+// View - основна дія і лишається кнопкою; Edit і Delete ховаються під стрілку.
+// Коли ховати нічого (чужий namespace - лише перегляд), стрілки немає: порожнє
+// меню дратує більше, ніж його відсутність.
+function nvsActions(e) {
+  const key = escapeHtml(e.key);
+  const hidden = [];
+  if (e.editable) {
+    hidden.push(`<button data-nvs-edit="${key}" data-type="${escapeHtml(nvsFormType(e.type))}"
+                         data-value="${escapeHtml(e.value)}">Edit</button>`);
+  }
+  if (nvsData.writable) {
+    hidden.push(`<button class="danger" data-nvs-drop="${key}">Delete</button>`);
+  }
+
+  const view = `<button class="act ghost" data-nvs-view="${key}">View</button>`;
+  if (!hidden.length) return view;
+
+  return `<span class="menu-wrap">
+      <span class="chip">${view}<button class="act ghost" data-nvs-menu="${key}" title="More actions">▾</button></span>
+      <div class="menu" hidden>${hidden.join("")}</div>
+    </span>`;
+}
+
+function closeNvsMenus(except) {
+  document.querySelectorAll("#tab-nvs .menu").forEach((m) => {
+    if (m !== except) m.hidden = true;
+  });
+}
+
+function renderNvsNamespaces(data) {
+  const sel = $("#nvs-ns");
+  // Свій namespace завжди перший: у нього ходять, решта - для діагностики.
+  const names = (data.namespaces || []).slice().sort((a, b) =>
+    a === data.namespace ? -1 : b === data.namespace ? 1 : a.localeCompare(b));
+  sel.innerHTML = names.map((n) =>
+    `<option value="${escapeHtml(n)}"${n === data.namespace ? " selected" : ""}>${escapeHtml(n)}</option>`).join("");
+
+  // Форму редагування ховаємо цілком, а не лише блокуємо: у чужому namespace
+  // нема чого пропонувати - пристрій однаково відмовить.
+  $("#nvs-form").hidden = $("#nvs-hint").hidden = !data.writable;
+  $("#nvs-ro").hidden = data.writable;
+}
+
+async function refreshNvs(ns) {
+  try {
+    const r = await job("/api/nvs/list" + (ns ? "?ns=" + encodeURIComponent(ns) : ""));
+    if (!r || !r.ok) { toast((r && r.message) || "Cannot read NVS", "err"); return; }
+    nvsData = r;
+    renderNvsNamespaces(r);
+    renderNvs();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+// Клік будь-де за межами розділу теж закриває меню: інакше воно висіло б
+// поверх сусідньої вкладки.
+document.addEventListener("click", (ev) => {
+  if (!ev.target.closest("#tab-nvs")) closeNvsMenus();
+});
+
+$("#nvs-filter").oninput = renderNvs;
+$("#nvs-ns").onchange = (ev) => {
+  $("#nvs-view").hidden = $("#nvs-view-title").hidden = true;
+  refreshNvs(ev.target.value);
+};
+
+// Булеве значення береться зі списку, а не з текстового поля: "True" чи "yes"
+// пристрій не вгадує, а мовчки зберегти false замість true - найгірший із
+// можливих наслідків одруку.
+function nvsValueInput() {
+  return $("#nvs-type").value === "bool" ? $("#nvs-bool") : $("#nvs-value");
+}
+
+// Чи є значення JSON-об'єктом або масивом. Це НЕ здогад за виглядом: рядок
+// проганяється через JSON.parse. Лишається умова на перший символ - без неї
+// сюди потрапляли б і "42", і "true", тобто звичайні рядки, яким ні
+// форматування, ні мініфікація не потрібні, зате trim() при мініфікації змінив
+// би збережене значення.
+function nvsAsJson(text) {
+  const t = text.trim();
+  if (!t.startsWith("{") && !t.startsWith("[")) return null;
+  try { return JSON.parse(t); } catch (e) { return null; }
+}
+
+// Показує кнопки Format/Minify рівно тоді, коли їм є на чому працювати, і
+// підганяє висоту поля під вміст.
+function nvsSyncValue() {
+  const box = $("#nvs-value");
+  const isJson = $("#nvs-type").value === "string" && nvsAsJson(box.value) !== null;
+  $("#nvs-json").style.display = isJson ? "" : "none";
+  box.rows = Math.min(20, Math.max(2, box.value.split("\n").length));
+}
+
+function nvsSyncType() {
+  const isBool = $("#nvs-type").value === "bool";
+  $("#nvs-value").style.display = isBool ? "none" : "";
+  $("#nvs-bool").style.display = isBool ? "" : "none";
+  nvsSyncValue();
+}
+
+$("#nvs-type").onchange = nvsSyncType;
+$("#nvs-value").oninput = nvsSyncValue;
+
+$("#nvs-pretty").onclick = () => {
+  const parsed = nvsAsJson($("#nvs-value").value);
+  if (parsed === null) { toast("Value is not valid JSON", "err"); return; }
+  $("#nvs-value").value = JSON.stringify(parsed, null, 2);
+  nvsSyncValue();
+};
+
+$("#nvs-minify").onclick = () => {
+  const parsed = nvsAsJson($("#nvs-value").value);
+  if (parsed === null) { toast("Value is not valid JSON", "err"); return; }
+  $("#nvs-value").value = JSON.stringify(parsed);
+  nvsSyncValue();
+};
+
+$("#nvs-clear").onclick = () => {
+  $("#nvs-key").value = "";
+  $("#nvs-value").value = "";
+  $("#nvs-view").hidden = $("#nvs-view-title").hidden = true;
+  nvsSyncValue();
+  $("#nvs-key").focus();
+};
+
+$("#nvs-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const key = $("#nvs-key").value.trim();
+  if (!key) { toast("Key must not be empty", "err"); return; }
+
+  // У flash їде мініфікований JSON: відступи, які додало форматування, - це
+  // місце в NVS і зайві байти в кожному читанні на пристрої. Текст, що НЕ є
+  // JSON, іде байт у байт, без trim() - у рядку цілком можуть бути значущі
+  // пробіли.
+  let value = nvsValueInput().value;
+  const parsed = $("#nvs-type").value === "string" ? nvsAsJson(value) : null;
+  if (parsed !== null) value = JSON.stringify(parsed);
+
+  try {
+    const r = await job("/api/nvs/entry", form({ key, type: $("#nvs-type").value, value }));
+    toast((r && r.message) || "Saved", r && r.ok === false ? "err" : "ok");
+  } catch (e) { toast(e.message, "err"); }
+  refreshNvs(nvsData.namespace);
+};
+
+// Дамп у форматі xxd: зсув, 16 байтів двома групами по 8, ASCII-панель.
+// Складається тут, а не на пристрої: з дроту йде лише hex, а розкладка - це
+// текст, який браузер зробить утричі дешевше.
+function nvsHexDump(hex) {
+  const bytes = [];
+  for (let i = 0; i + 1 < hex.length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16));
+
+  const lines = [];
+  for (let off = 0; off < bytes.length; off += 16) {
+    const row = bytes.slice(off, off + 16);
+    const cells = row.map((b) => b.toString(16).padStart(2, "0"));
+    while (cells.length < 16) cells.push("  ");
+    const ascii = row.map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".")).join("");
+    lines.push(off.toString(16).padStart(8, "0") + "  " +
+               cells.slice(0, 8).join(" ") + "  " + cells.slice(8).join(" ") +
+               "  |" + ascii + "|");
+  }
+  return lines.join("\n");
+}
+
+// Один переглядач на всі типи. У таблиці значення обрізане - довгий рядок
+// розпирав би стовпчик, - тому побачити його цілком можна лише тут; це
+// єдиний спосіб для чужих namespace'ів, де редактора немає взагалі.
+//
+// Блоб доводиться довантажувати (у списку від нього лише розмір), решта вже
+// приїхала разом зі списком - зайвого запиту на кожен перегляд не робимо.
+async function showNvsView(key) {
+  const entry = nvsData.entries.find((e) => e.key === key);
+  if (!entry) return;
+
+  const box = $("#nvs-view");
+  box.hidden = $("#nvs-view-title").hidden = false;
+  $("#nvs-view-meta").textContent = key + " · " + entry.type;
+
+  if (entry.type !== "blob") {
+    // JSON показуємо з відступами: у сховищі він лежить одним рядком, і
+    // читати його так неможливо.
+    const parsed = nvsAsJson(entry.value);
+    box.textContent = parsed === null ? entry.value : JSON.stringify(parsed, null, 2);
+    if (entry.value.length === 0) box.textContent = "(empty)";
+    return;
+  }
+
+  box.textContent = "reading…";
+  try {
+    const r = await job("/api/nvs/blob?key=" + encodeURIComponent(key) +
+                       "&ns=" + encodeURIComponent(nvsData.namespace));
+    if (!r || r.ok === false) { box.textContent = (r && r.message) || "Cannot read blob"; return; }
+    $("#nvs-view-meta").textContent = key + " · blob · " + r.size + " bytes" +
+      (r.truncated ? " (first " + (r.hex.length / 2) + " shown)" : "");
+    box.textContent = nvsHexDump(r.hex);
+  } catch (e) {
+    box.textContent = e.message;
+  }
+}
+
+$("#tab-nvs").addEventListener("click", async (ev) => {
+  const menuBtn = ev.target.closest("[data-nvs-menu]");
+  if (menuBtn) {
+    const menu = menuBtn.closest(".menu-wrap").querySelector(".menu");
+    closeNvsMenus(menu);
+    menu.hidden = !menu.hidden;
+    return;
+  }
+  // Будь-який інший клік у розділі закриває відкрите меню - і той, що обрав
+  // дію в ньому, теж: після Edit значення вже в формі, меню там зайве.
+  closeNvsMenus();
+
+  // Правка - це та сама форма: NVS не розрізняє вставку й оновлення, тож і
+  // окремого діалогу для неї не треба.
+  const edit = ev.target.closest("[data-nvs-edit]");
+  if (edit) {
+    $("#nvs-key").value = edit.dataset.nvsEdit;
+    $("#nvs-type").value = edit.dataset.type;
+    nvsSyncType();
+    // JSON розкладається на рядки одразу: у сховищі він лежить одним рядком на
+    // пів кілобайта, і правити його в такому вигляді неможливо.
+    const parsed = nvsAsJson(edit.dataset.value);
+    nvsValueInput().value = parsed === null ? edit.dataset.value : JSON.stringify(parsed, null, 2);
+    nvsSyncValue();
+    $("#nvs-value").focus();
+    return;
+  }
+
+  const view = ev.target.closest("[data-nvs-view]");
+  if (view) { showNvsView(view.dataset.nvsView); return; }
+
+  const drop = ev.target.closest("[data-nvs-drop]");
+  if (drop && confirm("Delete key “" + drop.dataset.nvsDrop + "”?")) {
+    try {
+      const r = await job("/api/nvs/entry?key=" + encodeURIComponent(drop.dataset.nvsDrop),
+                          { method: "DELETE" });
+      toast((r && r.message) || "Removed", r && r.ok === false ? "err" : "ok");
+    } catch (e) { toast(e.message, "err"); }
+    refreshNvs(nvsData.namespace);
+  }
+});
+
 /* ---------------- console ---------------- */
 
 let logCursor = null;
@@ -677,9 +1090,19 @@ $("#cmd").onkeydown = (ev) => {
 
 /* ---------------- boot ---------------- */
 
+// hh:mm:ss без обмеження на добу: пристрій живе тижнями, і "3:14:07" після
+// 80 годин має означати саме 80 годин, а не третю добу.
+function hhmmss(ms) {
+  const total = Math.floor(ms / 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return pad(Math.floor(total / 3600)) + ":" + pad(Math.floor(total / 60) % 60) + ":" +
+         pad(total % 60);
+}
+
 async function pollStatus() {
   try {
     const s = await api("/api/status");
+    $("#uptime").textContent = "up " + hhmmss(s.uptimeMs);
     $("#heap").textContent = "heap " + Math.round(s.freeHeap / 1024) + " KB";
   } catch (e) { /* ignore */ }
 }

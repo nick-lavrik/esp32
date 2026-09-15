@@ -1398,6 +1398,15 @@ void NetworkSupervisor::_notifyWpsPinGenerated(const std::string& pin) {
 
 // Див. коментар у NetworkSupervisor.hpp. Назви станів - ті, що історично
 // друкує 'scan'; веб-портал перейшов на них (data/www/index.html).
+// Формула платформи не стосується - тому поза #if, на відміну від таблиці
+// режимів автентифікації нижче.
+int wifiSignalQuality(long rssi) {
+  if (rssi >= -50) return 100;
+  if (rssi <= -100) return 0;
+  // Лінійна інтерполяція між -100 dBm (0%) та -50 dBm (100%).
+  return (int)((rssi + 100) * 2);
+}
+
 #if defined(ESP8266)
 // ESP8266 не має wifi_auth_mode_t/WIFI_AUTH_* (це ESP32 API). WiFi.encryptionType()
 // повертає ENC_TYPE_* з ESP8266WiFiType.h; WPA3 і enterprise там відсутні.
