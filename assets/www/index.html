@@ -51,6 +51,12 @@ button.act { background: var(--accent); border: none; color: #06121f; padding: 7
   border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; }
 button.act.ghost { background: none; border: 1px solid var(--line); color: var(--text); font-weight: 400; }
 button.act:disabled { opacity: .5; cursor: default; }
+/* Кнопка, підпис якої змінюється за станом, ширину не міняє: інакше сусідні
+   елементи стрибають рівно в мить, коли в кнопку цілиться курсор. min-width
+   рахується під найдовший підпис у `ch` (не залежить від кегля) плюс
+   горизонтальні падінги - box-sizing тут border-box. */
+#scr-run { min-width: calc(7ch + 28px); }    /* Pause / Resume */
+#btn-scan { min-width: calc(13ch + 28px); }  /* Scan networks / Scanning… */
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
@@ -344,8 +350,8 @@ textarea:focus { outline: 1px solid var(--accent); }
       <option value="1000">1 / s</option>
     </select>
     <select id="scr-fmt" title="Pixel format on the wire">
-      <option value="332" selected>Fast color (8-bit)</option>
-      <option value="565">Exact color (16-bit)</option>
+      <option value="332">Fast color (8-bit)</option>
+      <option value="565" selected>Exact color (16-bit)</option>
     </select>
     <select id="scr-zoom" title="Zoom">
       <option value="1">1&times;</option>
