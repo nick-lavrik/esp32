@@ -65,6 +65,15 @@ void WebCommandsModule::_rebuildJson() {
   _shortcutsJson = std::move(json);
 }
 
+void WebCommandsModule::_persist() {
+  std::vector<String> raw;
+  raw.reserve(_shortcuts.size());
+  for (const Shortcut& s : _shortcuts) raw.push_back(s.name + kFieldSeparator + s.command);
+  _storage.setStringArray(kCfgShortcuts, raw);
+
+  _rebuildJson();
+}
+
 String WebCommandsModule::_saveJob(const String& name, const String& command, int index) {
   if (index < 0 && _shortcuts.size() >= kMaxShortcuts) {
     return webjson::fail("Shortcut list is full");
@@ -79,12 +88,7 @@ String WebCommandsModule::_saveJob(const String& name, const String& command, in
     _shortcuts.push_back({name, command});
   }
 
-  std::vector<String> raw;
-  raw.reserve(_shortcuts.size());
-  for (const Shortcut& s : _shortcuts) raw.push_back(s.name + kFieldSeparator + s.command);
-  _storage.setStringArray(kCfgShortcuts, raw);
-
-  _rebuildJson();
+  _persist();
   return webjson::ok(index >= 0 ? "Shortcut updated" : "Shortcut saved");
 }
 
@@ -93,13 +97,20 @@ String WebCommandsModule::_deleteJob(size_t index) {
 
   _shortcuts.erase(_shortcuts.begin() + index);
 
-  std::vector<String> raw;
-  raw.reserve(_shortcuts.size());
-  for (const Shortcut& s : _shortcuts) raw.push_back(s.name + kFieldSeparator + s.command);
-  _storage.setStringArray(kCfgShortcuts, raw);
-
-  _rebuildJson();
+  _persist();
   return webjson::ok("Shortcut removed");
+}
+
+String WebCommandsModule::_reorderJob(size_t from, size_t to) {
+  if (from >= _shortcuts.size() || to >= _shortcuts.size()) return webjson::fail("No such shortcut");
+  if (from == to) return webjson::ok("Shortcut order unchanged");
+
+  const Shortcut moved = _shortcuts[from];
+  _shortcuts.erase(_shortcuts.begin() + from);
+  _shortcuts.insert(_shortcuts.begin() + to, moved);
+
+  _persist();
+  return webjson::ok("Shortcut order updated");
 }
 
 void WebCommandsModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
@@ -225,6 +236,26 @@ void WebCommandsModule::registerRoutes(AsyncWebServer& server, WebPortal& portal
 
     const size_t index = strtoul(request->getParam("index")->value().c_str(), nullptr, 10);
     const uint32_t jobId = portal.jobs().submit([this, index]() { return _deleteJob(index); });
+    if (jobId == 0) {
+      request->send(503, "application/json", webjson::error("Job queue is full, try again"));
+      return;
+    }
+    request->send(202, "application/json", String("{\"jobId\":") + jobId + "}");
+  });
+
+  // Дефіс, а не '/reorder' під '/shortcuts': шлях '/api/commands/shortcuts'
+  // сам є префіксом для canHandle() (див. коментар про '/api/commands' вище),
+  // і '/api/commands/shortcuts/reorder' той самий POST-обробник би й перехопив.
+  server.on("/api/commands/shortcuts-reorder", HTTP_POST, [this, &portal](AsyncWebServerRequest* request) {
+    if (!request->hasParam("from", true) || !request->hasParam("to", true)) {
+      request->send(400, "application/json", webjson::error("Missing 'from' or 'to' parameter"));
+      return;
+    }
+
+    const size_t from = strtoul(request->getParam("from", true)->value().c_str(), nullptr, 10);
+    const size_t to = strtoul(request->getParam("to", true)->value().c_str(), nullptr, 10);
+
+    const uint32_t jobId = portal.jobs().submit([this, from, to]() { return _reorderJob(from, to); });
     if (jobId == 0) {
       request->send(503, "application/json", webjson::error("Job queue is full, try again"));
       return;

@@ -18,10 +18,10 @@ LittleFS-джерело при цьому нікуди не зникло - во�
 пристрій не розпаковує нічого. Сторінка на ~72 КБ лягає приблизно в 22 КБ
 флеша.
 
-Запуск (після кожної правки assets/www/):
+Запускається сам перед кожною збіркою - через pre-script
+tools/pio_web_assets.py (див. extra_scripts у platformio.ini). Руками:
     ./tools/gen_web_assets.py
-Згенерований заголовок комітиться разом із джерелом - збірка не залежить від
-наявності Python.
+Згенерований заголовок комітиться разом із джерелом.
 """
 
 import gzip
@@ -62,7 +62,9 @@ def main() -> int:
     arrays, entries, report = [], [], []
     for source, path, content_type in FILES:
         raw = (SRC_DIR / source).read_bytes()
-        packed = gzip.compress(raw, 9)
+        # mtime=0: без цього gzip кладе в заголовок час запуску, і той самий
+        # вхід давав би щоразу інший заголовок - тобто вічну перекомпіляцію.
+        packed = gzip.compress(raw, 9, mtime=0)
         name = c_identifier(path)
 
         arrays.append(emit_array(name, packed))
@@ -99,6 +101,11 @@ inline constexpr size_t kAssetCount = sizeof(kAssets) / sizeof(kAssets[0]);
 
 }}  // namespace webassets
 """
+
+    # Пишемо лише при реальній зміні: інакше кожен 'pio run' оновлював би mtime
+    # заголовка й тягнув за собою перекомпіляцію всіх, хто його включає.
+    if OUT.is_file() and OUT.read_text() == header:
+        return 0
 
     OUT.write_text(header)
     print(f"{OUT.relative_to(ROOT)} written")

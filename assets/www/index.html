@@ -8,6 +8,13 @@
 :root {
   --bg: #14171c; --panel: #1c2027; --line: #2b313b; --text: #e6e9ef;
   --muted: #8b94a3; --accent: #4da3ff; --ok: #4cc38a; --warn: #e0a33e; --err: #e5534b;
+  /* Розмір стовпчика шкали сигналу. Змінною - бо підбирається очима: 4px
+     виглядали як пунктир, який на екрані телефона не читається взагалі. */
+  --sig-bar: 8px; --sig-bar-gap: 3px;
+  /* Шар поверх вмісту на час job() (.busy нижче) - світло-сірий, а не тон
+     --bg: на темних кнопках і панелях однотонний з фоном шар був майже не
+     видимий, і спінер лишався єдиною ознакою busy-стану. */
+  --busy-overlay: rgba(230, 233, 239, .50);
 }
 * { box-sizing: border-box; }
 /* Атрибут hidden ховає елемент лише через display:none з UA-стилю, і будь-який
@@ -33,7 +40,15 @@ section { display: none; background: var(--panel); border: 1px solid var(--line)
 section.active { display: block; }
 h2 { font-size: 16px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--text); margin: 24px 0 10px; font-weight: 600; }
-h2:first-child, .col > h2:first-child { margin-top: 0; }
+/* Прибирає зайвий відступ лише в РЕАЛЬНИХ контейнерів розкладки - секції
+   вкладки й колонки. Обгортки під busy-стан (.busy нижче) - #shortcuts-block,
+   #scan-block, #wifi-form-block тощо - навмисно не box, а невидимий div, і
+   селектор про них нічого не знає: h2 всередині лишається НЕ першою дитиною
+   ні section, ні .col, тому звичайний відступ 24px спрацьовує сам, без
+   точкового винятку на кожну нову обгортку. Раніше тут стояв голий
+   "h2:first-child" (без прив'язки до батька) - і ловив кожен новий div
+   заново, вимагаючи свій виняток. */
+section > h2:first-child, .col > h2:first-child { margin-top: 0; }
 /* Підпис усередині заголовка - це дані, а не назва розділу: ім'я namespace,
    лічильники, стан стрічки. Регістр у них значущий (namespace в NVS
    регістрозалежний), тому uppercase заголовка на них не поширюється. */
@@ -51,6 +66,29 @@ button.act { background: var(--accent); border: none; color: #06121f; padding: 7
   border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; }
 button.act.ghost { background: none; border: 1px solid var(--line); color: var(--text); font-weight: 400; }
 button.act:disabled { opacity: .5; cursor: default; }
+/* Спінер на час job(): вміст НЕ ховається (visibility/display), а лишається
+   під напівпрозорим шаром - на кнопці видно притлумлений підпис, на цілому
+   блоці (#shortcuts-block) - притлумлені chip'и, а не порожнеча на їхньому
+   місці. inset: -0.7ch виносить шар за межі самого елемента - тонкий
+   світло-сірий обвід навколо, а не лише заливка всередині контуру. Через це
+   border-radius уже не можна успадкувати від елемента (кут вийшов би різким
+   там, де шар ширший за нього) - тому фіксоване значення в ch, як і решта
+   розмірів на цій сторінці. Клас спільний для кнопки, .chip і цілого блоку -
+   розмір визначає сам елемент.
+   isolation: isolate - .busy отримує власний стековий контекст, а ::before/
+   ::after - z-index:1 у ньому: без цього шар і descendant з position
+   (.menu-wrap для ▾-меню - #wifi-form-block точно такий випадок) стоять в
+   одному стековому контексті сторінки нарівні (обидва z-index:auto), і хто
+   зверху вирішує порядок у розмітці - тобто будь-який контрол, доданий у
+   busy-блок ПІСЛЯ .busy::before, малювався б поверх шару. z-index:1 усередині
+   ізольованого контексту прибиває це раз назавжди, а не для одного .chip. */
+.busy { position: relative; pointer-events: none; isolation: isolate; }
+.busy::before { content: ""; position: absolute; inset: -0.7ch; background: var(--busy-overlay);
+  border-radius: 0.7ch; z-index: 1; }
+.busy::after { content: ""; position: absolute; top: 50%; left: 50%; width: 14px; height: 14px;
+  margin: -7px 0 0 -7px; border: 2px solid var(--line); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin .6s linear infinite; z-index: 1; }
+@keyframes spin { to { transform: rotate(360deg); } }
 /* Кнопка, підпис якої змінюється за станом, ширину не міняє: інакше сусідні
    елементи стрибають рівно в мить, коли в кнопку цілиться курсор. min-width
    рахується під найдовший підпис у `ch` (не залежить від кегля) плюс
@@ -66,9 +104,35 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line
 th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase;
   letter-spacing: .04em; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Рівень сигналу. Гліфи ▮/▯ тут були не варіантом: у system-ui вони різної
+   ширини й висоти, тому сама шкала хиталась, а число після неї ставало в
+   кожному рядку на іншій позиції. Блоки фіксованого розміру плюс стала
+   ширина під число і відсоток - і стовпчик стоїть рівно в усіх рядках. */
+.sig { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.sig b { display: inline-flex; gap: var(--sig-bar-gap); margin-right: 4px; }
+.sig i { width: var(--sig-bar); height: 11px; border-radius: 2px; background: var(--line); }
+.sig i.on { background: var(--accent); }
+.sig .n, .sig .q { min-width: 4ch; text-align: right; }
+.sig .u, .sig .sep, .sig .q { color: var(--muted); }
 input, select { background: var(--bg); border: 1px solid var(--line); color: var(--text);
   padding: 7px 10px; border-radius: 6px; font: inherit; }
 input:focus, select:focus { outline: 1px solid var(--accent); }
+input:disabled { color: var(--muted); }
+/* Підпис поля - разом зі своїм контролом: розрив між чекбоксом і його текстом
+   у рядку, що переносяться, лишав галочку на одному рядку, а підпис на іншому. */
+label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+/* Ширина під "-128" разом зі стрілками спінера: за замовчуванням поле числа
+   вужче за своє ж значення, і "-128" у ньому видно як "-12". Падінги в
+   рахунок входять - box-sizing тут border-box. */
+label input[type="number"] { width: calc(4ch + 52px); }
+/* Чекбокс малюємо самі. Нативний тут гасне: загальне правило для input дає
+   йому темний фон і рамку, і в невідмічений стан він зливається з тлом
+   сторінки - на формі профілю це виглядало як відсутній контрол. */
+input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 16px; height: 16px;
+  padding: 0; border-radius: 4px; display: inline-grid; place-content: center; cursor: pointer; }
+input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::after { content: "✓"; color: #06121f; font-size: 12px;
+  font-weight: 700; line-height: 1; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
 dt { color: var(--muted); }
 dd { margin: 0; }
@@ -100,8 +164,27 @@ dd { margin: 0; }
 /* Пара "запустити / видалити" виглядає й поводиться як одна кнопка. */
 .chip { display: inline-flex; }
 .chip button:first-child { border-radius: 6px 0 0 6px; }
-.chip button:last-child { border-radius: 0 6px 6px 0; border-left: none;
-  padding: 7px 10px; color: var(--muted); }
+.chip button:last-child { border-radius: 0 6px 6px 0; border-left: none; padding: 7px 10px; }
+/* Стрілка - того ж кольору, що й кнопка, до якої вона пришита: дві половини
+   одного контрола, а не кнопка з причепленою чужою. Приглушений гліф - лише
+   на ghost-кнопці; на акцентній він давав темно-сіре по блакитному, тобто
+   найгірший контраст саме там, де в стрілку й цілишся. Розділяє половини
+   тонка внутрішня лінія - на акцентній рамки для цього немає. */
+.chip button.ghost:last-child { color: var(--muted); }
+.chip button.act:not(.ghost):last-child { box-shadow: inset 1px 0 0 #06121f33; }
+/* Drag-n-drop сортування shortcuts: сама .chip - draggable, курсор про це й
+   каже. DOM під час перетягування не міняємо - плата рахує порядок лише
+   після drop (запит /shortcuts-reorder), проміжні кадри нічого не міняють на
+   сервері. */
+.chip[draggable="true"] { cursor: grab; }
+.chip.dragging { opacity: .4; }
+/* Риска-індикатор - МІСЦЕ, куди ляже елемент, а не сам chip під курсором
+   (того й хочемо позбутись - раніше підсвічувався цільовий chip цілком, і не
+   було видно, з якого боку від нього стане перетягуваний). box-shadow без
+   blur/spread повторює контур chip, зсунутий по горизонталі - і ховається за
+   сусідніми кнопками всюди, крім тонкої смужки в проміжку між chip'ами. */
+.chip.drag-before { box-shadow: -5px 0 0 0 var(--accent); }
+.chip.drag-after { box-shadow: 5px 0 0 0 var(--accent); }
 /* Дії над записом NVS: основна (View) - кнопка, рідші - під стрілкою.
    Три кнопки в кожному з півтора десятка рядків перетворювали стовпчик на
    частокіл, у якому Delete стоїть рівно там, куди цілиться палець. */
@@ -113,10 +196,26 @@ dd { margin: 0; }
   text-align: left; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
 .menu button:hover { background: #ffffff12; }
 .menu button.danger { color: var(--err); }
-#toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel);
+/* Правий верхній кут. z-index вищий за меню (5): тостер перекриває і шапку,
+   і відкрите меню - інакше повідомлення про відмову ховалось би саме за тим
+   меню, з якого дію й запустили. */
+#toast { position: fixed; right: 16px; top: 16px; z-index: 20; background: var(--panel);
   border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px;
-  padding: 10px 14px; max-width: 60vw; display: none; }
+  padding: 10px 14px; max-width: 60vw; display: none; box-shadow: 0 6px 20px #0009; }
 .muted { color: var(--muted); }
+/* Пробіл на краю SSID. Лапки для цього не годяться: вони читаються як частина
+   імені, а на краю рядка ще й зливаються з типографікою решти сторінки. Тут
+   натомість рівно те, що є, - місце шириною в пробіл із крапкою по центру.
+   Крапка намальована, а не гліф "·": той у system-ui різної ширини й не
+   центрується по вертикалі однаково на різних платформах. */
+.ws { display: inline-block; width: 1ch; height: 1em; position: relative;
+  vertical-align: baseline; }
+.ws::before { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px;
+  margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--muted); }
+/* Помилка поруч із формою, що її викликала. Тостер гасне за 4 секунди, а
+   причину ("SSID уже зайнятий", "Invalid gateway address") читають рівно
+   тоді, коли виправляють поле, тобто пізніше. */
+.errmsg { color: var(--err); margin: 10px 0 0; }
 /* Профіль, до якого підключені зараз. Підсвічуємо рядок цілком, а не одну
    комірку: у таблиці з п'яти стовпчиків значок у крайньому лівому губиться. */
 tr.active > td { background: #4cc38a14; }
@@ -137,11 +236,25 @@ textarea:focus { outline: 1px solid var(--accent); }
 /* Клікабельний увесь рядок - як у переліку команд: клік відкриває View, і
    цілитись у маленьку кнопку не треба. Рядки-заглушки ("Loading…", "Nothing
    matches.") атрибута не мають, тому не підсвічуються й не клікаються. */
-#nvs-table tbody tr[data-nvs-view],
+#nvs-table tbody tr[data-nvs-view], #profiles tbody tr[data-wifi-edit],
 #fs-table tbody tr[data-fs-open], #fs-table tbody tr[data-fs-view] { cursor: pointer; }
 #nvs-table tbody tr[data-nvs-view]:hover > td,
+#profiles tbody tr[data-wifi-edit]:hover > td,
 #fs-table tbody tr[data-fs-open]:hover > td,
 #fs-table tbody tr[data-fs-view]:hover > td { background: #ffffff0f; }
+/* Чотири адреси статичної IP в один рядок: кожна стискається, але не вужче
+   за "255.255.255.255", інакше поле обрізає власне значення. */
+#wifi-static-row input { flex: 1 1 14ch; min-width: 15ch; }
+/* Save ширша за свій підпис: у пари "кнопка + стрілка" вузька перша половина
+   виглядає як обрізана, та й цілитись у неї гірше. */
+#wifi-save { min-width: calc(8ch + 28px); }
+/* Заголовок із дією: "+ New" праворуч від назви, а не кнопкою в ряду під
+   таблицею - створення профілю починається там, де на список і дивляться.
+   Окремий клас, а не :has(.act): правило має працювати й у старому браузері
+   на телефоні, з якого портал теж відкривають. */
+h2.hrow { display: flex; align-items: center; gap: 10px; }
+h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-transform: none;
+  letter-spacing: 0; }
 /* Редактор і переглядач значення липнуть до верху: таблиця ключів довша за
    екран, і без цього кожна правка - це скрол угору по формі й назад. */
 #tab-nvs .col + .col, #tab-files .col + .col { position: sticky; top: 16px; }
@@ -212,16 +325,64 @@ textarea:focus { outline: 1px solid var(--accent); }
     <button class="act ghost" id="btn-hotspot-stop">Stop hotspot</button>
   </div>
 
+  <div id="scan-block">
   <h2>Networks in range</h2>
   <table id="scan-table"><tbody><tr><td class="muted">Press “Scan networks”.</td></tr></tbody></table>
   </div>
+  </div>
 
   <div class="col">
-  <h2>Saved profiles</h2>
+  <h2 class="hrow">Saved profiles
+    <button class="act ghost" id="wifi-new" title="Create a new profile">+ New</button></h2>
   <table id="profiles">
     <thead><tr><th>SSID</th><th class="opt">Priority</th><th class="opt">Signal</th><th>State</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
+
+  <div id="wifi-form-block">
+  <h2 id="wifi-form-title">New profile</h2>
+  <form id="wifi-form">
+    <div class="row">
+      <input id="wifi-ssid" maxlength="32" autocomplete="off" placeholder="SSID" style="flex:1">
+      <span class="menu-wrap">
+        <span class="chip"><button class="act" type="submit" id="wifi-save">Save</button><button
+          class="act" type="button" data-wifi-menu="form" title="More actions">▾</button></span>
+        <div class="menu" hidden>
+          <button type="button" id="wifi-save-connect">Save &amp; connect</button>
+        </div>
+      </span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="wifi-pass" type="password" autocomplete="new-password" placeholder="password"
+             style="flex:1">
+      <label><input type="checkbox" id="wifi-open"> Open network</label>
+      <label><input type="checkbox" id="wifi-enabled" checked> Enabled</label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>Priority <input id="wifi-priority" type="number" min="-128" max="127" value="0"></label>
+      <label>Retries <input id="wifi-retries" type="number" min="-1" max="127" value="-1"></label>
+      <label><input type="checkbox" id="wifi-static"> Static IP</label>
+    </div>
+    <div class="row" id="wifi-static-row" style="margin-top:8px" hidden>
+      <input id="wifi-ip" autocomplete="off" placeholder="address">
+      <input id="wifi-gateway" autocomplete="off" placeholder="gateway">
+      <input id="wifi-subnet" autocomplete="off" placeholder="netmask">
+      <input id="wifi-dns" autocomplete="off" placeholder="DNS">
+    </div>
+  </form>
+  <p class="errmsg" id="wifi-error" hidden></p>
+  <p class="muted" id="wifi-hint">Click a profile to edit it. An empty password field keeps the
+    stored one; tick “Open network” to drop it — a password, when set, is 8 to 63 characters.
+    <b>Enabled</b> keeps the profile in the auto-connect list; a disabled one is skipped when the
+    device picks a network, but “Connect” still works on it.
+    <b>Priority</b> (−128 … 127, higher first) only breaks ties: the device tries the profile it
+    connected to most recently, and falls back to priority for the rest — so raising it changes
+    nothing until another network wins on recency.
+    <b>Retries</b> (−1 … 127) is how many attempts this profile gets before the device moves on to
+    the next one; −1 means the firmware default (3), and 0 means a single attempt with no retry.
+    Importing a NetworkManager “.nmconnection” file is not supported here yet — use the console
+    command “net connection load &lt;file&gt;”.</p>
+  </div>
   </div>
  </div>
 </section>
@@ -237,8 +398,10 @@ textarea:focus { outline: 1px solid var(--accent); }
     <button class="act ghost" type="button" id="btn-save-shortcut">Save as shortcut</button>
   </form>
 
-  <h2>Shortcuts</h2>
-  <div class="row" id="shortcuts"></div>
+  <div id="shortcuts-block">
+    <h2>Shortcuts</h2>
+    <div class="row" id="shortcuts"></div>
+  </div>
 
   <h2>Output <span id="run-state" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
   <div id="run-out"></div>
@@ -412,19 +575,35 @@ function form(fields) {
   return { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } };
 }
 
+// Спінер на час запиту. Правило без винятків: усе, що шле мутацію й чекає
+// job() перед перемальовкою, показує busyEl зайнятим - інакше між кліком і
+// результатом немає жодного відгуку, а на власній точці доступу пристрою
+// (повільний лінк, вкладка Files тягне список каталогу через ту саму чергу)
+// це помітна пауза, яку легко прийняти за зависання.
+function setBusy(el, busy) {
+  if (!el) return;
+  el.classList.toggle("busy", busy);
+  if ("disabled" in el) el.disabled = busy;
+}
+
 // Мутації сервер виконує не одразу, а в loop() - тому кожна відповідає
 // номером задачі, а результат забираємо опитуванням /api/job.
-async function job(path, options) {
-  const started = await api(path, options);
-  if (!started || !started.jobId) return started;
+async function job(path, options, busyEl) {
+  setBusy(busyEl, true);
+  try {
+    const started = await api(path, options);
+    if (!started || !started.jobId) return started;
 
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 300));
-    const state = await api("/api/job?id=" + started.jobId);
-    if (state.status === "done") return state.result;
-    if (state.status === "expired") throw new Error("Job result expired");
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      const state = await api("/api/job?id=" + started.jobId);
+      if (state.status === "done") return state.result;
+      if (state.status === "expired") throw new Error("Job result expired");
+    }
+    throw new Error("Job timed out");
+  } finally {
+    setBusy(busyEl, false);
   }
-  throw new Error("Job timed out");
 }
 
 /* ---------------- tabs ---------------- */
@@ -453,11 +632,17 @@ document.querySelectorAll("nav button").forEach((btn) => {
 // самим числом підписані екран плати і 'status sys'. Формулу сюди не
 // переносимо: дві шкали, що розходяться на кілька відсотків, помітні рівно
 // тоді, коли дивишся на плату й на сторінку одночасно.
+// Повертає РОЗМІТКУ, а не текст: викликач вставляє її в innerHTML як є, без
+// escapeHtml. Числа проганяються через Number() - те, що прийшло не числом,
+// стане NaN і в розмітку не потрапить.
 function signal(rssi, quality) {
-  if (!rssi) return "–";
+  if (!rssi) return '<span class="muted">–</span>';
   const bars = rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -80 ? 2 : 1;
-  return "▮".repeat(bars) + "▯".repeat(4 - bars) + " " + rssi + " dBm" +
-         (quality === undefined ? "" : " · " + quality + "%");
+  let html = '<span class="sig"><b>';
+  for (let i = 1; i <= 4; i++) html += i <= bars ? '<i class="on"></i>' : "<i></i>";
+  html += `</b><span class="n">${Number(rssi)}</span><span class="u">dBm</span>`;
+  if (quality !== undefined) html += `<span class="sep">·</span><span class="q">${Number(quality)}%</span>`;
+  return html + "</span>";
 }
 
 function renderStatus(s) {
@@ -468,11 +653,22 @@ function renderStatus(s) {
     ["State", s.state],
     ["SSID", s.ssid || "–"],
     ["IP address", s.ip || "–"],
-    ["Signal", s.connected ? signal(s.rssi, s.quality) : "–"],
+    ["Signal", s.connected ? signal(s.rssi, s.quality) : "–", true],
     ["MAC", s.mac],
     ["Auto reconnect", s.autoReconnect ? "on" : "off"],
     ["Hotspot", ap.active ? ap.ssid + " · " + ap.ip + " · " + ap.clients + " client(s)" : "off"],
-  ].map(([k, v]) => "<dt>" + k + "</dt><dd>" + escapeHtml(String(v)) + "</dd>").join("");
+    // Третій елемент - позначка "це вже розмітка": решта значень тут рядки
+    // ззовні (SSID, стан), і їх екранувати обов'язково.
+  ].map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
+}
+
+// Пробіли на краю SSID - видимою міткою: без неї "Asus " і "Asus" у таблиці
+// виглядають однаково, і другий рядок здається дублем першого. Кожен пробіл
+// окремою крапкою, бо їх може бути й два - за однією їх не порахувати.
+// Повертає РОЗМІТКУ: екранування вже всередині.
+function ssidLabel(ssid) {
+  return escapeHtml(ssid).replace(/^\s+|\s+$/g, (run) =>
+    '<span class="ws" title="space"></span>'.repeat(run.length));
 }
 
 function escapeHtml(s) {
@@ -480,24 +676,133 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Список профілів тримаємо і в JS: редактор відкривається з нього, а не
+// окремим запитом - дані вже прийшли, і другий запит показував би те саме.
+let wifiProfiles = [];
+
 function renderProfiles(list) {
+  wifiProfiles = list;
   const body = $("#profiles tbody");
   if (!list.length) {
     body.innerHTML = '<tr><td colspan="5" class="muted">No saved profiles.</td></tr>';
     return;
   }
   body.innerHTML = list.map((c) => `
-    <tr class="${c.active ? "active" : ""}">
-      <td>${escapeHtml(c.ssid)}${c.hasPassword ? "" : ' <span class="muted">(open)</span>'}
+    <tr class="${c.active ? "active" : ""}" data-wifi-edit="${c.id}">
+      <td>${ssidLabel(c.ssid)}${c.hasPassword ? "" : ' <span class="muted">(open)</span>'}
+          ${c.staticIp ? ' <span class="muted">static</span>' : ""}
           ${c.active ? ' <span style="color:var(--ok)">connected</span>' : ""}</td>
       <td class="num opt">${c.priority}</td>
       <td class="opt">${c.rssi ? signal(c.rssi, c.quality) : '<span class="muted">not in range</span>'}</td>
       <td>${c.enabled ? "enabled" : '<span class="muted">disabled</span>'}</td>
-      <td class="num">
-        <button class="act ghost" data-connect="${c.id}">Connect</button>
-        <button class="act ghost" data-forget="${c.id}">Forget</button>
-      </td>
+      <td class="num"><span class="menu-wrap">
+          <span class="chip"><button class="act ghost" data-connect="${c.id}">Connect</button><button
+            class="act ghost" data-wifi-menu="${c.id}" title="More actions">▾</button></span>
+          <div class="menu" hidden>
+            <button data-wifi-edit="${c.id}">Edit</button>
+            <button class="danger" data-forget="${c.id}">Forget</button>
+          </div>
+        </span></td>
     </tr>`).join("");
+}
+
+// Заповнює редактор профілем; без аргументу - порожня форма для нового.
+function wifiFormFill(c) {
+  wifiError("");
+  wifiEditId = c ? c.id : 0;
+  $("#wifi-form-title").textContent = c ? "Edit profile" : "New profile";
+  $("#wifi-ssid").value = c ? c.ssid : "";
+  $("#wifi-pass").value = "";
+  $("#wifi-open").checked = c ? !c.hasPassword : false;
+  $("#wifi-enabled").checked = c ? c.enabled : true;
+  $("#wifi-priority").value = c ? c.priority : 0;
+  $("#wifi-retries").value = c ? c.maxRetries : -1;
+  $("#wifi-static").checked = c ? c.staticIp : false;
+  $("#wifi-ip").value = c ? c.ip : "";
+  $("#wifi-gateway").value = c ? c.gateway : "";
+  $("#wifi-subnet").value = c && c.subnet ? c.subnet : "255.255.255.0";
+  $("#wifi-dns").value = c ? c.dns : "";
+  wifiSyncForm();
+}
+
+function wifiSyncForm() {
+  const open = $("#wifi-open").checked;
+  $("#wifi-pass").disabled = open;
+  if (open) $("#wifi-pass").value = "";
+  // Порожнє поле на наявному профілі означає "лишити як є" - і це має бути
+  // видно ДО того, як користувач збереже правку пріоритету й піде дивитись,
+  // чому мережа більше не підключається.
+  $("#wifi-pass").placeholder = wifiEditId && !open ? "password (unchanged)" : "password";
+  $("#wifi-static-row").hidden = !$("#wifi-static").checked;
+}
+
+// Збирає поля форми; null - форма не пройшла перевірку (про причину вже
+// сказав toast). Решту перевіряє пристрій: адреси і довжину пароля.
+function wifiFormFields(connectNow) {
+  // БЕЗ trim(): пробіл на краю SSID - значуща частина імені мережі, а не
+  // одрук. У переліку прошивки такий SSID є ("Asus " у src/WifiNetworks.hpp),
+  // і зрізаний пробіл дає профіль, який виглядає правильно й не підключається
+  // ніколи. Адреси нижче trim'аються - там пробіл справді зайвий.
+  const ssid = $("#wifi-ssid").value;
+  if (!ssid) {
+    // І на формі, і тостером: решта відмов приходить від пристрою тим самим
+    // шляхом, і виглядати вони мусять однаково.
+    const message = "SSID must not be empty";
+    wifiError(message);
+    toast(message, "err");
+    return null;
+  }
+
+  const fields = {
+    ssid,
+    priority: $("#wifi-priority").value || "0",
+    maxRetries: $("#wifi-retries").value || "-1",
+    enabled: $("#wifi-enabled").checked,
+    staticIp: $("#wifi-static").checked,
+  };
+  if (wifiEditId) fields.id = wifiEditId;
+  // Пароль іде в запит лише тоді, коли його справді задають: порожнє поле на
+  // наявному профілі - це "не чіпати", а не "зробити мережу відкритою".
+  if ($("#wifi-open").checked || $("#wifi-pass").value || !wifiEditId) {
+    fields.password = $("#wifi-pass").value;
+  }
+  if ($("#wifi-static").checked) {
+    fields.ip = $("#wifi-ip").value.trim();
+    fields.gateway = $("#wifi-gateway").value.trim();
+    fields.subnet = $("#wifi-subnet").value.trim();
+    fields.dns = $("#wifi-dns").value.trim();
+  }
+  if (connectNow) fields.connect = "true";
+  return fields;
+}
+
+// Рядок помилки під формою; порожній текст ховає його.
+function wifiError(text) {
+  $("#wifi-error").textContent = text || "";
+  $("#wifi-error").hidden = !text;
+}
+
+async function wifiSave(connectNow, busyEl) {
+  wifiError("");
+  const fields = wifiFormFields(connectNow);
+  if (!fields) return;
+
+  const outcome = await runAction("/api/wifi/connections", form(fields), busyEl);
+  // Форму не чіпаємо, поки не збереглось. Раніше вона перезаповнювалась
+  // безумовно, а profiles після відмови такого SSID не містить - тому
+  // wifiFormFill() діставав undefined і мовчки стирав усе введене разом із
+  // паролем, який лишалось хіба набирати заново.
+  if (!outcome.ok) { wifiError(outcome.message); return; }
+
+  // Новий профіль щойно дістав id - підхоплюємо його, щоб наступне
+  // збереження було правкою, а не другим створенням за тим самим SSID.
+  wifiFormFill(wifiProfiles.find((c) => c.ssid === fields.ssid));
+}
+
+function closeWifiMenus(except) {
+  document.querySelectorAll("#tab-wifi .menu").forEach((m) => {
+    if (m !== except) m.hidden = true;
+  });
 }
 
 function renderScan(networks) {
@@ -509,7 +814,7 @@ function renderScan(networks) {
   networks.sort((a, b) => b.rssi - a.rssi);
   body.innerHTML = networks.map((n) => `
     <tr>
-      <td>${n.hidden ? '<span class="muted">&lt;hidden&gt;</span>' : escapeHtml(n.ssid)}
+      <td>${n.hidden ? '<span class="muted">&lt;hidden&gt;</span>' : ssidLabel(n.ssid)}
           ${n.inUse ? ' <span style="color:var(--ok)">•</span>' : ""}
           ${n.known ? ' <span class="muted">saved</span>' : ""}</td>
       <td class="opt">${n.security}</td>
@@ -551,6 +856,9 @@ function poller(fn, ms, isActive) {
 
 const onWifiTab = () => $("#tab-wifi").classList.contains("active");
 
+// Профіль, відкритий у редакторі; 0 - форма створює новий.
+let wifiEditId = 0;
+
 // Тільки стан - його й опитуємо періодично.
 async function refreshWifiStatus() {
   renderStatus(await api("/api/wifi/status"));
@@ -565,11 +873,15 @@ async function refreshWifi() {
   } catch (e) { /* мережа пристрою могла впасти - наступний тік спробує знову */ }
 }
 
+// Кнопка сама показує стан текстом ("Scan networks" -> "Scanning…"), тому
+// власного спінера не отримує (setBusy додав би ще й другий індикатор
+// поверх першого); busy тут веде #scan-block - список іде під overlay, поки
+// стара таблиця чекає нових даних.
 $("#btn-scan").onclick = async (ev) => {
   ev.target.disabled = true;
   ev.target.textContent = "Scanning…";
   try {
-    const result = await job("/api/wifi/scan", { method: "POST" });
+    const result = await job("/api/wifi/scan", { method: "POST" }, $("#scan-block"));
     if (result && result.ok) renderScan(result.networks);
     else toast((result && result.message) || "Scan failed", "err");
   } catch (e) { toast(e.message, "err"); }
@@ -577,34 +889,85 @@ $("#btn-scan").onclick = async (ev) => {
   ev.target.textContent = "Scan networks";
 };
 
-$("#btn-reconnect").onclick = () => runAction("/api/wifi/reconnect", { method: "POST" });
-$("#btn-hotspot").onclick = () => runAction("/api/wifi/hotspot", form({ action: "start" }));
-$("#btn-hotspot-stop").onclick = () => runAction("/api/wifi/hotspot", form({ action: "stop" }));
+$("#btn-reconnect").onclick = (ev) => runAction("/api/wifi/reconnect", { method: "POST" }, ev.target);
+$("#btn-hotspot").onclick = (ev) => runAction("/api/wifi/hotspot", form({ action: "start" }), ev.target);
+$("#btn-hotspot-stop").onclick = (ev) =>
+  runAction("/api/wifi/hotspot", form({ action: "stop" }), ev.target);
 
-async function runAction(path, options) {
+// Повертає {ok, message}: викликачеві мало тостера. Збереження профілю по
+// ньому вирішує, чи можна чіпати форму, і показує причину відмови поруч із
+// полями. Відмова приїжджає двома шляхами - 400 від роута (api() кидає
+// виняток) і {"ok":false} із задачі, - і для сторінки це те саме.
+async function runAction(path, options, busyEl) {
+  let outcome;
   try {
-    const r = await job(path, options);
-    toast((r && r.message) || "Done", r && r.ok === false ? "err" : "ok");
-  } catch (e) { toast(e.message, "err"); }
-  refreshWifi();
+    const r = await job(path, options, busyEl);
+    outcome = { ok: !(r && r.ok === false), message: (r && r.message) || "Done" };
+  } catch (e) {
+    outcome = { ok: false, message: e.message };
+  }
+  toast(outcome.message, outcome.ok ? "ok" : "err");
+  // Саме await: викликач (збереження профілю) читає оновлений список одразу
+  // після повернення.
+  await refreshWifi();
+  return outcome;
 }
 
+$("#wifi-open").onchange = wifiSyncForm;
+$("#wifi-static").onchange = wifiSyncForm;
+// busy веде #wifi-form-block цілком (заголовок, форма, хінт), а не саму
+// кнопку - поки триває збереження, малося б сенсу дозволяти правити поля чи
+// тиснути другу дію з того ж меню.
+$("#wifi-form").onsubmit = (ev) => { ev.preventDefault(); wifiSave(false, $("#wifi-form-block")); };
+$("#wifi-save-connect").onclick = () => wifiSave(true, $("#wifi-form-block"));  // меню закриє спільний обробник кліку
+$("#wifi-new").onclick = () => { wifiFormFill(null); $("#wifi-ssid").focus(); };
+
 document.addEventListener("click", (ev) => {
+  const menuBtn = ev.target.closest("[data-wifi-menu]");
+  if (menuBtn) {
+    const menu = menuBtn.closest(".menu-wrap").querySelector(".menu");
+    closeWifiMenus(menu);
+    menu.hidden = !menu.hidden;
+    return;
+  }
+  closeWifiMenus();
+
   const join = ev.target.closest("[data-join]");
   if (join) {
     const ssid = join.dataset.join;
-    const password = join.dataset.open === "true" ? "" : prompt("Password for “" + ssid + "”:");
-    if (password === null) return;
-    runAction("/api/wifi/connections", form({ ssid, password, connect: "true" }));
+    // Збережену мережу підключаємо одразу, невідому - відкриваємо в
+    // редакторі: пароль вводиться там само, де пріоритет і статична IP, а
+    // prompt() уміє лише пароль.
+    const known = wifiProfiles.find((c) => c.ssid === ssid);
+    if (known) { runAction("/api/wifi/connect", form({ id: known.id }), join); return; }
+    wifiFormFill(null);
+    $("#wifi-ssid").value = ssid;
+    $("#wifi-open").checked = join.dataset.open === "true";
+    wifiSyncForm();
+    ($("#wifi-open").checked ? $("#wifi-save-connect") : $("#wifi-pass")).focus();
     return;
   }
-  const connect = ev.target.closest("[data-connect]");
-  if (connect) { runAction("/api/wifi/connect", form({ id: connect.dataset.connect })); return; }
 
   const forget = ev.target.closest("[data-forget]");
-  if (forget && confirm("Remove this profile?")) {
-    runAction("/api/wifi/connections?id=" + forget.dataset.forget, { method: "DELETE" });
+  if (forget) {
+    if (!confirm("Remove this profile?")) return;
+    // Видалений профіль не має лишатись у редакторі: наступне "Save"
+    // створило б його заново.
+    if (String(wifiEditId) === forget.dataset.forget) wifiFormFill(null);
+    runAction("/api/wifi/connections?id=" + forget.dataset.forget, { method: "DELETE" }, forget);
+    return;
   }
+
+  const connect = ev.target.closest("[data-connect]");
+  if (connect) {
+    runAction("/api/wifi/connect", form({ id: connect.dataset.connect }), connect);
+    return;
+  }
+
+  // Правка - остання: closest() від кнопок рядка знаходить <tr>, на якому
+  // висить той самий data-wifi-edit, тому рідкісні дії перевіряються раніше.
+  const edit = ev.target.closest("[data-wifi-edit]");
+  if (edit) wifiFormFill(wifiProfiles.find((c) => String(c.id) === edit.dataset.wifiEdit));
 });
 
 /* ---------------- commands ---------------- */
@@ -655,12 +1018,82 @@ function renderShortcuts(list) {
     return;
   }
   box.innerHTML = list.map((s) => `
-    <span class="chip">
+    <span class="chip" draggable="true" data-index="${s.index}">
       <button class="act ghost" data-run="${escapeHtml(s.command)}"
               title="${escapeHtml(s.command)}">${escapeHtml(s.name)}</button>
       <button class="act ghost" data-drop-shortcut="${s.index}" title="Remove shortcut">×</button>
     </span>`).join("");
 }
+
+// Перетягування міняє позицію в масиві на платі, а не сам список у браузері:
+// DOM не чіпаємо до відповіді сервера, drop лише шле {from, to} і чекає
+// refreshShortcuts() - той самий підхід, що й save/delete shortcut вище.
+let _dragShortcutIndex = null;
+
+function _clearDropMarks() {
+  $("#shortcuts").querySelectorAll(".chip.drag-before, .chip.drag-after")
+    .forEach((el) => el.classList.remove("drag-before", "drag-after"));
+}
+
+// Риска-індикатор показує МІСЦЕ, куди ляже елемент, а не сам елемент під
+// курсором: сторона визначається половиною ширини chip'а, на якій зараз
+// курсор.
+function _dropSide(chip, clientX) {
+  const rect = chip.getBoundingClientRect();
+  return clientX < rect.left + rect.width / 2 ? "before" : "after";
+}
+
+$("#shortcuts").addEventListener("dragstart", (ev) => {
+  const chip = ev.target.closest(".chip");
+  if (!chip) return;
+  _dragShortcutIndex = chip.dataset.index;
+  chip.classList.add("dragging");
+  ev.dataTransfer.effectAllowed = "move";
+});
+
+$("#shortcuts").addEventListener("dragover", (ev) => {
+  const chip = ev.target.closest(".chip");
+  if (!chip) return;
+  ev.preventDefault();
+  _clearDropMarks();
+  chip.classList.add(_dropSide(chip, ev.clientX) === "before" ? "drag-before" : "drag-after");
+});
+
+$("#shortcuts").addEventListener("dragleave", (ev) => {
+  // dragleave за межі всього контейнера (а не на сусідній chip, де dragover
+  // одразу перемалює риску) - інакше вона лишається висіти після того, як
+  // курсор пішов на іншу вкладку чи повз .row.
+  if (!ev.currentTarget.contains(ev.relatedTarget)) _clearDropMarks();
+});
+
+$("#shortcuts").addEventListener("drop", async (ev) => {
+  const chip = ev.target.closest(".chip");
+  ev.preventDefault();
+  _clearDropMarks();
+  if (!chip || _dragShortcutIndex === null) return;
+
+  const from = Number(_dragShortcutIndex);
+  _dragShortcutIndex = null;
+
+  // "to" - позиція в масиві ПІСЛЯ видалення from: елементи за from зсуваються
+  // на 1, тому компенсуємо, коли ціль лежить далі перетягуваного.
+  const target = Number(chip.dataset.index);
+  let to = _dropSide(chip, ev.clientX) === "after" ? target + 1 : target;
+  if (from < to) to -= 1;
+  if (to === from) return;
+
+  try {
+    const r = await job("/api/commands/shortcuts-reorder", form({ from, to }), $("#shortcuts-block"));
+    toast((r && r.message) || "Reordered", r && r.ok === false ? "err" : "ok");
+  } catch (e) { toast(e.message, "err"); }
+  refreshShortcuts();
+});
+
+$("#shortcuts").addEventListener("dragend", () => {
+  $("#shortcuts").querySelectorAll(".chip.dragging").forEach((el) => el.classList.remove("dragging"));
+  _clearDropMarks();
+  _dragShortcutIndex = null;
+});
 
 async function refreshShortcuts() {
   // Помилку ковтаємо: наступне відкриття вкладки спробує знову.
@@ -732,13 +1165,13 @@ $("#run-form").onsubmit = (ev) => {
   if (cmd) runCommand(cmd);
 };
 
-$("#btn-save-shortcut").onclick = async () => {
+$("#btn-save-shortcut").onclick = async (ev) => {
   const cmd = $("#run-cmd").value.trim();
   if (!cmd) { toast("Type a command first", "err"); return; }
   const name = prompt("Shortcut name:", cmd.split(" ")[0]);
   if (name === null) return;
   try {
-    const r = await job("/api/commands/shortcuts", form({ name, command: cmd }));
+    const r = await job("/api/commands/shortcuts", form({ name, command: cmd }), $("#shortcuts-block"));
     toast((r && r.message) || "Saved", r && r.ok === false ? "err" : "ok");
   } catch (e) { toast(e.message, "err"); }
   refreshShortcuts();
@@ -762,7 +1195,7 @@ $("#tab-commands").addEventListener("click", async (ev) => {
   if (drop && confirm("Remove this shortcut?")) {
     try {
       const r = await job("/api/commands/shortcuts?index=" + drop.dataset.dropShortcut,
-                          { method: "DELETE" });
+                          { method: "DELETE" }, $("#shortcuts-block"));
       toast((r && r.message) || "Removed", r && r.ok === false ? "err" : "ok");
     } catch (e) { toast(e.message, "err"); }
     refreshShortcuts();
@@ -951,7 +1384,7 @@ $("#nvs-form").onsubmit = async (ev) => {
   if (parsed !== null) value = JSON.stringify(parsed);
 
   try {
-    const r = await job("/api/nvs/entry", form({ key, type: $("#nvs-type").value, value }));
+    const r = await job("/api/nvs/entry", form({ key, type: $("#nvs-type").value, value }), ev.submitter);
     toast((r && r.message) || "Saved", r && r.ok === false ? "err" : "ok");
   } catch (e) { toast(e.message, "err"); }
   refreshNvs(nvsData.namespace);
@@ -1055,7 +1488,7 @@ $("#tab-nvs").addEventListener("click", async (ev) => {
     if (!confirm("Delete key “" + drop.dataset.nvsDrop + "”?")) return;
     try {
       const r = await job("/api/nvs/entry?key=" + encodeURIComponent(drop.dataset.nvsDrop),
-                          { method: "DELETE" });
+                          { method: "DELETE" }, drop);
       toast((r && r.message) || "Removed", r && r.ok === false ? "err" : "ok");
     } catch (e) { toast(e.message, "err"); }
     refreshNvs(nvsData.namespace);
@@ -1309,11 +1742,11 @@ $("#fs-new").onclick = () => {
   $("#fs-file").focus();
 };
 
-$("#fs-mkdir").onclick = async () => {
+$("#fs-mkdir").onclick = async (ev) => {
   const name = prompt("New folder in " + fsData.path);
   if (!name) return;
   try {
-    const r = await job("/api/fs/mkdir", form({ path: fsJoin(fsData.path, name.trim()) }));
+    const r = await job("/api/fs/mkdir", form({ path: fsJoin(fsData.path, name.trim()) }), ev.target);
     toast((r && r.message) || "Created", r && r.ok === false ? "err" : "ok");
   } catch (e) { toast(e.message, "err"); }
   refreshFiles(fsData.path);
@@ -1325,7 +1758,7 @@ $("#fs-form").onsubmit = async (ev) => {
   if (!path || path.endsWith("/")) { toast("Enter a file path", "err"); return; }
 
   try {
-    const r = await job("/api/fs/file", form({ path, content: $("#fs-content").value }));
+    const r = await job("/api/fs/file", form({ path, content: $("#fs-content").value }), ev.submitter);
     toast((r && r.message) || "Saved", r && r.ok === false ? "err" : "ok");
   } catch (e) { toast(e.message, "err"); }
   // Каталог збереженого файла може бути не тим, що показано зараз - тоді
@@ -1362,7 +1795,7 @@ $("#tab-files").addEventListener("click", async (ev) => {
     const to = prompt("Rename to (absolute path)", ren.dataset.fsRename);
     if (!to || to === ren.dataset.fsRename) return;
     try {
-      const r = await job("/api/fs/rename", form({ from: ren.dataset.fsRename, to: to.trim() }));
+      const r = await job("/api/fs/rename", form({ from: ren.dataset.fsRename, to: to.trim() }), ren);
       toast((r && r.message) || "Renamed", r && r.ok === false ? "err" : "ok");
     } catch (e) { toast(e.message, "err"); }
     refreshFiles(fsData.path);
@@ -1376,7 +1809,7 @@ $("#tab-files").addEventListener("click", async (ev) => {
     if (!confirm("Delete “" + drop.dataset.fsDrop + "”?")) return;
     try {
       const r = await job("/api/fs/remove?path=" + encodeURIComponent(drop.dataset.fsDrop),
-                          { method: "DELETE" });
+                          { method: "DELETE" }, drop);
       toast((r && r.message) || "Removed", r && r.ok === false ? "err" : "ok");
     } catch (e) { toast(e.message, "err"); }
     refreshFiles(fsData.path);

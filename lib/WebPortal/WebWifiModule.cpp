@@ -25,6 +25,110 @@ const char* stateName(NetworkSupervisorState state) {
   return "unknown";
 }
 
+// Поля редактора профілю. Окрема структура, а не півтора десятка захоплень
+// лямбди: майже кожне поле йде парою "значення + чи було воно в запиті" -
+// відсутнє поле означає "не чіпати", а не "скинути в типове".
+struct ProfileForm {
+  uint16_t id = 0;  // 0 - новий профіль або пошук наявного за ssid
+  String ssid;
+  String password;
+  bool hasPassword = false;
+  int priority = 0;
+  bool hasPriority = false;
+  bool enabled = true;
+  bool hasEnabled = false;
+  int maxRetries = -1;
+  bool hasMaxRetries = false;
+  bool staticIp = false;
+  bool hasStaticIp = false;
+  String ip;
+  String gateway;
+  String subnet;
+  String dns;
+  bool connectNow = false;
+};
+
+String formParam(AsyncWebServerRequest* request, const char* name, bool* present = nullptr) {
+  const bool has = request->hasParam(name, true);
+  if (present) *present = has;
+  return has ? request->getParam(name, true)->value() : String();
+}
+
+bool formFlag(AsyncWebServerRequest* request, const char* name, bool* present = nullptr) {
+  // "false" і "0" - хиба, будь-що інше (зокрема "on" від чекбокса) - істина.
+  const String value = formParam(request, name, present);
+  return value != "false" && value != "0";
+}
+
+ProfileForm readProfileForm(AsyncWebServerRequest* request) {
+  ProfileForm f;
+  f.id = (uint16_t)strtoul(formParam(request, "id").c_str(), nullptr, 10);
+  f.ssid = formParam(request, "ssid");
+  f.password = formParam(request, "password", &f.hasPassword);
+  f.priority = formParam(request, "priority", &f.hasPriority).toInt();
+  f.enabled = formFlag(request, "enabled", &f.hasEnabled);
+  f.maxRetries = formParam(request, "maxRetries", &f.hasMaxRetries).toInt();
+  f.staticIp = formFlag(request, "staticIp", &f.hasStaticIp);
+  f.ip = formParam(request, "ip");
+  f.gateway = formParam(request, "gateway");
+  f.subnet = formParam(request, "subnet");
+  f.dns = formParam(request, "dns");
+  f.connectNow = request->hasParam("connect", true) && formFlag(request, "connect");
+  return f;
+}
+
+// Перевіряє адресу через IPAddress::fromString() - той самий розбір, яким її
+// потім застосує NetworkSupervisor, тож "майже адреса" не проїде.
+bool validIp(const String& value) {
+  IPAddress parsed;
+  return parsed.fromString(value);
+}
+
+// Порожній рядок - форма валідна; інакше текст помилки для 400.
+String validateProfileForm(const ProfileForm& f) {
+  if (f.ssid.length() == 0) return "Missing 'ssid' parameter";
+  if (f.ssid.length() > 32) return "SSID is longer than 32 characters";
+  // Порожній пароль дозволений і означає відкриту мережу; непорожній мусить
+  // бути придатним для WPA, інакше профіль збережеться, а підключення
+  // провалиться вже мовчки, під час підбору мережі.
+  if (f.hasPassword && f.password.length() != 0 &&
+      (f.password.length() < 8 || f.password.length() > 63)) {
+    return "Password must be 8-63 characters";
+  }
+  if (f.hasPriority && (f.priority < -128 || f.priority > 127)) {
+    return "Priority must be between -128 and 127";
+  }
+  if (f.hasMaxRetries && (f.maxRetries < -1 || f.maxRetries > 127)) {
+    return "Retries must be between -1 and 127";
+  }
+  if (!f.hasStaticIp || !f.staticIp) return String();
+
+  if (!validIp(f.ip)) return "Invalid IP address";
+  if (!validIp(f.gateway)) return "Invalid gateway address";
+  if (!validIp(f.subnet)) return "Invalid subnet mask";
+  if (f.dns.length() != 0 && !validIp(f.dns)) return "Invalid DNS address";
+  return String();
+}
+
+void applyProfileForm(WifiConnection& conn, const ProfileForm& f) {
+  conn.ssid = f.ssid.c_str();
+  if (f.hasPassword) conn.password = f.password.c_str();
+  if (f.hasPriority) conn.priority = (int8_t)f.priority;
+  if (f.hasEnabled) conn.isEnabled = f.enabled;
+  if (f.hasMaxRetries) conn.maxRetries = (int8_t)f.maxRetries;
+  if (!f.hasStaticIp) return;
+
+  conn.staticIp = f.staticIp;
+  // Адреси лишаємо в профілі й при поверненні на DHCP: вимкнути статику і
+  // повернути її назад - звична пара дій, і вдруге вводити ті самі чотири
+  // поля користувач не має.
+  if (!f.staticIp) return;
+  conn.ip = f.ip.c_str();
+  conn.gateway = f.gateway.c_str();
+  conn.subnet = f.subnet.c_str();
+  conn.dns = f.dns.c_str();
+}
+
 }  // namespace
 
 WebWifiModule::WebWifiModule(NetworkSupervisor& supervisor) : _supervisor(supervisor) {
@@ -98,6 +202,8 @@ void WebWifiModule::_refreshSnapshot() {
     connections += c.priority;
     connections += ",\"enabled\":";
     connections += webjson::boolean(c.isEnabled);
+    connections += ",\"maxRetries\":";
+    connections += c.maxRetries;
     connections += ",\"lastConnected\":";
     connections += c.lastConnected;
     connections += ",\"rssi\":";
@@ -218,56 +324,50 @@ void WebWifiModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
   // ---- зберегти/оновити профіль ----
   //
   // Семантика nmcli, як і в команді 'net device wifi connect': профіль
-  // створюється, якщо його немає, і оновлюється, якщо він уже є.
+  // створюється, якщо його немає, і оновлюється, якщо він уже є. Явний 'id'
+  // потрібен лише редакторові - без нього перейменувати SSID не можна, бо
+  // саме SSID і шукається.
   server.on("/api/wifi/connections", HTTP_POST, [this, &portal](AsyncWebServerRequest* request) {
-    if (!request->hasParam("ssid", true)) {
-      request->send(400, "application/json", webjson::error("Missing 'ssid' parameter"));
+    const ProfileForm form = readProfileForm(request);
+    const String invalid = validateProfileForm(form);
+    if (invalid.length() != 0) {
+      request->send(400, "application/json", webjson::error(invalid.c_str()));
       return;
     }
 
-    const String ssid = request->getParam("ssid", true)->value();
-    const bool hasPassword = request->hasParam("password", true);
-    const String password = hasPassword ? request->getParam("password", true)->value() : String();
-    const bool hasPriority = request->hasParam("priority", true);
-    const int priority =
-        hasPriority ? request->getParam("priority", true)->value().toInt() : 0;
-    const bool hasEnabled = request->hasParam("enabled", true);
-    const bool enabled =
-        hasEnabled ? request->getParam("enabled", true)->value() != "false" : true;
-    const bool connectNow =
-        request->hasParam("connect", true) && request->getParam("connect", true)->value() != "false";
+    const uint32_t jobId = portal.jobs().submit([this, form]() -> String {
+      WifiConnection* target =
+          form.id != 0 ? _supervisor.getConnection(form.id) : _findBySsid(form.ssid);
+      if (form.id != 0 && target == nullptr) return webjson::fail("No such profile");
 
-    const uint32_t jobId = portal.jobs().submit(
-        [this, ssid, password, hasPassword, priority, hasPriority, enabled, hasEnabled,
-         connectNow]() -> String {
-          WifiConnection* existing = _findBySsid(ssid);
-          uint16_t id;
+      // Два профілі з однаковим SSID - тиха пастка: підбір мережі візьме
+      // перший-ліпший, і правки в другому просто ніколи не спрацюють.
+      WifiConnection* sameSsid = _findBySsid(form.ssid);
+      if (sameSsid != nullptr && (target == nullptr || sameSsid->connectionId != target->connectionId)) {
+        return webjson::fail("Another profile already uses this SSID");
+      }
 
-          if (existing != nullptr) {
-            if (hasPassword) existing->password = password.c_str();
-            if (hasPriority) existing->priority = (int8_t)priority;
-            if (hasEnabled) existing->isEnabled = enabled;
-            id = existing->connectionId;
-          } else {
-            WifiConnection conn;
-            conn.ssid = ssid.c_str();
-            conn.password = password.c_str();
-            conn.priority = (int8_t)priority;
-            conn.isEnabled = enabled;
-            id = _supervisor.addConnection(conn);
-          }
+      uint16_t id;
+      if (target != nullptr) {
+        applyProfileForm(*target, form);
+        id = target->connectionId;
+      } else {
+        WifiConnection conn;
+        applyProfileForm(conn, form);
+        id = _supervisor.addConnection(conn);
+      }
 
-          _supervisor.saveConfig();
+      _supervisor.saveConfig();
 
-          if (!connectNow) return webjson::ok("Profile saved");
+      if (!form.connectNow) return webjson::ok("Profile saved");
 
-          // Явне підключення скасовує попередній ручний disconnect - інакше
-          // FSM підключився б і лишився без нагляду (та сама логіка, що в
-          // 'net device wifi connect').
-          _supervisor.setAutoReconnect(true);
-          if (!_supervisor.connectTo(id)) return webjson::fail("Profile vanished");
-          return webjson::ok("Connecting");
-        });
+      // Явне підключення скасовує попередній ручний disconnect - інакше
+      // FSM підключився б і лишився без нагляду (та сама логіка, що в
+      // 'net device wifi connect').
+      _supervisor.setAutoReconnect(true);
+      if (!_supervisor.connectTo(id)) return webjson::fail("Profile vanished");
+      return webjson::ok("Connecting");
+    });
 
     if (jobId == 0) {
       request->send(503, "application/json", webjson::error("Job queue is full, try again"));

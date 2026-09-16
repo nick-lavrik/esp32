@@ -86,10 +86,16 @@ private:
     String command;
   };
 
-  // Усі три - лише з loop()/черги задач: читають NVS або чіпають вектор.
+  // Усі чотири - лише з loop()/черги задач: читають NVS або чіпають вектор.
   void _loadShortcuts();
   String _saveJob(const String& name, const String& command, int index);
   String _deleteJob(size_t index);
+  String _reorderJob(size_t from, size_t to);
+
+  // Записує _shortcuts у NVS і перебудовує JSON-знімок. Спільний хвіст для
+  // _saveJob/_deleteJob/_reorderJob - усі три міняють вектор, а серіалізують
+  // його однаково.
+  void _persist();
 
   // Перезбирає _shortcutsJson під мьютексом. Викликати після кожної зміни
   // вектора.
