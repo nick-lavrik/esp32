@@ -30,9 +30,15 @@ header .spacer { flex: 1; }
 header #uptime, header #heap { font-variant-numeric: tabular-nums; }
 header #uptime + #heap { margin-left: 12px; }
 #devstate { color: var(--muted); font-size: 12px; }
-nav { display: flex; gap: 4px; padding: 8px 16px 0; }
+/* overflow-x на nav, а не wrap: шести вкладкам на телефоні місця не вистачає, і
+   без цього flexbox стискає кнопки нижче ширини тексту ("Wi-Fi" ламалось на
+   "Wi-" / "Fi"), а сама nav розпирає body - сторінка отримує зайвий
+   горизонтальний скрол, і вкладка Console випадає за екран без способу до неї
+   дістатись. flex:none на кнопках прибиває стиснення остаточно. */
+nav { display: flex; gap: 4px; padding: 8px 16px 0; overflow-x: auto; }
 nav button { background: none; border: 1px solid transparent; border-bottom: none;
-  color: var(--muted); padding: 7px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit; }
+  color: var(--muted); padding: 7px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit;
+  flex: none; white-space: nowrap; }
 nav button.active { background: var(--panel); border-color: var(--line); color: var(--text); }
 main { padding: 0 16px 24px; }
 section { display: none; background: var(--panel); border: 1px solid var(--line);
@@ -96,14 +102,35 @@ button.act:disabled { opacity: .5; cursor: default; }
 #scr-run { min-width: calc(7ch + 28px); }    /* Pause / Resume */
 #btn-scan { min-width: calc(13ch + 28px); }  /* Scan networks / Scanning… */
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* flex:1+min-width:0 для input/div, що ділить рядок із кнопкою чи чекбоксом:
+   без min-width:0 браузерний авто-мінімум текстового поля (~170px, як у
+   .col нижче - та сама причина) не дає йому стиснутись, і рядок ламається на
+   два раніше, ніж треба - SSID лишався сам на своєму рядку, а Save/▾
+   переїжджав під нього, хоча вдвох вони й так влазили. */
+.fill { flex: 1; min-width: 0; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+/* SSID буває одним нерозривним словом до 32 символів: без overflow-wrap
+   table-layout:auto рахує мінімальну ширину стовпця під ціле слово й розпирає
+   таблицю (а з нею й усю сторінку, бо ширше за viewport) на телефоні. Не на
+   th/td узагалі - там-таки короткі свої слова ("enabled", "Connect"), і той
+   самий алгоритм звужував би їх до літери замість того, щоб забрати простір у
+   SSID. NVS/Files цієї загрози не несуть: ключ NVS - максимум 15 символів
+   (maxlength у формі), а довге значення й ім'я файла вже обрізаються через
+   white-space:nowrap+ellipsis (.val, .n нижче) - їм теж нема куди рости. */
+#profiles td:first-child, #scan-table td:first-child { overflow-wrap: anywhere; }
 /* Заголовки стовпчиків - того ж кегля, що й вміст таблиці: менший шрифт
    робив із них підпис дрібним шрифтом, який око пропускає. Від даних вони
    відрізняються кольором і регістром, а не розміром. */
 th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase;
   letter-spacing: .04em; }
-td.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* width:1%+nowrap - стовпець стискається до вмісту, а не навпаки. Без цього
+   auto-layout на вузькому екрані (Files без стовпця Size - лишається лише
+   Name і Actions) міг віддати вільну ширину саме цьому короткому стовпцю
+   (View/▾ ~93px) замість Name/Key/SSID: там, де вже стоїть ellipsis (.val,
+   .n), той ellipsis різав ім'я файла до "backgrou…", хоч праворуч лишалось
+   під сотню зайвих пікселів. */
+td.num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
 /* Рівень сигналу. Гліфи ▮/▯ тут були не варіантом: у system-ui вони різної
    ширини й висоти, тому сама шкала хиталась, а число після неї ставало в
    кожному рядку на іншій позиції. Блоки фіксованого розміру плюс стала
@@ -141,6 +168,12 @@ dd { margin: 0; }
   overflow-y: auto; white-space: pre-wrap; word-break: break-word;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #log { flex: 1; min-height: 200px; }
+/* Перемикач "No-wrap": м'який перенос ламає рядки логу як звичайний текст,
+   а це часто вивід команд (таблиці, JSON) - зручніше читати їх горизонтальним
+   скролом, ніж поламаними по 40 символів. За замовчуванням лишається
+   поточна поведінка (перенос), кнопка - на #run-out свідомо не поширюється:
+   про Commands мова не була. */
+#log.nowrap { white-space: pre; overflow-x: auto; }
 /* Консоль - єдина вкладка, що займає екран цілком: поле вводу має бути видно
    без скролу, як у терміналі. Тому висота рахується від вікна, а стрічка
    забирає весь залишок. 128px - це шапка з навігацією і відступи main. */
@@ -269,13 +302,30 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
   #tab-files .col + .col { max-height: none; overflow-y: visible; }
 }
 /* Хлібні крихти шляху: клік по будь-якому сегменту піднімає на його рівень -
-   окрема кнопка "вгору" потрібна лише для одного кроку. */
+   окрема кнопка "вгору" потрібна лише для одного кроку. flex-wrap ділить
+   ряд по кнопках цілком, але саме ім'я каталогу (створюють його через
+   prompt() в fs-mkdir, довжина не обмежена) усередині однієї кнопки -
+   нерозривний рядок, і на телефоні він самотужки ширший за viewport;
+   overflow-wrap на кнопці дає йому розбитись, а не розперти сторінку. */
 #fs-crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }
 #fs-crumbs button { background: none; border: none; color: var(--accent); font: inherit;
-  cursor: pointer; padding: 2px 3px; border-radius: 4px; }
+  cursor: pointer; padding: 2px 3px; border-radius: 4px; overflow-wrap: anywhere; }
 #fs-crumbs button:hover { background: #ffffff12; }
 #fs-crumbs .sep { color: var(--muted); }
-#fs-content { margin-top: 10px; }
+/* flex-basis:100% - textarea завжди на своєму рядку, під input+Save/Clear:
+   #fs-form сам є .row (flex-wrap), і без цього textarea намагався б стати
+   в один рядок із чим влізе. */
+#fs-content { margin-top: 10px; flex: 1 1 100%; }
+#fs-actions { display: inline-flex; gap: 8px; }
+/* На телефоні Save/Clear переносяться ПІД textarea, а не над ним: поле може
+   бути на 24 рядки, і тягнутись угору по кожній правці до кнопки - зайвий
+   скрол. order лише переставляє порядок серед flex-елементів однієї лінії
+   переносу - сам textarea й далі забирає весь рядок через flex-basis:100%
+   вище, просто тепер після нього. */
+@media (max-width: 560px) {
+  #fs-content { order: 1; }
+  #fs-actions { order: 2; }
+}
 /* Картинку показує браузер із /api/fs/raw - у переглядачі вона просто
    вписується в ширину колонки. Шахівниця під нею потрібна для PNG і SVG з
    прозорістю: на темному тлі порталу прозоре від чорного не відрізниш. */
@@ -343,7 +393,7 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
   <h2 id="wifi-form-title">New profile</h2>
   <form id="wifi-form">
     <div class="row">
-      <input id="wifi-ssid" maxlength="32" autocomplete="off" placeholder="SSID" style="flex:1">
+      <input id="wifi-ssid" maxlength="32" autocomplete="off" placeholder="SSID" class="fill">
       <span class="menu-wrap">
         <span class="chip"><button class="act" type="submit" id="wifi-save">Save</button><button
           class="act" type="button" data-wifi-menu="form" title="More actions">▾</button></span>
@@ -353,6 +403,10 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
       </span>
     </div>
     <div class="row" style="margin-top:8px">
+      <!-- Не .fill: тут поруч ДВА чекбокси, а не одна кнопка, і min-width:0
+           стиснув би поле пароля до нечитабельної смужки заради того, щоб усі
+           троє влізли в один рядок - переніс на свій рядок тут кращий за
+           стиснення. -->
       <input id="wifi-pass" type="password" autocomplete="new-password" placeholder="password"
              style="flex:1">
       <label><input type="checkbox" id="wifi-open"> Open network</label>
@@ -421,7 +475,7 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
   <h2>Records <span id="nvs-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
   <div class="row">
     <select id="nvs-ns"></select>
-    <input id="nvs-filter" placeholder="filter keys…" autocomplete="off" style="flex:1">
+    <input id="nvs-filter" placeholder="filter keys…" autocomplete="off" class="fill">
   </div>
   <table id="nvs-table">
     <thead><tr><th>Key</th><th class="opt">Type</th><th>Value</th><th></th></tr></thead>
@@ -444,13 +498,20 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
         <option value="true">true</option>
         <option value="false">false</option>
       </select>
-      <span class="spacer" style="flex:1"></span>
       <span id="nvs-json" class="muted" style="display:none">JSON
         <button class="act ghost" type="button" id="nvs-pretty">Format</button>
         <button class="act ghost" type="button" id="nvs-minify">Minify</button>
       </span>
-      <button class="act" type="submit">Save</button>
-      <button class="act ghost" type="button" id="nvs-clear">Clear</button>
+      <span class="spacer" style="flex:1"></span>
+      <!-- Save+Clear в одній inline-flex обгортці: flex-wrap ламає рядок МІЖ
+           елементами, а не всередині них, тож без обгортки на вузькому екрані
+           Save лишався на рядку з Format/Minify, а Clear переносився окремо,
+           самотнім рядком нижче. Обгортка - один нероздільний елемент для
+           wrap, тому пара завжди переноситься разом. -->
+      <span style="display:inline-flex; gap:8px">
+        <button class="act" type="submit">Save</button>
+        <button class="act ghost" type="button" id="nvs-clear">Clear</button>
+      </span>
     </div>
     <textarea id="nvs-value" rows="2" spellcheck="false" placeholder="value"></textarea>
   </form>
@@ -470,7 +531,7 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
   <div class="col">
   <h2>Files <span id="fs-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
   <div class="row">
-    <div id="fs-crumbs" style="flex:1"></div>
+    <div id="fs-crumbs" class="fill"></div>
     <button class="act ghost" id="fs-mkdir">New folder</button>
     <button class="act ghost" id="fs-new">New file</button>
   </div>
@@ -482,13 +543,16 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
 
   <div class="col">
   <h2>Editor <span id="fs-edit-meta" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
-  <form id="fs-form">
-    <div class="row">
-      <input id="fs-file" autocomplete="off" spellcheck="false" placeholder="/path/to/file">
+  <form id="fs-form" class="row">
+    <input id="fs-file" autocomplete="off" spellcheck="false" placeholder="/path/to/file" class="fill">
+    <span id="fs-actions">
       <button class="act" type="submit">Save</button>
       <button class="act ghost" type="button" id="fs-clear">Clear</button>
-    </div>
-    <textarea id="fs-content" rows="8" spellcheck="false" placeholder="file contents"></textarea>
+    </span>
+    <!-- wrap="off" - довгий рядок коду читають горизонтальним скролом, а не
+         м'яким переносом: перенесений рядок ламає відступи й номер рядка,
+         який рахують по оку, стає невірним. -->
+    <textarea id="fs-content" rows="8" spellcheck="false" placeholder="file contents" wrap="off"></textarea>
   </form>
   <p class="muted" id="fs-hint">Text files up to 4 KB can be edited here. Everything else is read-only:
     images are shown as images, other binaries as a hex dump. Previews cover the whole file, not just
@@ -533,8 +597,13 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
 </section>
 
 <section id="tab-console">
-  <h2>Log <span id="feed" class="muted" style="font-size:.75em; font-weight:400; cursor:pointer"></span></h2>
-  <div id="log"></div>
+  <h2 class="hrow">Log <span id="feed" class="muted" style="font-size:.75em; font-weight:400; cursor:pointer"></span>
+    <!-- За замовчуванням увімкнено (без .ghost): вивід команд - таблиці,
+         JSON, банер завантаження - частіше зручніше читати горизонтальним
+         скролом, ніж поламаним по 40 символів. -->
+    <button class="act" type="button" id="log-nowrap"
+            title="Scroll sideways instead of wrapping long lines">No-wrap</button></h2>
+  <div id="log" class="nowrap"></div>
   <h2>Command</h2>
   <form class="row" id="cmd-form">
     <input id="cmd" list="cmd-list" autocomplete="off" placeholder="type a command, e.g. list">
@@ -1964,6 +2033,13 @@ $("#feed").onclick = () => {
   setFeed("connecting…");
   startStream();
 }
+
+// ghost <-> act - той самий візуальний словник, що й для активної вкладки:
+// підсвічене (не ghost) значить "зараз увімкнено", а не просто "натиснута".
+$("#log-nowrap").onclick = () => {
+  const on = $("#log").classList.toggle("nowrap");
+  $("#log-nowrap").classList.toggle("ghost", !on);
+};
 
 $("#cmd-form").onsubmit = async (ev) => {
   ev.preventDefault();
