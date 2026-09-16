@@ -356,6 +356,7 @@ static void printHelp() {
   logger.info("  OBJECT and COMMAND may be abbreviated: 'net c s' == 'net connection show'");
   logger.info("");
   logger.info("net general status                    overall network state");
+  logger.info("net general hostname [<name>]         show/set DHCP hostname");
   logger.info("net radio wifi [on|off]               enable/disable the supervisor");
   logger.info("net device status                     interface state");
   logger.info("net device wifi list                  scan the air");
@@ -396,18 +397,36 @@ static void generalStatus(NetworkSupervisor& ns) {
   logger.info("%u saved profile(s)", (unsigned)ns.connections().size());
 }
 
+static void generalHostname(NetworkSupervisor& ns, const std::vector<String>& args) {
+  if (args.size() < 3) {
+    logger.info("hostname: %s", ns.config().hostname.c_str());
+    return;
+  }
+  NetworkSupervisorConfig cfg = ns.config();
+  cfg.hostname = args[2].c_str();
+  ns.setConfig(cfg);
+  ns.saveConfig();
+  logger.info("hostname: %s (applies on next reconnect - 'net device disconnect' + 'up',"
+              " or reboot)",
+              cfg.hostname.c_str());
+}
+
 static void objectGeneral(NetworkSupervisor& ns, const std::vector<String>& args) {
-  static const char* const verbs[] = {"status", "help"};
+  static const char* const verbs[] = {"status", "hostname", "help"};
   if (args.size() < 2) {
     generalStatus(ns);
     return;
   }
-  const int v = match(args[1], verbs, 2);
+  const int v = match(args[1], verbs, 3);
   if (v < 0) {
-    reportMatch(v, args[1], verbs, 2);
+    reportMatch(v, args[1], verbs, 3);
     return;
   }
   if (v == 1) {
+    generalHostname(ns, args);
+    return;
+  }
+  if (v == 2) {
     printHelp();
     return;
   }

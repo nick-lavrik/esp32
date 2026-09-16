@@ -4184,6 +4184,11 @@ void setupNetworkSupervisor() {
   // Ім'я env у SSID точки доступу: у мережі часто крутиться кілька плат.
   cfg.apSsid = std::string("ESP-") + PIO_PIOENV;
   cfg.apFallbackEnabled = true;
+  // DHCP hostname = ім'я env за замовчуванням (WIFI_HOSTNAME, секрети),
+  // щоб "ping esp32-c6-lcd096" резолвився без окремої настройки. Runtime-
+  // перевизначення - 'net general hostname <name>', loadConfig() нижче
+  // підхопить його з NVS і перекриє цей дефолт.
+  cfg.hostname = WIFI_HOSTNAME;
   netSupervisor.setConfig(cfg);
 
   // Список мереж живе в NVS; loadConfig() перекриє щойно виставлений cfg

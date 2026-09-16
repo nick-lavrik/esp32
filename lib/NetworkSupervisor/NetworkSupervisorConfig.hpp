@@ -75,4 +75,12 @@ struct NetworkSupervisorConfig {
   std::string apPassword = "";  // порожній рядок → відкрита мережа
   uint8_t apChannel = 1;
   std::string apIp = "192.168.4.1";
+
+  // ---- DHCP hostname ----
+  // Застосовується в STA-режимі (WiFi.setHostname()/WiFi.hostname()) перед
+  // кожним підключенням. Порожній рядок → лишити дефолт ядра. Значення за
+  // замовчуванням задає викликач (src/main.cpp бере його з WIFI_HOSTNAME,
+  // build flag з секретів) - loadConfig() перекриє його, якщо в NVS вже щось
+  // збережено командою 'net general hostname'.
+  std::string hostname = "";
 };

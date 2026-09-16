@@ -341,6 +341,7 @@ void NetworkSupervisor::saveConfig() {
     doc["apPassword"] = _config.apPassword.c_str();
     doc["apChannel"] = _config.apChannel;
     doc["apIp"] = _config.apIp.c_str();
+    doc["hostname"] = _config.hostname.c_str();
     doc["wpsEnabled"] = _config.wpsEnabled;
     doc["wpsMethod"] = static_cast<uint8_t>(_config.wpsMethod);
     doc["wpsTimeoutMs"] = _config.wpsTimeoutMs;
@@ -407,6 +408,8 @@ void NetworkSupervisor::loadConfig() {
           _config.apPassword = doc["apPassword"].as<const char*>();
         _config.apChannel = doc["apChannel"] | _config.apChannel;
         if (doc["apIp"].is<const char*>()) _config.apIp = doc["apIp"].as<const char*>();
+        if (doc["hostname"].is<const char*>())
+          _config.hostname = doc["hostname"].as<const char*>();
         _config.wpsEnabled = doc["wpsEnabled"] | _config.wpsEnabled;
         _config.wpsMethod =
           static_cast<WpsMethod>(doc["wpsMethod"] | static_cast<uint8_t>(_config.wpsMethod));
@@ -478,6 +481,25 @@ void NetworkSupervisor::_setState(NetworkSupervisorState next) { _state = next; 
 void NetworkSupervisor::_applyStaRadioConfig(bool keepAp) {
   // keepAp: AP_STA тримає точку доступу піднятою, поки станція сканує ефір.
   WiFi.mode(keepAp ? WIFI_AP_STA : WIFI_STA);
+
+  // Hostname. На ESP32 WiFi.setHostname() у arduino-esp32 3.x лише пише
+  // статичний буфер за замовчуванням (NetworkManager::setHostname) - у сам
+  // STA netif його штовхає ЛИШЕ WiFi.mode() у момент переходу OFF->ON
+  // (WiFiGeneric.cpp: esp_netif_set_hostname() всередині mode()). Виклик
+  // WiFi.setHostname() ПІСЛЯ WiFi.mode() (як було раніше) запізнювався:
+  // netif уже піднявся зі старим значенням, а на кожному наступному
+  // reconnect() mode() - no-op (режим не змінюється), тому DHCP так і йшов
+  // з фабричним "esp32-xxxxxx". WiFi.STA - публічний NetworkInterface, його
+  // setHostname() штовхає esp_netif_set_hostname() напряму, незалежно від
+  // переходів mode() - цим і користуємось, а не трюком з порядком виклику.
+  if (!_config.hostname.empty()) {
+#if defined(ESP8266)
+    WiFi.hostname(_config.hostname.c_str());
+#else
+    WiFi.setHostname(_config.hostname.c_str());  // синхронізує дефолт на майбутнє пересворення netif
+    WiFi.STA.setHostname(_config.hostname.c_str());  // і штовхає в уже існуючий netif негайно
+#endif
+  }
 
   // Вимикаємо ВЛАСНИЙ автореконект ядра Arduino: рішення про перепідключення
   // тут ухвалює лише FSM. З увімкненим - ядро мовчки переасоціюється до
