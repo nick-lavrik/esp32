@@ -9,13 +9,13 @@ TLogger logger{"ecoflow"};
 // звірка з хмарою робиться за serialNumber, тому вони можуть не збігатися
 // дослівно з назвами, заданими в застосунку EcoFlow.
 const EcoflowDeviceInfo kDevices[] = {
+    {"R331ZEB4ZEBW0026", "DELTA 2", EcoflowDeviceType::Delta2},
     {"DBEBZ5XD9180271", "DELTA mini", EcoflowDeviceType::DeltaMini},
     // FOB (Forward Operating Base) — Передова операційна база. Найпопулярніший аналог ПТД.
     {"DCEBZ8ZF2230701", "DELTA Pro (104)", EcoflowDeviceType::DeltaPro},
     {"DCEBZ8ZE9250273", "DELTA Pro (xama)", EcoflowDeviceType::DeltaPro},
     // {"DG21ZEB5REAF0196", "Smart Generator (Dual Fuel)", EcoflowDeviceType::SmartGenerator},
     // {"DG21ZEB5REAF0196", "Smart Generator", EcoflowDeviceType::SmartGenerator},
-    {"R331ZEB4ZEBW0026", "DELTA 2", EcoflowDeviceType::Delta2},
 };
 
 // Ключі quota для одного логічного показника, у порядку пріоритету.

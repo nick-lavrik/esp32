@@ -15,6 +15,16 @@
      --bg: на темних кнопках і панелях однотонний з фоном шар був майже не
      видимий, і спінер лишався єдиною ознакою busy-стану. */
   --busy-overlay: rgba(230, 233, 239, .50);
+  /* Одна шкала кегля на всю сторінку: --font-size-base - єдине число, яке
+     має сенс міняти руками, решта рівнів виражені через нього і --font-scale,
+     а не власними px. Раніше заголовки таблиць (12px) виходили дрібнішими за
+     їхній же вміст (14px, успадкований від body) - того самого не помітиш,
+     якщо кожен розмір лежить окремим магічним числом у своєму правилі. */
+  --font-size-base: 14px;   /* body, вміст таблиць (td) */
+  --font-scale: 1.125;
+  --font-size-small: calc(var(--font-size-base) / var(--font-scale));   /* ~12.4px - приглушені підписи, моно-блоки */
+  --font-size-medium: calc(var(--font-size-base) * var(--font-scale));  /* ~15.75px - h1, заголовки таблиць (th) */
+  --font-size-large: calc(var(--font-size-medium) * var(--font-scale)); /* ~17.7px - h2 */
 }
 * { box-sizing: border-box; }
 /* Атрибут hidden ховає елемент лише через display:none з UA-стилю, і будь-який
@@ -22,14 +32,14 @@
    вийшло: приховані меню всіх рядків малювались одночасно. */
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  font: var(--font-size-base)/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
-header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+header h1 { font-size: var(--font-size-medium); margin: 0; font-weight: 600; }
 header .spacer { flex: 1; }
 header #uptime, header #heap { font-variant-numeric: tabular-nums; }
 header #uptime + #heap { margin-left: 12px; }
-#devstate { color: var(--muted); font-size: 12px; }
+#devstate { color: var(--muted); font-size: var(--font-size-small); }
 /* overflow-x на nav, а не wrap: шести вкладкам на телефоні місця не вистачає, і
    без цього flexbox стискає кнопки нижче ширини тексту ("Wi-Fi" ламалось на
    "Wi-" / "Fi"), а сама nav розпирає body - сторінка отримує зайвий
@@ -63,7 +73,7 @@ main { padding: 0 16px 24px; }
 section { display: none; background: var(--panel); border: 1px solid var(--line);
   border-radius: 0 8px 8px 8px; padding: 16px; }
 section.active { display: block; }
-h2 { font-size: 16px; text-transform: uppercase; letter-spacing: .05em;
+h2 { font-size: var(--font-size-large); text-transform: uppercase; letter-spacing: .05em;
   color: var(--text); margin: 24px 0 10px; font-weight: 600; }
 /* Прибирає зайвий відступ лише в РЕАЛЬНИХ контейнерів розкладки - секції
    вкладки й колонки. Обгортки під busy-стан (.busy нижче) - #shortcuts-block,
@@ -144,10 +154,11 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line
    (maxlength у формі), а довге значення й ім'я файла вже обрізаються через
    white-space:nowrap+ellipsis (.val, .n нижче) - їм теж нема куди рости. */
 #profiles td:first-child, #scan-table td:first-child { overflow-wrap: anywhere; }
-/* Заголовки стовпчиків - того ж кегля, що й вміст таблиці: менший шрифт
-   робив із них підпис дрібним шрифтом, який око пропускає. Від даних вони
-   відрізняються кольором і регістром, а не розміром. */
-th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase;
+/* Заголовки стовпчиків - БІЛЬШОГО кегля, ніж вміст таблиці (тут це раніше
+   писалось навпаки, але код завжди мав 12px проти 14px вмісту - підпис
+   виходив дрібнішим за дані, і саме це око й пропускало). Від даних тепер
+   заголовок відрізняється і кеглем, і кольором, і регістром. */
+th { color: var(--muted); font-weight: 600; font-size: var(--font-size-medium); text-transform: uppercase;
   letter-spacing: .04em; }
 /* width:1%+nowrap - стовпець стискається до вмісту, а не навпаки. Без цього
    auto-layout на вузькому екрані (Files без стовпця Size - лишається лише
@@ -156,6 +167,10 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: upp
    .n), той ellipsis різав ім'я файла до "backgrou…", хоч праворуч лишалось
    під сотню зайвих пікселів. */
 td.num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
+/* Підпис стовпця - туди ж, куди й самі значення: інакше "Size"/"Left"/"Age"
+   стоять ліворуч, а числа під ними збираються біля правого краю широкого
+   стовпця, і візуально підпис і дані вже не виглядають одним стовпцем. */
+th.num { text-align: right; }
 /* Рівень сигналу. Гліфи ▮/▯ тут були не варіантом: у system-ui вони різної
    ширини й висоти, тому сама шкала хиталась, а число після неї ставало в
    кожному рядку на іншій позиції. Блоки фіксованого розміру плюс стала
@@ -201,7 +216,7 @@ dd { margin: 0; }
 /* Дві однакові стрічки: повний лог на Console і вивід команди на Commands. */
 #log, #run-out { background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
   overflow-y: auto; white-space: pre-wrap; word-break: break-word;
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #log { flex: 1; min-height: 200px; }
 /* Перемикач "No-wrap": м'який перенос ламає рядки логу як звичайний текст,
    а це часто вивід команд (таблиці, JSON) - зручніше читати їх горизонтальним
@@ -227,8 +242,8 @@ dd { margin: 0; }
 #cmd-table tr { cursor: pointer; }
 #cmd-table tr:hover { background: #ffffff0f; }
 #cmd-table td.n { width: 1%; white-space: nowrap; color: var(--accent);
-  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-#cmd-table td.d { color: var(--muted); font-size: 12px; }
+  font: var(--font-size-small)/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#cmd-table td.d { color: var(--muted); font-size: var(--font-size-small); }
 /* Пара "запустити / видалити" виглядає й поводиться як одна кнопка. */
 .chip { display: inline-flex; }
 .chip button:first-child { border-radius: 6px 0 0 6px; }
@@ -292,15 +307,37 @@ tr.active > td:first-child { box-shadow: inset 2px 0 0 var(--ok); font-weight: 6
    пів кілобайта, тому висота росте, а не зʼявляється другий контрол. */
 textarea { background: var(--bg); border: 1px solid var(--line); color: var(--text);
   padding: 7px 10px; border-radius: 6px; width: 100%; resize: vertical;
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 textarea:focus { outline: 1px solid var(--accent); }
 /* Поле значення - окремий рядок під ключем і типом, а не впритул до них. */
 #nvs-value { margin-top: 10px; }
 #nvs-view, #fs-view { background: #0e1116; border: 1px solid var(--line); border-radius: 6px;
   padding: 10px; overflow-x: auto; overflow-y: auto; max-height: 50vh; white-space: pre;
   margin-top: 8px;
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #nvs-table td, #fs-table td { vertical-align: baseline; }
+/* Картки пристроїв EcoFlow у рядок: на широкому екрані влазять усі поруч
+   (пристроїв зазвичай 3-4), на планшеті - по два, на телефоні лишається
+   майже поточна одноколонкова верстка - усе це дає сам flex-wrap, без
+   окремих брейкпоінтів під кожну ширину. */
+#ecoflow-devices { display: flex; flex-wrap: wrap; gap: 12px; }
+/* Той самий бордер/радіус, що й у #log/#nvs-view, лише без темного фону:
+   тут не дамп і не лог, а звичайний dl. */
+.ecoflow-device { border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+  flex: 1 1 300px; min-width: 260px; }
+/* dt+dd лишаються в один рядок на будь-якій ширині - на відміну від
+   загального правила dl нижче (одна колонка під 560px), тут це зробило б
+   картку в 260px переважно порожньою: підпис і значення й так короткі,
+   довге лишається в .eco-sub на власному рядку (див. нижче). */
+.ecoflow-device dl { grid-template-columns: max-content 1fr; }
+/* Другорядне уточнення в значенні (кількість переходів, Гц, "(inferred)") -
+   завжди власним рядком під основним значенням, а не втиснуте в ту саму
+   колонку dd: там воно або переносилось посередині слова, або розпирало
+   картку на вузькому екрані. */
+.eco-sub { display: block; color: var(--muted); font-size: var(--font-size-small); margin-top: 1px; }
+.ecoflow-device summary { cursor: pointer; color: var(--muted); margin-top: 10px; user-select: none; }
+.ecoflow-device table { margin-top: 8px; }
+.ecoflow-device table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 /* Клікабельний увесь рядок - як у переліку команд: клік відкриває View, і
    цілитись у маленьку кнопку не треба. Рядки-заглушки ("Loading…", "Nothing
    matches.") атрибута не мають, тому не підсвічуються й не клікаються. */
@@ -321,8 +358,35 @@ textarea:focus { outline: 1px solid var(--accent); }
    Окремий клас, а не :has(.act): правило має працювати й у старому браузері
    на телефоні, з якого портал теж відкривають. */
 h2.hrow { display: flex; align-items: center; gap: 10px; }
-h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-transform: none;
+h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4px 10px; text-transform: none;
   letter-spacing: 0; }
+/* Заголовок вкладки EcoFlow, що сам є перемикачем (<summary>) - той самий
+   вигляд, що в h2, плюс рідний трикутник розкриття замість окремої кнопки:
+   у h2.hrow "Collapse" не мав куди перенестись на вузькому екрані й наїжджав
+   на лічильник "N device(s)" (звідси й скарга "поїхали"). */
+#ecoflow-devices-wrap > summary { font-size: var(--font-size-large); text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text); margin: 24px 0 10px; font-weight: 600; cursor: pointer;
+  user-select: none; }
+#ecoflow-devices-wrap > summary span { text-transform: none; letter-spacing: 0; }
+/* Стовпчики overview-таблиці: .opt (наявний глобальний клас) ховає найменш
+   потрібне вже на планшеті (≤900px) - Left лишається, бо в описі задачі це
+   був другий за пріоритетом стовпець після Grid/Charge; .opt2 ховає ще
+   раніше і забирає решту другорядного (індекс, серійник, тривалість grid) -
+   на телефоні лишаються тільки Name, Status, Charge, Grid. */
+@media (max-width: 900px) { #ecoflow-table .opt2 { display: none; } }
+/* Power/AC - навпаки, з'являються лише там, де вже й так порожньо: на
+   вузькому й середньому екрані вісім колонок і без того займають весь
+   рядок, а на широкому (>1300px) під ними лишається порожнє поле - тут
+   доречніше показати ще дві реальні колонки, ніж розтягувати наявні
+   пробілами. */
+.ecoflow-wide { display: none; }
+@media (min-width: 1300px) { .ecoflow-wide { display: table-cell; } }
+/* Неяскрава зебра плюс той самий hover, що в NVS/Files/Wi-Fi (#ffffff0f).
+   thead навмисно того ж, майже прозорого відтінку, що й парні рядки - без
+   цього заголовок на тлі зебри виглядав темнішою, чужорідною смугою. */
+#ecoflow-table thead th { background: #ffffff05; }
+#ecoflow-table tbody tr:nth-child(even) { background: #ffffff05; }
+#ecoflow-table tbody tr:hover { background: #ffffff0f; }
 /* Редактор і переглядач значення липнуть до верху: таблиця ключів довша за
    екран, і без цього кожна правка - це скрол угору по формі й назад. */
 #tab-nvs .col + .col, #tab-files .col + .col { position: sticky; top: 16px; }
@@ -367,7 +431,7 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
 #fs-view img { display: block; max-width: 100%; height: auto;
   background: repeating-conic-gradient(#2a2f37 0% 25%, #1c2027 0% 50%) 50% / 16px 16px; }
 #nvs-table td.val, #fs-table td.n { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 /* Дзеркало екрана. Згладжування тут шкідливе: масштаб цілочисельний, і
    інтерполяція показала б піксели, яких на панелі немає. Тло рамки те саме,
    що в стрічки логу, - це теж "вікно в пристрій", а не елемент сторінки. */
@@ -429,6 +493,18 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
       <path d="M4 17l6-6-6-6"/><path d="M12 19h8"/>
     </svg>
     <span class="tab-label">Console</span>
+  </button>
+  <!-- hidden за замовчуванням: показує лише pollStatus(), коли "ecoflow" є
+       у списку "modules" з /api/status - на платах без HAS_ECOFLOW_CLIENT
+       (docs/tech_debt.md §4, портал+EcoFlow не вміщаються на платах без
+       PSRAM) розділу в прошивці просто немає. -->
+  <button data-tab="ecoflow" aria-label="EcoFlow" id="nav-ecoflow" hidden>
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 10v4"/>
+      <rect x="5" y="10" width="7" height="4" fill="currentColor" stroke="none"/>
+    </svg>
+    <span class="tab-label">EcoFlow</span>
   </button>
 </nav>
 
@@ -668,6 +744,40 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
      because neighbouring strips come from different device frames.</p>
 </section>
 
+<section id="tab-ecoflow">
+  <h2>Connection</h2>
+  <dl id="ecoflow-status"></dl>
+
+  <h2>Overview</h2>
+  <table id="ecoflow-table">
+    <thead><tr>
+      <th class="opt2">#</th>
+      <th class="opt2">Serial</th>
+      <th>Name</th>
+      <th>Status</th>
+      <th class="num">Charge</th>
+      <th>Grid</th>
+      <!-- З'являються лише на широкому екрані (.ecoflow-wide, CSS вище) -
+           там, де решті колонок уже не вистачає чого заповнити рядок. -->
+      <th class="ecoflow-wide">Power</th>
+      <th class="ecoflow-wide num">AC</th>
+      <th class="opt num">Left</th>
+      <th class="opt2 num">Age</th>
+    </tr></thead>
+    <tbody><tr><td colspan="10" class="muted">Loading…</td></tr></tbody>
+  </table>
+
+  <!-- Той самий disclosure-трикутник, що й "Raw parameters" у картці нижче -
+       клік будь-де в заголовку згортає/розгортає весь блок карток. Кнопка
+       "Collapse"/"Expand" тут раніше стояла окремо в h2.hrow і на вузькому
+       заголовку наїжджала на лічильник (h2.hrow не переносить рядок) -
+       <details> це прибирає без медіа-запиту. -->
+  <details id="ecoflow-devices-wrap" open>
+    <summary>Devices <span id="ecoflow-count" class="muted" style="font-size:.75em; font-weight:400"></span></summary>
+    <div id="ecoflow-devices"><p class="muted">Loading…</p></div>
+  </details>
+</section>
+
 <section id="tab-console">
   <h2 class="hrow">Log <span id="feed" class="muted" style="font-size:.75em; font-weight:400; cursor:pointer"></span>
     <!-- За замовчуванням увімкнено (без .ghost): вивід команд - таблиці,
@@ -764,6 +874,7 @@ document.querySelectorAll("nav button").forEach((btn) => {
     if (btn.dataset.tab === "nvs") refreshNvs(nvsData.namespace);
     // Так само, як із namespace NVS: повертаємось у той каталог, де були.
     if (btn.dataset.tab === "files") refreshFiles(fsData.path);
+    if (btn.dataset.tab === "ecoflow") refreshEcoflow();
     // Поки вкладка прихована, у #log clientHeight/scrollHeight - нулі, тому
     // scrollTop = scrollHeight в appendTo() нічого не робить, і накопичені
     // під час паузи рядки лишають стрічку прокрученою вгору. Довести вручну.
@@ -2311,6 +2422,186 @@ $("#scr-save").onclick = () => {
   link.click();
 };
 
+/* ---------------- ecoflow ---------------- */
+
+const onEcoflowTab = () => $("#tab-ecoflow").classList.contains("active");
+
+// "1d 03h 12m" / "3h12m" / "5m" / "45s" - той самий поділ, що
+// EcoflowDeviceRegistry::formatDuration() друкує в серійну команду 'ecoflow',
+// лише без ведучого нуля там, де день не показаний (тут це зайве - рядок і
+// так короткий).
+function ecoDuration(ms) {
+  if (ms == null) return "–";
+  const total = Math.floor(ms / 1000);
+  const d = Math.floor(total / 86400), h = Math.floor(total % 86400 / 3600), m = Math.floor(total % 3600 / 60);
+  if (d > 0) return d + "d " + h + "h " + m + "m";
+  if (h > 0) return h + "h " + m + "m";
+  if (m > 0) return m + "m";
+  return (total % 60) + "s";
+}
+
+// Дзеркалить EcoflowDeviceRegistry::formatRemainTime(): одне поле remainTime
+// означає і "до заряду", і "до розряду" - що саме, видно з колонки GRID поруч,
+// тому підпису "заряд/розряд" тут навмисно немає (як і в серійній команді).
+function ecoRemain(minutes) {
+  if (minutes == null) return "–";
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return h > 0 ? h + "h" + String(m).padStart(2, "0") + "m" : m + "m";
+}
+
+function ecoAgo(ms) {
+  return ms == null ? "never" : ecoDuration(ms) + " ago";
+}
+
+function ecoPresence(presence) {
+  const color = presence === "online" ? "var(--ok)" : presence === "offline" ? "var(--err)" : "var(--muted)";
+  return `<span style="color:${color}">${presence}</span>`;
+}
+
+function ecoGrid(grid, inferred) {
+  const color = grid === "on-grid" ? "var(--ok)" : grid === "off-grid" ? "var(--warn)" : "var(--muted)";
+  return `<span style="color:${color}">${grid}</span>` + (inferred ? '<span class="muted"> (inferred)</span>' : "");
+}
+
+function ecoWatts(inputWatts, outputWatts) {
+  if (inputWatts == null && outputWatts == null) return "–";
+  return "in " + (inputWatts ?? "–") + " W · out " + (outputWatts ?? "–") + " W";
+}
+
+// Ключі вже нормалізовані на пристрої (EcoflowDeviceRegistry::normalizeKey) -
+// escapeHtml лишається обов'язковим: список формується з того, що прийшло
+// мережею, і довіряти йому не можна навіть у власному акаунті.
+function ecoParamsTable(params) {
+  const keys = Object.keys(params).sort();
+  if (keys.length === 0) return '<p class="muted">No raw parameters captured yet.</p>';
+  const rows = keys.map((k) => `<tr><td>${escapeHtml(k)}</td><td>${params[k]}</td></tr>`).join("");
+  return `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Які картки розгорнуті - переживає перемальовку при кожному опитуванні,
+// інакше відкритий <details> згортався б назад щотика.
+const ecoOpenDetails = new Set();
+
+// Другорядна частина значення (тривалість, Гц, лічильник) - завжди окремим
+// рядком під основним (.eco-sub, CSS вище), а не впритул через " · ": впритул
+// воно або переносилось посередині слова в 260px картці, або розпирало її
+// на телефоні. sub тут завжди зібраний сам, не рядок ззовні - escapeHtml
+// усередині ecoRow() не потрібен.
+function ecoRow(primary, sub) {
+  return primary + (sub ? `<span class="eco-sub">${sub}</span>` : "");
+}
+
+// Для картки - з дробовою частиною, якщо пристрій її шле (socPrecise).
+function ecoCharge(d) {
+  if (d.socPercent == null) return "–";
+  return d.socPrecise != null ? d.socPrecise + "%" : d.socPercent + "%";
+}
+
+// Для Overview - завжди ціле (98.1% -> 98%): таблиця огляду, дробова частка
+// зайва там, де й так вісім-десять колонок в рядок.
+function ecoChargeRounded(d) {
+  return d.socPercent == null ? "–" : d.socPercent + "%";
+}
+
+// Спільне для картки й таблиці - та сама умова "немає AC-входу" (DRY).
+function ecoAcVolts(d) {
+  return d.acInputMilliVolts == null ? "–" : (d.acInputMilliVolts / 1000).toFixed(1) + " V";
+}
+
+// Компактний варіант для клітинки таблиці - картка розводить ці самі дві
+// частини через .eco-sub (ecoRow), тут для них нема окремого рядка.
+function ecoAcText(d) {
+  const hz = d.acInputFrequency != null ? " · " + d.acInputFrequency + " Hz" : "";
+  return ecoAcVolts(d) + hz;
+}
+
+// Рядок компактної таблиці "Overview" - той самий перелік стовпців, що в
+// серійній команді 'ecoflow' (main.cpp): #, Serial, Name, Status, Charge,
+// Grid, Left, Age - звична таблиця з консолі впізнається одразу. Power/AC -
+// додаткові, лише для широкого екрана (.ecoflow-wide, CSS вище). Класи
+// .opt/.opt2 прибирають найменш потрібне спершу на планшеті, потім на
+// телефоні; .num вирівнює тривалості праворуч - як і Charge, це числа.
+function ecoTableRow(d, index) {
+  return `<tr>
+    <td class="opt2">${index}</td>
+    <td class="opt2">${escapeHtml(d.serialNumber)}</td>
+    <td>${escapeHtml(d.name)}</td>
+    <td>${ecoPresence(d.presence)}</td>
+    <td class="num">${ecoChargeRounded(d)}</td>
+    <td>${ecoGrid(d.grid, d.gridInferred)}</td>
+    <td class="ecoflow-wide">${ecoWatts(d.inputWatts, d.outputWatts)}</td>
+    <td class="ecoflow-wide num">${ecoAcText(d)}</td>
+    <td class="opt num">${ecoRemain(d.remainTimeMinutes)}</td>
+    <td class="opt2 num">${d.gridForMs != null ? ecoDuration(d.gridForMs) : "–"}</td>
+  </tr>`;
+}
+
+function ecoDeviceCard(d) {
+  const acVolts = ecoAcVolts(d);
+  const rows = [
+    ["Presence", ecoPresence(d.presence), true],
+    ["Charge", ecoCharge(d)],
+    ["Grid", ecoRow(ecoGrid(d.grid, d.gridInferred),
+      d.gridForMs != null ? "for " + ecoDuration(d.gridForMs) : ""), true],
+    ["Previous grid", ecoRow(escapeHtml(d.previousGrid),
+      (d.previousGridDurationMs ? "for " + ecoDuration(d.previousGridDurationMs) + " · " : "") +
+      d.gridChangeCount + " change(s)"), true],
+    ["Power", ecoWatts(d.inputWatts, d.outputWatts), true],
+    ["Remaining", ecoRemain(d.remainTimeMinutes)],
+    ["AC input", ecoRow(acVolts, d.acInputFrequency != null ? d.acInputFrequency + " Hz" : ""), true],
+    ["Last message", ecoRow(escapeHtml(ecoAgo(d.ageMs)), d.messageCount + " message(s)"), true],
+    ["REST snapshot", d.snapshotAvailable ? "available" : "not allowed by device"],
+  ].map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
+
+  const paramCount = Object.keys(d.params).length;
+  const dropped = d.droppedParams > 0 ? `, ${d.droppedParams} dropped (per-device limit)` : "";
+  return `<div class="ecoflow-device" data-sn="${escapeHtml(d.serialNumber)}">
+    <div class="row" style="justify-content:space-between">
+      <b>${escapeHtml(d.name)}</b><span class="muted">${escapeHtml(d.serialNumber)} · ${escapeHtml(d.type)}</span>
+    </div>
+    <dl>${rows}</dl>
+    <details${ecoOpenDetails.has(d.serialNumber) ? " open" : ""}>
+      <summary>Raw parameters (${paramCount}${dropped}, capture: ${d.captureAll ? "all" : "important only"})</summary>
+      ${ecoParamsTable(d.params)}
+    </details>
+  </div>`;
+}
+
+function renderEcoflow(data) {
+  $("#ecoflow-status").innerHTML = [
+    ["Connected", data.connected ? "yes" : "no"],
+    ["MQTT session", data.running ? "running" : "stopped"],
+    ["Channel", data.channel],
+    ["Account", data.account || "–"],
+    ["Messages received", String(data.messageCount)],
+    ["Last topic", data.lastTopic || "–"],
+    ["Last error", data.lastError || "–"],
+    ["Heap", Math.round(data.heapFreeBytes / 1024) + " KB free · " +
+      Math.round(data.heapLargestBlockBytes / 1024) + " KB largest block"],
+    ["Net task stack headroom", data.netStackHeadroomBytes + " B"],
+  ].map(([k, v]) => "<dt>" + k + "</dt><dd>" + escapeHtml(v) + "</dd>").join("");
+
+  $("#ecoflow-table tbody").innerHTML = data.devices.length === 0
+    ? '<tr><td colspan="10" class="muted">No devices configured.</td></tr>'
+    : data.devices.map(ecoTableRow).join("");
+
+  $("#ecoflow-count").textContent = data.devices.length + " device(s)";
+  const box = $("#ecoflow-devices");
+  ecoOpenDetails.clear();
+  box.querySelectorAll(".ecoflow-device").forEach((el) => {
+    if (el.querySelector("details")?.open) ecoOpenDetails.add(el.dataset.sn);
+  });
+  box.innerHTML = data.devices.length === 0
+    ? '<p class="muted">No devices configured.</p>'
+    : data.devices.map(ecoDeviceCard).join("");
+}
+
+async function refreshEcoflow() {
+  try {
+    renderEcoflow(await api("/api/ecoflow/status"));
+  } catch (e) { /* пристрій міг тимчасово не відповісти - наступний тік спробує знову */ }
+}
+
 /* ---------------- boot ---------------- */
 
 // hh:mm:ss без обмеження на добу: пристрій живе тижнями, і "3:14:07" після
@@ -2327,6 +2618,16 @@ async function pollStatus() {
     const s = await api("/api/status");
     $("#uptime").textContent = "up " + hhmmss(s.uptimeMs);
     $("#heap").textContent = "heap " + Math.round(s.freeHeap / 1024) + " KB";
+    // Вкладка з'являється сама, коли розділ реально є в прошивці - на платах
+    // без HAS_ECOFLOW_CLIENT "ecoflow" у списку "modules" немає (пристрій без
+    // PSRAM, портал+EcoFlow разом не вміщаються - docs/tech_debt.md §4), і
+    // мертву вкладку з вічним 404 показувати нема сенсу. Ніколи не ховаємо
+    // назад - перевіряти достатньо, поки вона ще прихована.
+    const nav = $("#nav-ecoflow");
+    if (nav.hidden && (s.modules || []).includes("ecoflow")) {
+      nav.hidden = false;
+      if (onEcoflowTab()) refreshEcoflow();
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -2339,6 +2640,7 @@ startStream();
 // Раніше обидва йшли кожні 3 і 5 секунд незалежно від того, чи їх видно.
 poller(refreshWifiStatus, 5000, onWifiTab);
 poller(pollStatus, 10000);
+poller(refreshEcoflow, 5000, onEcoflowTab);
 </script>
 </body>
 </html>

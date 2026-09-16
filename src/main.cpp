@@ -182,6 +182,9 @@ using ActiveBulkReader = SdSpiBulkReader;
 #if HAS_ECOFLOW_CLIENT
 #include "Ecoflow/EcoflowClient.hpp"
 #include "Ecoflow/EcoflowDeviceRegistry.hpp"
+#if HAS_WEB_PORTAL
+#include "Ecoflow/WebEcoflowModule.hpp"
+#endif
 #endif
 
 #include "BackgroundImages.hpp"
@@ -431,6 +434,11 @@ WebFilesModule webFilesModule(LittleFS, "LittleFS", [](size_t& used, size_t& tot
 // (esp8266) віддавати браузеру нічого не може - там розділу просто немає
 // (див. HAS_SCREEN_MIRROR у src/Display.h).
 WebScreenModule webScreenModule;
+#endif
+#if HAS_ECOFLOW_CLIENT
+// Розділ живе в src/Ecoflow, не в lib/WebPortal - див. коментар у
+// WebEcoflowModule.hpp. ecoflow/ecoflowDevices оголошені вище (стор. 372-373).
+WebEcoflowModule webEcoflowModule(ecoflow, ecoflowDevices);
 #endif
 WebPortal webPortal(httpServer, configStorage);
 #endif
@@ -4313,6 +4321,9 @@ void setupWebPortal() {
    webPortal.addModule(&webFilesModule);
 #if HAS_SCREEN_MIRROR
   webPortal.addModule(&webScreenModule);
+#endif
+#if HAS_ECOFLOW_CLIENT
+  webPortal.addModule(&webEcoflowModule);
 #endif
 
   if (!webPortal.begin()) {
