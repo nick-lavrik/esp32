@@ -185,6 +185,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #endif
 
 #include "BackgroundImages.hpp"
+#include "TestGfx.hpp"
 #include "SizeFormatter.hpp"
 #include "ntp.h"
 #include "ping.h"
@@ -459,6 +460,20 @@ bool dinoTestMode = false;
 // за DISPLAY_SPLIT_COUNT проходів, тому одного clear() не досить.
 uint8_t dinoPendingClear = 0;
 #endif
+
+// Тестова таблиця дисплея (команда "test-gfx") - реєструється поза #if,
+// як dino/clock/flip: список команд однаковий на всіх платах.
+bool testGfxActive = false;
+TestGfxPattern testGfxPattern = TestGfxPattern::Bars;
+// Скільки ще смуг треба почистити після перемикання режиму/патерну - той
+// самий сенс, що dinoPendingClear (кадр збирається за splitCount() проходів).
+uint8_t testGfxPendingClear = 0;
+// "test-gfx on" без явного імені патерну - демо-режим: проходить усі патерни
+// по черзі, поки "test-gfx <pattern>" не зафіксує один і не вимкне цикл.
+bool testGfxAutoCycle = false;
+uint32_t testGfxCycleTs = 0;
+constexpr uint32_t kTestGfxCycleMs = 5000;
+
 TouchScreenConfig displayConfig = makeTouchScreenConfig();
 
 #if BOARD_HAS_TOUCHSCREEN
@@ -798,6 +813,29 @@ void dino_set_active(bool on) {
   (void)on;
   Logger::info("dino: display game not available on this board");
 #endif
+}
+
+// Вмикає/вимикає тестову таблицю, лишаючи патерн і testGfxAutoCycle як є.
+// Той самий прийом, що dino_set_active(): лише прапорці, малює loop() у своїй
+// транзакції шини (див. коментар там же про SPI.beginTransaction() без обліку
+// вкладеності).
+void testgfx_set_active(bool on) {
+  testGfxActive = on;
+  testGfxPendingClear = display.splitCount();
+  testGfxCycleTs = millis();
+  Logger::info("test-gfx %s (%s%s)", on ? "ON" : "OFF", testGfxPatternName(testGfxPattern),
+               (on && testGfxAutoCycle) ? ", auto-cycle 5s" : "");
+}
+
+// Фіксує конкретний патерн і вимикає авто-цикл: "test-gfx <pattern>" - це
+// явний вибір, а не запит на демо.
+void testgfx_set_pattern(TestGfxPattern pattern) {
+  testGfxActive = true;
+  testGfxAutoCycle = false;
+  testGfxPattern = pattern;
+  testGfxPendingClear = display.splitCount();
+  testGfxCycleTs = millis();
+  Logger::info("test-gfx ON (%s)", testGfxPatternName(pattern));
 }
 
 // I2C-шина СПІЛЬНА для тача й IMU, тому Wire.begin() робиться рівно один раз
@@ -3637,6 +3675,30 @@ void setupSerialCommander() {
     }
   });
 
+  commandHandler.registerCommand(
+      "test-gfx",
+      "display graphics test patterns: test-gfx on (cycles patterns every 5s) | off | "
+      "bars|gray|gradient|frame|checker|primitives (pins one pattern)",
+      [](const String& args) {
+        if (args.equalsIgnoreCase("on")) {
+          testGfxAutoCycle = true;
+          testgfx_set_active(true);
+        } else if (args.equalsIgnoreCase("off")) {
+          testgfx_set_active(false);
+        } else if (args.length() == 0) {
+          Logger::info("test-gfx: %s (%s%s)", testGfxActive ? "ON" : "OFF",
+                       testGfxPatternName(testGfxPattern),
+                       (testGfxActive && testGfxAutoCycle) ? ", auto-cycle 5s" : "");
+        } else {
+          TestGfxPattern p;
+          if (testGfxPatternFromName(args.c_str(), &p)) {
+            testgfx_set_pattern(p);
+          } else {
+            Logger::info("use: test-gfx on|off|bars|gray|gradient|frame|checker|primitives");
+          }
+        }
+      });
+
   commandHandler.registerCommand("brightness", "control screen brightness: brightness 0-100|auto", [](const String& args) {
     if (args.length() == 0) {
       Logger::info("use: brightness 0-100|auto");
@@ -4922,14 +4984,32 @@ void loop() {
     dinoPendingClear--;
   }
 #endif
+  // Перемикання патерну в авто-циклі - лише на початку ПОВНОГО кадру (та сама
+  // причина, що в isFrameStart(): між ітераціями loop() у межах кадру сцена
+  // мінятись не має, інакше кожна смуга показала б інший патерн).
+  if (testGfxActive && testGfxAutoCycle && display.isFrameStart() &&
+      millis() - testGfxCycleTs >= kTestGfxCycleMs) {
+    testGfxPattern = testGfxNextPattern(testGfxPattern);
+    testGfxPendingClear = display.splitCount();
+    testGfxCycleTs = millis();
+  }
+
+  // Той самий сенс, що dinoPendingClear вище, для тестової таблиці.
+  if (testGfxPendingClear) {
+    display.clear();
+    testGfxPendingClear--;
+  }
 
   if (!dinoOn) {
+    if (testGfxActive) {
+      drawTestGfx(testGfxPattern);
+    }
 #if HAS_DINO_GAME
-    if (dinoTestMode) {
+    else if (dinoTestMode) {
       dinoRenderer.renderSpriteSheet();
-    } else
+    }
 #endif
-    {
+    else {
       drawBackgroundImage();
       drawSystemInfo();
     }
@@ -4977,9 +5057,9 @@ void loop() {
   webPortal.loop();
 #endif
 #if HAS_DINO_GAME
-  if (showClock && !dinoOn && !dinoTestMode) drawTime();
+  if (showClock && !dinoOn && !dinoTestMode && !testGfxActive) drawTime();
 #else
-  if (showClock && !dinoOn) drawTime();
+  if (showClock && !dinoOn && !testGfxActive) drawTime();
 #endif
 
   // sendEmail();

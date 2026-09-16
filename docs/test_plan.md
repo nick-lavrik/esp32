@@ -172,7 +172,7 @@ DTR/RTS** — ресет робиться командою `reboot`, прогр�
 | :-- | :--- | :--- |
 | S1 | Прошити, відкрити монітор, натиснути RESET | Банер `*-*-*-...`, рядок з моделлю чипа і `(<PIOENV>)`, далі послідовність `... setup done`, наприкінці `> Ready. Enter 'list' for comand list.` |
 | S2 | Дочекатись 60 с без дій | Жодних reset/panic/`Guru Meditation`, `Stack canary`, `Task watchdog` у консолі |
-| S3 | `list` | Список команд. Обов'язково присутні: `list`, `status`, `reboot`, `scan`, `flip`, `led`, `clock`, `brightness`, `dump-mqtt`, `publish`, `mqtt-prefix`, `dump-asuswrt`; на платах із Gmail — ще й `mailto`, `sendmail`, `smtp-probe` |
+| S3 | `list` | Список команд. Обов'язково присутні: `list`, `status`, `reboot`, `scan`, `flip`, `led`, `clock`, `brightness`, `test-gfx`, `dump-mqtt`, `publish`, `mqtt-prefix`, `dump-asuswrt`; на платах із Gmail — ще й `mailto`, `sendmail`, `smtp-probe` |
 | S4 | `status sys` | Секція `ESP32 CHIP INFO`: модель чипа, ревізія, ядра, частота, SDK, Core, розмір і швидкість флеш, купа, PSRAM, WiFi SSID/RSSI, IP, `Last Reset Reason`, `display.brightness` |
 | S5 | `zzz` (неіснуюча команда) | `Unknown command: zzz` — **саме текст команди**, не сміття й не порожньо *(регресія R3)* |
 | S6 | `status` без аргументу | Підказка `use: status sys\|cfg\|sd\|sd+\|flash\|flash+\|littlefs` |
@@ -195,6 +195,8 @@ DTR/RTS** — ресет робиться командою `reboot`, прогр�
 | D6a | `brightness 20` → `brightness 100` | Змінюється **контраст** OLED (через I2C, регістр `0x81`), не підсвітка | esp8266 |
 | D6b | `brightness 20` | Значення зберігається і показується в `status cfg`, але **фізично нічого не змінюється**: `TFT_BL` для цієї плати не визначений. Це очікувано, не баг | **esp32-c6** |
 | D7 | Спостерігати 30 с за платами з `DISPLAY_SPLIT_COUNT > 1` | Розриви (tearing) на межах смуг допустимі для змінних значень (секунди/купа), але **статичні** елементи не мають миготіти чи зсуватись | s3-lcd147 (2), c6 (4), c6-lcd096 (4), st7789 (6) |
+| D8 | `test-gfx on`, дивитись 30+ с, звіряти з вкладкою Screen | Патерни змінюються самі кожні 5 с (`bars → gray → gradient → frame → checker → primitives → bars …`), без розривів на межах смуг і без залишків попереднього патерну. Панель і дзеркало показують ІДЕНТИЧНУ картинку - розбіжність кольору/порядку каналів у `bars`, зсув рамки/кутів у `frame` або "розрізана на квадрати" картинка в `checker` вказують на помилку в `Display`/`ScreenMirror`, а не в самій команді | усі |
+| D9 | `test-gfx frame` під час авто-циклу (D8), потім `test-gfx off` → `test-gfx on` | Перша команда фіксує `frame` і зупиняє цикл (у логах `test-gfx ON (frame)`, без `auto-cycle 5s`); повторний `on` знову циклює з `bars` | усі |
 
 ---
 

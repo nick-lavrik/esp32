@@ -8,21 +8,6 @@
 #include <ScreenMirror.hpp>
 #endif
 
-#if defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096) || defined(BOARD_ESP32_S3_LCD147) || defined(BOARD_TTGO_T1) || defined(BOARD_ST7789)
-// Arduino_Canvas (Arduino_GFX) не має 8bpp-режиму - канва завжди 16-біт
-// RGB565 (див. Setup_JD9853_C6.h::TFT_eSprite::setColorDepth() - no-op).
-// Конвертуємо RGB332 (3-3-2) назад у RGB565 (5-6-5) біт-реплікацією.
-static inline uint16_t rgb332to565(uint8_t c) {
-  uint8_t r3 = (c >> 5) & 0x07;
-  uint8_t g3 = (c >> 2) & 0x07;
-  uint8_t b2 = c & 0x03;
-  uint16_t r5 = (uint16_t)((r3 << 2) | (r3 >> 1));  // 0..7   -> 0..31
-  uint16_t g6 = (uint16_t)(g3 * 9);                 // 0..7   -> 0..63 (7*9=63)
-  uint16_t b5 = (uint16_t)(b2 * 10);                // 0..3   -> 0..30 (~5-біт, похибка ≤1)
-  return (uint16_t)((r5 << 11) | (g6 << 5) | b5);
-}
-#endif
-
 #if HAS_SCREEN_MIRROR
 // Пікселі активної смуги - те, що дзеркало екрана віддає у веб-портал.
 // Ім'я методу в бекендів різне, вміст - однаковий: RGB565, рядок за рядком.
