@@ -40,6 +40,25 @@ nav button { background: none; border: 1px solid transparent; border-bottom: non
   color: var(--muted); padding: 7px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit;
   flex: none; white-space: nowrap; }
 nav button.active { background: var(--panel); border-color: var(--line); color: var(--text); }
+/* Іконка захована на широкому екрані (там вистачає місця під текст), підпис -
+   навпаки, на вузькому. Одна розмітка кнопки на обидва стани замість двох
+   наборів. */
+nav button .tab-icon { display: none; width: 18px; height: 18px; vertical-align: -4px; }
+/* На телефоні шести текстовим підписам місця не вистачає без горизонтального
+   скролу (коментар про overflow-x вище) - іконка вужча за найдовше слово
+   ("Commands"), тому весь ряд вкладок вміщається без нього. aria-label на
+   кнопці лишає назву доступною для читалок екрана, хоч видимий підпис і
+   прибраний.
+   Sticky - тому ж вузькому екрану: заголовок сторінки в mobile не липне, і
+   без цього вкладки прокручуються геть разом з ним при довгому списку
+   (NVS, Files). background дублює колір body - інакше вміст секції, що
+   прокручується під навігацією, просвічував би крізь неї. */
+@media (max-width: 560px) {
+  nav { position: sticky; top: 0; z-index: 5; background: var(--bg); }
+  nav button { padding: 8px 10px; }
+  nav button .tab-icon { display: inline-block; }
+  nav button .tab-label { display: none; }
+}
 main { padding: 0 16px 24px; }
 section { display: none; background: var(--panel); border: 1px solid var(--line);
   border-radius: 0 8px 8px 8px; padding: 16px; }
@@ -95,6 +114,12 @@ button.act:disabled { opacity: .5; cursor: default; }
   margin: -7px 0 0 -7px; border: 2px solid var(--line); border-top-color: var(--accent);
   border-radius: 50%; animation: spin .6s linear infinite; z-index: 1; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* Яскраво-синя акцентна кнопка лишається такою ж яскравою і під напівпрозорим
+   busy-шаром - спінер губиться на її насиченому фоні. .busy буває і на самій
+   кнопці (busyEl - ev.target/ev.submitter), і на обгортці навколо кількох
+   контролів (#wifi-form-block, #scan-block, #shortcuts-block) - тому два
+   селектори, а не один. Ghost не чіпаємо: у неї й так немає суцільного фону. */
+.busy button.act:not(.ghost), button.act.busy:not(.ghost) { background: var(--line); }
 /* Кнопка, підпис якої змінюється за станом, ширину не міняє: інакше сусідні
    елементи стрибають рівно в мить, коли в кнопку цілиться курсор. min-width
    рахується під найдовший підпис у `ch` (не залежить від кегля) плюс
@@ -139,8 +164,18 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white
 .sig b { display: inline-flex; gap: var(--sig-bar-gap); margin-right: 4px; }
 .sig i { width: var(--sig-bar); height: 11px; border-radius: 2px; background: var(--line); }
 .sig i.on { background: var(--accent); }
-.sig .n, .sig .q { min-width: 4ch; text-align: right; }
-.sig .u, .sig .sep, .sig .q { color: var(--muted); }
+.sig .q { min-width: 4ch; text-align: right; }
+.sig .u, .sig .q { color: var(--muted); }
+/* Ця клітинка не переноситься сама (inline-flex без wrap) - на вузькому
+   стовпці рахувалась як обов'язкова мінімальна ширина, і table-layout:auto
+   забирав під неї простір у SSID: той стискається (він навмисно може, через
+   overflow-wrap:anywhere вище) до однієї літери в рядку, і навіть коротке
+   "STARLINK" ламалось посеред слова. Стовпчик, а не рядок - той самий поріг,
+   що ховає security/channel (.opt) поряд. */
+@media (max-width: 560px) {
+  .sig { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .sig .val, .sig .q { min-width: 0; text-align: left; }
+}
 input, select { background: var(--bg); border: 1px solid var(--line); color: var(--text);
   padding: 7px 10px; border-radius: 6px; font: inherit; }
 input:focus, select:focus { outline: 1px solid var(--accent); }
@@ -352,12 +387,49 @@ h2.hrow .act { margin-left: auto; font-size: 13px; padding: 4px 10px; text-trans
 </header>
 
 <nav>
-  <button data-tab="wifi" class="active">Wi-Fi</button>
-  <button data-tab="commands">Commands</button>
-  <button data-tab="nvs">NVS</button>
-  <button data-tab="files">Files</button>
-  <button data-tab="screen">Screen</button>
-  <button data-tab="console">Console</button>
+  <button data-tab="wifi" class="active" aria-label="Wi-Fi">
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M1.4 9a16 16 0 0 1 21.2 0"/>
+      <path d="M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor" stroke="none"/>
+    </svg>
+    <span class="tab-label">Wi-Fi</span>
+  </button>
+  <button data-tab="commands" aria-label="Commands">
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M13 2 3 14h8l-1 8 10-12h-8l1-8z"/>
+    </svg>
+    <span class="tab-label">Commands</span>
+  </button>
+  <button data-tab="nvs" aria-label="NVS">
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14a8 3 0 0 0 16 0V5"/><path d="M4 12a8 3 0 0 0 16 0"/>
+    </svg>
+    <span class="tab-label">NVS</span>
+  </button>
+  <button data-tab="files" aria-label="Files">
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+    </svg>
+    <span class="tab-label">Files</span>
+  </button>
+  <button data-tab="screen" aria-label="Screen">
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+    </svg>
+    <span class="tab-label">Screen</span>
+  </button>
+  <button data-tab="console" aria-label="Console">
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M4 17l6-6-6-6"/><path d="M12 19h8"/>
+    </svg>
+    <span class="tab-label">Console</span>
+  </button>
 </nav>
 
 <main>
@@ -692,6 +764,13 @@ document.querySelectorAll("nav button").forEach((btn) => {
     if (btn.dataset.tab === "nvs") refreshNvs(nvsData.namespace);
     // Так само, як із namespace NVS: повертаємось у той каталог, де були.
     if (btn.dataset.tab === "files") refreshFiles(fsData.path);
+    // Поки вкладка прихована, у #log clientHeight/scrollHeight - нулі, тому
+    // scrollTop = scrollHeight в appendTo() нічого не робить, і накопичені
+    // під час паузи рядки лишають стрічку прокрученою вгору. Довести вручну.
+    if (btn.dataset.tab === "console") {
+      const box = $("#log");
+      box.scrollTop = box.scrollHeight;
+    }
   };
 });
 
@@ -709,8 +788,8 @@ function signal(rssi, quality) {
   const bars = rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -80 ? 2 : 1;
   let html = '<span class="sig"><b>';
   for (let i = 1; i <= 4; i++) html += i <= bars ? '<i class="on"></i>' : "<i></i>";
-  html += `</b><span class="n">${Number(rssi)}</span><span class="u">dBm</span>`;
-  if (quality !== undefined) html += `<span class="sep">·</span><span class="q">${Number(quality)}%</span>`;
+  html += `</b><span class="val">${Number(rssi)} <span class="u">dBm</span></span>`;
+  if (quality !== undefined) html += `<span class="q">${Number(quality)}%</span>`;
   return html + "</span>";
 }
 
