@@ -214,7 +214,7 @@ const char* CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix";
 // runtime-override для ECOFLOW_AUTOCONNECT: "1"/"0"; порожнє -> build-time дефолт
 const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
 // dump ecoflow device status each minute
-const char* CFG_ECOFLOW_ENABLE_CRON = "ecoflow.cron";
+const char* CFG_ECOFLOW_WATCH = "ecoflow.watch";
 // Останні випущені app-креденшели (команда 'ecoflow-login'). Зберігаються
 // як резервна копія й журнал: застосувати їх з NVS на льоту не можна - MqttConfig
 // копіює вказівники в конструкторі глобального EcoflowClient, тобто до setup().
@@ -1181,25 +1181,30 @@ void setupEcoflow() {
     _logger.info("");
   });
 
-  // command: ecoflow-cron
-  commandHandler.registerCommand("ecoflow-cron", "enable/disable ecoflow cron task (show device table)",
+  // command: ecoflow-watch
+  commandHandler.registerCommand("ecoflow-watch", "periodic EcoFlow device table: ecoflow-watch [on|off]",
     [ecoflowShowCronTaskId](const String args) {
-      if (scheduler.isPaused(ecoflowShowCronTaskId)) {
+      // Порожній аргумент - лише звіт: раніше команда була перемикачем, і
+      // «подивитись стан» мовчки міняло його на протилежний.
+      if (args.equalsIgnoreCase("on")) {
         scheduler.resume(ecoflowShowCronTaskId);
-        configStorage.setBool(CFG_ECOFLOW_ENABLE_CRON, true);
-        _logger.info("ecoflow cron task - active");
-      } else {
+        configStorage.setBool(CFG_ECOFLOW_WATCH, true);
+      } else if (args.equalsIgnoreCase("off")) {
         scheduler.pause(ecoflowShowCronTaskId);
-        configStorage.setBool(CFG_ECOFLOW_ENABLE_CRON, false);
-        _logger.info("ecoflow cron task - pause");
+        configStorage.setBool(CFG_ECOFLOW_WATCH, false);
+      } else if (args.length() != 0) {
+        _logger.info("use: ecoflow-watch [on|off]");
+        return;
       }
+      _logger.info("ecoflow watch - %s",
+                   scheduler.isPaused(ecoflowShowCronTaskId) ? "off" : "on");
     }
   );
 
-  // enable/disable ecoflow cron task (show device table)
-  if (!configStorage.getBool(CFG_ECOFLOW_ENABLE_CRON, true)) {
+  // enable/disable periodic ecoflow device table
+  if (!configStorage.getBool(CFG_ECOFLOW_WATCH, true)) {
     scheduler.pause(ecoflowShowCronTaskId);
-    _logger.warn("ecoflow cron task disabled");
+    _logger.warn("ecoflow watch disabled");
   }
 
   // Обидві REST-команди йдуть у власний таск: TLS-хендшейк не вміщується
