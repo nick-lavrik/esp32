@@ -201,6 +201,17 @@ private:
     // Один REST-таск за раз: паралельні запити змагались би за suspend().
     volatile bool _restBusy = false;
 
+    // resume() відкладений до loop(), а не викликаний одразу з
+    // withMqttSuspended(): там REST-таск (16 КБ стека, ще живий) і
+    // MqttClient::resume() -> startNetworkTask() (ще +16 КБ нового
+    // mqtt-net таска) + свіжа TLS-сесія накладаються в один момент.
+    // Один раз це посадило heap саме під ту мить, коли WiFi power save
+    // (WIFI_PS_MIN_MODEM) незалежно від REST/MQTT спробував створити
+    // таймер PLL (esp_timer_create) - і той упав з ESP_ERR_NO_MEM
+    // (ESP_ERROR_CHECK без фолбеку -> abort()). У loop() REST-таска вже
+    // напевно нема, і цього накладання не буде.
+    volatile bool _mqttResumePending = false;
+
     enum class RestJob { kDevices, kCredentials, kStart, kSnapshots, kAppLogin };
     EcoflowDeviceRegistry *_registry = nullptr;
     AppCredentialsCallback _appCredentialsCallback;

@@ -2516,9 +2516,12 @@ function ecoAcVolts(d) {
 
 // Компактний варіант для клітинки таблиці - картка розводить ці самі дві
 // частини через .eco-sub (ecoRow), тут для них нема окремого рядка.
+// 0 V - валідне значення (немає напруги на вході), а не відсутність даних
+// (те дає "–" з ecoAcVolts) - тому приглушуємо його окремо, як другорядне.
 function ecoAcText(d) {
   const hz = d.acInputFrequency != null ? " · " + d.acInputFrequency + " Hz" : "";
-  return ecoAcVolts(d) + hz;
+  const text = ecoAcVolts(d) + hz;
+  return d.acInputMilliVolts === 0 ? `<span class="muted">${text}</span>` : text;
 }
 
 // Рядок компактної таблиці "Overview" - той самий перелік стовпців, що в

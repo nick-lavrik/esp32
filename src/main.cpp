@@ -219,6 +219,8 @@ const char* CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix";
 const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
 // dump ecoflow device status each minute
 const char* CFG_ECOFLOW_WATCH = "ecoflow.watch";
+// periodic 'heap' sampling (тимчасова діагностика фрагментації, docs/tech_debt.md)
+const char* CFG_HEAP_WATCH = "heap.watch";
 // Останні випущені app-креденшели (команда 'ecoflow-login'). Зберігаються
 // як резервна копія й журнал: застосувати їх з NVS на льоту не можна - MqttConfig
 // копіює вказівники в конструкторі глобального EcoflowClient, тобто до setup().
@@ -1053,7 +1055,9 @@ void setupEcoflow() {
   });
 
   ecoflow.onMqttConnectionFail([](const MqttTransportClient& client) {
-    _logger.info("MQTT connect fail    [%s:%d]", client.host.c_str(), client.port);
+    _logger.info("MQTT connect fail    [%s:%d], WiFi status=%d RSSI=%d dBm, %u B free (largest block %u B)",
+                 client.host.c_str(), client.port, (int)WiFi.status(), (int)WiFi.RSSI(),
+                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
   });
   #endif
 
@@ -1504,7 +1508,9 @@ void setupMqttClient() {
   });
 
   mqtt.onConnectionFail([](const MqttTransportClient& client) {
-    _logger.info("MQTT connect fail    [%s:%d]", client.host.c_str(), client.port);
+    _logger.info("MQTT connect fail    [%s:%d], WiFi status=%d RSSI=%d dBm, %u B free (largest block %u B)",
+                 client.host.c_str(), client.port, (int)WiFi.status(), (int)WiFi.RSSI(),
+                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
   });
   #endif
 
@@ -3258,6 +3264,42 @@ void setupSerialCommander() {
 #endif
     _log.info("uptime       : %lu s", (unsigned long)(millis() / 1000UL));
   });
+
+  // ТИМЧАСОВА діагностика фрагментації heap (docs/tech_debt.md) - прибрати
+  // після завершення дослідження або перевести в постійний інтервал.
+  // queueCommand(), а не прямий виклик - той самий шлях, що й у консолі/MQTT,
+  // тож результат однаково потрапляє в journal і, за потреби, у console-mqtt.
+  const TaskId heapWatchCronTaskId = scheduler.addCronTask(2 * 60 * 1000UL, []() {
+    static TLogger _log{"heap"};
+    if (!queueCommand("heap")) _log.warn("command queue full, cron 'heap' skipped");
+  });
+
+  // command: heap-watch - та сама схема вимикача, що й ecoflow-watch вище:
+  // pause/resume таска + збереження стану в NVS, щоб пережити перезапуск.
+  commandHandler.registerCommand("heap-watch", "periodic 'heap' sampling: heap-watch [on|off]",
+    [heapWatchCronTaskId](const String args) {
+      static TLogger _log{"heap"};
+      if (args.equalsIgnoreCase("on")) {
+        scheduler.resume(heapWatchCronTaskId);
+        configStorage.setBool(CFG_HEAP_WATCH, true);
+      } else if (args.equalsIgnoreCase("off")) {
+        scheduler.pause(heapWatchCronTaskId);
+        configStorage.setBool(CFG_HEAP_WATCH, false);
+      } else if (args.length() != 0) {
+        _log.info("use: heap-watch [on|off]");
+        return;
+      }
+      _log.info("heap watch - %s", scheduler.isPaused(heapWatchCronTaskId) ? "off" : "on");
+    }
+  );
+
+  // heap-watch увімкнений за замовчуванням (те саме, що ecoflow-watch) - вимкнення
+  // застосовується одразу при старті, якщо збережене в NVS.
+  if (!configStorage.getBool(CFG_HEAP_WATCH, true)) {
+    scheduler.pause(heapWatchCronTaskId);
+    static TLogger _log{"heap"};
+    _log.warn("heap watch disabled");
+  }
 
 #if defined(LITTLEFS_BACKGROUND_IMAGE)
   // Дамп ПОТОЧНОГО фону (тобто вже з накладеними ефектами: blur/desaturate/

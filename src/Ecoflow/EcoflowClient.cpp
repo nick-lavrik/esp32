@@ -1,6 +1,7 @@
 #include "EcoflowClient.hpp"
 
 #include <TLogger.hpp>
+#include <WiFi.h>
 
 #include "EcoflowAppAuthClient.hpp"
 #include "EcoflowDeviceRegistry.hpp"
@@ -186,7 +187,14 @@ void EcoflowClient::begin() {
               _account.c_str(), (unsigned)(EcoflowDeviceRegistry::deviceCount() * 2));
 }
 
-void EcoflowClient::loop() { _mqtt.loop(); }
+void EcoflowClient::loop() {
+  _mqtt.loop();
+
+  if (_mqttResumePending && !_restBusy) {
+    _mqttResumePending = false;
+    _mqtt.resume();
+  }
+}
 
 // Стек REST-таска: TLS-хендшейк (mbedTLS RSA/ECDHE) + HTTPClient + розбір JSON.
 // 16 КБ - той самий порядок, що й у мережевого таска MQTT з TLS.
@@ -276,7 +284,9 @@ void EcoflowClient::runRestJob(RestJob job) {
           logger.info("%s: REST snapshot not permitted, MQTT-only", state.info->name);
           skipped++;
         } else {
-          logger.warn("%s: snapshot failed: %s", state.info->name, _auth.lastError().c_str());
+          logger.warn("%s: snapshot failed: %s, WiFi status=%d RSSI=%d dBm, %u B free (largest block %u B)",
+                      state.info->name, _auth.lastError().c_str(), (int)WiFi.status(), (int)WiFi.RSSI(),
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
         }
       }
       logger.info("snapshots: %u applied, %u skipped", (unsigned)ok, (unsigned)skipped);
@@ -392,7 +402,10 @@ bool EcoflowClient::withMqttSuspended(const char *what, const std::function<bool
   const bool ok = action();
 
   if (needSuspend) {
-    _mqtt.resume();
+    // Не resume() тут напряму - REST-таск ще живий (свій 16 КБ стек), а
+    // resume() одразу підняв би ще один mqtt-net таск + TLS-сесію. Дочекатись
+    // loop() після реального завершення таска (див. коментар у .hpp).
+    _mqttResumePending = true;
   }
   return ok;
 }
