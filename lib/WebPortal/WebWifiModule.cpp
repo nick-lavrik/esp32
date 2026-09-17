@@ -9,6 +9,10 @@
 #include "WebJson.hpp"
 #include "WebPortal.hpp"
 
+#if defined(ESP32)
+#include <esp_wifi.h>
+#endif
+
 namespace {
 
 const char* stateName(NetworkSupervisorState state) {
@@ -23,6 +27,33 @@ const char* stateName(NetworkSupervisorState state) {
     case NetworkSupervisorState::AP_MODE: return "ap";
   }
   return "unknown";
+}
+
+// "Тип з'єднання" для System-вкладки порталу - протокол/смуга, узгоджені з
+// точкою доступу. esp_wifi_sta_get_negotiated_phymode() - ESP-IDF API, якого
+// немає ні на ESP8266, ні в самому Arduino WiFi.h (лише RSSI/BSSID/channel).
+// Точної швидкості (Мбіт/с) звідси не дістати - ESP-IDF її не віддає, лише
+// PHY-режим, який і показуємо замість неї.
+const char* connectionPhyMode(bool connected) {
+#if defined(ESP32)
+  if (!connected) return "";
+  wifi_phy_mode_t mode;
+  if (esp_wifi_sta_get_negotiated_phymode(&mode) != ESP_OK) return "";
+  switch (mode) {
+    case WIFI_PHY_MODE_11B: return "802.11b";
+    case WIFI_PHY_MODE_11G: return "802.11g";
+    case WIFI_PHY_MODE_11A: return "802.11a";
+    case WIFI_PHY_MODE_HT20: return "802.11n (HT20)";
+    case WIFI_PHY_MODE_HT40: return "802.11n (HT40)";
+    case WIFI_PHY_MODE_HE20: return "802.11ax (HE20)";
+    case WIFI_PHY_MODE_VHT20: return "802.11ac (VHT20)";
+    case WIFI_PHY_MODE_LR: return "long range";
+  }
+  return "";
+#else
+  (void)connected;
+  return "";
+#endif
 }
 
 // Поля редактора профілю. Окрема структура, а не півтора десятка захоплень
@@ -164,12 +195,18 @@ void WebWifiModule::_refreshSnapshot() {
   status += webjson::quote(_supervisor.currentSsid());
   status += ",\"ip\":";
   status += webjson::quote(_supervisor.localIp());
+  // IP роутера - лише для STA: WiFi.gatewayIP() у режимі AP не означає
+  // нічого (шлюзом є сам пристрій), сторінка ховає поле, коли !connected.
+  status += ",\"gateway\":";
+  status += webjson::quote(_supervisor.isConnected() ? WiFi.gatewayIP().toString() : String());
   status += ",\"rssi\":";
   status += _supervisor.isConnected() ? (int)WiFi.RSSI() : 0;
   // Відсоток рахує пристрій, а не сторінка: та сама шкала, що в 'status sys'
   // і на екрані плати (wifiSignalQuality() в NetworkSupervisor).
   status += ",\"quality\":";
   status += _supervisor.isConnected() ? wifiSignalQuality(WiFi.RSSI()) : 0;
+  status += ",\"phyMode\":";
+  status += webjson::quote(connectionPhyMode(_supervisor.isConnected()));
   status += ",\"mac\":";
   status += webjson::quote(WiFi.macAddress());
   status += ",\"autoReconnect\":";
@@ -182,6 +219,10 @@ void WebWifiModule::_refreshSnapshot() {
   status += webjson::quote(apMode ? WiFi.softAPIP().toString() : String(cfg.apIp.c_str()));
   status += ",\"clients\":";
   status += apMode ? (int)WiFi.softAPgetStationNum() : 0;
+  // Порожній пароль AP-профілю = відкрита мережа (та сама угода, що для
+  // збережених STA-профілів: hasPassword, а не сам пароль).
+  status += ",\"security\":";
+  status += webjson::quote(cfg.apPassword.empty() ? "open" : "WPA2");
   status += "}}";
 
   String connections = "[";

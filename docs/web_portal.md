@@ -117,7 +117,8 @@ web auth off                # вимкнути автентифікацію
 | GET | `/api/status` | env (PIOENV), uptime, heap, чи ввімкнена авторизація, список розділів |
 | GET | `/api/job?id=N` | результат задачі: `queued` / `running` / `done` / `expired` |
 | POST | `/api/auth` | `user`, `password` — змінити креденшели |
-| GET | `/api/wifi/status` | стан FSM, SSID, IP, RSSI, точка доступу |
+| GET | `/api/wifi/status` | стан FSM, SSID, IP, шлюз, RSSI, тип з'єднання (PHY mode), точка доступу (з полем `security`) |
+| GET | `/api/system/info` | heap-деталі, LittleFS, SD-картка, флеш і таблиця розділів, статистика NVS (задача) |
 | GET | `/api/wifi/connections` | збережені профілі (без паролів) |
 | POST | `/api/wifi/connections` | створити/оновити профіль: `ssid`, `password`, `priority`, `enabled`, `maxRetries`, `staticIp`, `ip`, `gateway`, `subnet`, `dns`, `connect`; `id` — правити саме цей профіль (інакше пошук за `ssid`) |
 | DELETE | `/api/wifi/connections?id=N` | видалити профіль |
@@ -209,6 +210,43 @@ web auth off                # вимкнути автентифікацію
 > дублюванням і видалена. Ціна: глибина впала з 60 рядків до 32, і залповий
 > вивід (`list` — 70 рядків) браузер побачить із розривом. Лікується одним
 > числом — `-D JOURNAL_RING=64` в env (5.9 КБ RAM за глибину 64).
+
+## Розділ «System»
+
+Перша вкладка порталу. Дві групи даних, різні за ціною:
+
+- **Швидкі, з фонового опиту** — Device (env, uptime, вільний heap, авторизація,
+  pending jobs — `/api/status`) і Network (стан Wi-Fi, IP, шлюз, тип
+  з'єднання, точка доступу — `/api/wifi/status`, той самий, що й вкладка
+  Wi-Fi). Оновлюються самі, разів на 5-10 с, поки вкладка відкрита.
+- **Дорогі/рідкісні, лише за запитом** — Memory (деталі heap: total/largest
+  block/фрагментація/min free ever), Storage (LittleFS + SD-картка, якщо є),
+  Flash (розмір/швидкість чипа, таблиця розділів), NVS (used/free/total
+  entries, кількість namespace'ів) — усі одним `GET /api/system/info`
+  (`lib/WebPortal/WebSystemModule.{hpp,cpp}`).
+
+**Чому другий блок не в `/api/status`.** Ці дані або чіпають flash (NVS
+stats, partition table, SD), або дорого рахувати щотік (heap_caps_* по всій
+купі) — на відміну від `/api/status`, гарячого роута фонового опиту.
+`/api/system/info` тому йде через `WebJobQueue`, а сторінка тягне його не за
+таймером, а один раз при відкритті вкладки і за клацанням кнопки **Refresh**
+(`h2.hrow` поруч із заголовком "Memory") — той самий шаблон варто повторити
+для наступних дорогих/рідкісних блоків порталу.
+
+**SD-картка - через колбек.** Модуль сам SD не чіпає: яка шина підключена
+(SD чи SD_MMC) вирішує плата (`BOARD_HAS_SD`/`SD_USE_SDMMC`, `src/main.cpp`),
+тож `WebSystemModule` приймає `SdInfoFn` - на платах без SD колбек
+`nullptr`, і блок ховається на сторінці (`sd.available === false`).
+
+**LittleFS - той самий колбек, що й `WebFilesModule`.** Формула
+`usedBytes()/totalBytes()` для LittleFS одна на весь портал
+(`littleFsUsage` у `setupWebPortal()`, `src/main.cpp`) - друга копія
+розійшлася б першою (CLAUDE.md, DRY).
+
+**Точний час PHY-швидкості (Мбіт/с) недоступний.** `esp_wifi_sta_get_
+negotiated_phymode()` (ESP-IDF, лише ESP32) віддає лише протокол/смугу
+("802.11n (HT40)"), не Мбіт/с - ESP-IDF цього числа не публікує. "Connection
+type" на сторінці показує саме протокол.
 
 ## Розділ «Wi-Fi»
 

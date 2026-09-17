@@ -73,8 +73,12 @@ struct HttpServerConfig {
   uint16_t port = 80;
 
 #if defined(ESP32)
-  uint8_t maxClients =
-      4;  // ESP32 classic / S3 — обмежуємо явно, не покладаємось на дефолт бібліотеки
+#ifndef HTTP_SERVER_MAX_CLIENTS
+#define HTTP_SERVER_MAX_CLIENTS 4  // ESP32 classic / S3 — обмежуємо явно, не покладаємось на
+                                   // дефолт бібліотеки; плата може перевизначити через build_flags
+                                   // (docs/tech_debt.md §4 - портал+EcoFlow на тісному heap)
+#endif
+  uint8_t maxClients = HTTP_SERVER_MAX_CLIENTS;
   size_t chunkSize = 1024;  // розмір чанку при читанні файлів з SD/LittleFS
 #elif defined(ESP8266)
   uint8_t maxClients = 2;  // менше RAM — менше одночасних з'єднань

@@ -40,7 +40,10 @@
 //
 // Розмір кільця - через build_flags, по платформі (див. platformio.ini):
 //   -D JOURNAL_RING=48   плати з вільною RAM
-//   -D JOURNAL_RING=32   C6 / C3 / st7789 / ttgo-t1
+//   -D JOURNAL_RING=32   C6 / st7789 / ttgo-t1
+//   -D JOURNAL_RING=16   C3 (320 КБ RAM проти 512 КБ у C6, а портал+EcoFlow -
+//                        обов'язкові й без дисплея-запасного шляху; кожен
+//                        запис - ~180 Б, 16 замість 32 повертає heap'у ~3 КБ)
 //   -D JOURNAL_RING=8    esp8266 (там вільно ~20 КБ на все)
 
 #include <cstddef>

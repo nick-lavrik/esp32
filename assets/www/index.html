@@ -83,7 +83,7 @@ h2 { font-size: var(--font-size-large); text-transform: uppercase; letter-spacin
    точкового винятку на кожну нову обгортку. Раніше тут стояв голий
    "h2:first-child" (без прив'язки до батька) - і ловив кожен новий div
    заново, вимагаючи свій виняток. */
-section > h2:first-child, .col > h2:first-child { margin-top: 0; }
+section > h2:first-child, .col > h2:first-child, .card > h2:first-child { margin-top: 0; }
 /* Підпис усередині заголовка - це дані, а не назва розділу: ім'я namespace,
    лічильники, стан стрічки. Регістр у них значущий (namespace в NVS
    регістрозалежний), тому uppercase заголовка на них не поширюється. */
@@ -316,20 +316,28 @@ textarea:focus { outline: 1px solid var(--accent); }
   margin-top: 8px;
   font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #nvs-table td, #fs-table td { vertical-align: baseline; }
-/* Картки пристроїв EcoFlow у рядок: на широкому екрані влазять усі поруч
-   (пристроїв зазвичай 3-4), на планшеті - по два, на телефоні лишається
-   майже поточна одноколонкова верстка - усе це дає сам flex-wrap, без
-   окремих брейкпоінтів під кожну ширину. */
-#ecoflow-devices { display: flex; flex-wrap: wrap; gap: 12px; }
+/* Картки в рядок: на широкому екрані влазять кілька поруч (EcoFlow-пристроїв
+   зазвичай 3-4, System-блоків - і всі 4-5), на планшеті - по два, на
+   телефоні лишається майже поточна одноколонкова верстка - усе це дає сам
+   flex-wrap, без окремих брейкпоінтів під кожну ширину. Спільний контейнер
+   для обох споживачів - #ecoflow-devices і #sys-cards. */
+#ecoflow-devices, #sys-cards { display: flex; flex-wrap: wrap; gap: 12px; }
 /* Той самий бордер/радіус, що й у #log/#nvs-view, лише без темного фону:
-   тут не дамп і не лог, а звичайний dl. */
-.ecoflow-device { border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+   тут не дамп і не лог, а звичайний dl. Спільний клас .card - EcoFlow і
+   System це той самий контейнер, різниться лише вміст. */
+.card { border: 1px solid var(--line); border-radius: 6px; padding: 12px;
   flex: 1 1 300px; min-width: 260px; }
 /* dt+dd лишаються в один рядок на будь-якій ширині - на відміну від
    загального правила dl нижче (одна колонка під 560px), тут це зробило б
    картку в 260px переважно порожньою: підпис і значення й так короткі,
    довге лишається в .eco-sub на власному рядку (див. нижче). */
-.ecoflow-device dl { grid-template-columns: max-content 1fr; }
+.card dl { grid-template-columns: max-content 1fr; }
+/* Device - єдина картка з ДВОМА dl (#sys-device - фоновий тік, #sys-device-flash
+   - лише за Refresh, окремо саме через різний час оновлення). max-content
+   рахується для кожного dl окремо, тож "Chip size" і "Firmware env" виходили
+   різної ширини підпису - value 'їхав' між рядками. Фіксована ширина замість
+   max-content - обидва dl вирівнюються в одну колонку. */
+#sys-device, #sys-device-flash { grid-template-columns: 100px 1fr; }
 /* Другорядне уточнення в значенні (кількість переходів, Гц, "(inferred)") -
    завжди власним рядком під основним значенням, а не втиснуте в ту саму
    колонку dd: там воно або переносилось посередині слова, або розпирало
@@ -381,12 +389,23 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
    пробілами. */
 .ecoflow-wide { display: none; }
 @media (min-width: 1300px) { .ecoflow-wide { display: table-cell; } }
-/* Неяскрава зебра плюс той самий hover, що в NVS/Files/Wi-Fi (#ffffff0f).
-   thead навмисно того ж, майже прозорого відтінку, що й парні рядки - без
-   цього заголовок на тлі зебри виглядав темнішою, чужорідною смугою. */
-#ecoflow-table thead th { background: #ffffff05; }
-#ecoflow-table tbody tr:nth-child(even) { background: #ffffff05; }
-#ecoflow-table tbody tr:hover { background: #ffffff0f; }
+/* Неяскрава зебра плюс той самий hover, що в NVS/Files/Wi-Fi (#ffffff0f) -
+   правило: будь-яка нова довідкова таблиця (не форма-редактор на кшталт
+   #profiles/#fs-table, де клікабельність підсвічує окреме правило нижче)
+   отримує клас .zebra, а не власну копію цього блоку. thead навмисно того ж,
+   майже прозорого відтінку, що й парні рядки - без цього заголовок на тлі
+   зебри виглядав темнішою, чужорідною смугою. */
+table.zebra thead th { background: #ffffff05; }
+table.zebra tbody tr:nth-child(even) { background: #ffffff05; }
+table.zebra tbody tr:hover { background: #ffffff0f; }
+/* Клікабельні рядки таблиці розділів (System - Flash): не всі рядки ведуть
+   кудись, тому курсор - точковий сигнал поверх загального hover .zebra. */
+#sys-partitions tbody tr[data-sys-nav] { cursor: pointer; }
+/* Offset - шістнадцяткові адреси, вирівняні ведучими нулями до однакової
+   довжини (JS); моноширинний шрифт - щоб однакова довжина рядка справді
+   давала однакову ширину на екрані (тут це не пропорційний шрифт сторінки). */
+#sys-partitions td.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 /* Редактор і переглядач значення липнуть до верху: таблиця ключів довша за
    екран, і без цього кожна правка - це скрол угору по формі й назад. */
 #tab-nvs .col + .col, #tab-files .col + .col { position: sticky; top: 16px; }
@@ -451,7 +470,15 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
 </header>
 
 <nav>
-  <button data-tab="wifi" class="active" aria-label="Wi-Fi">
+  <button data-tab="system" class="active" aria-label="System">
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <rect x="6" y="6" width="12" height="12" rx="1"/>
+      <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>
+    </svg>
+    <span class="tab-label">System</span>
+  </button>
+  <button data-tab="wifi" aria-label="Wi-Fi">
     <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
       <path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M1.4 9a16 16 0 0 1 21.2 0"/>
@@ -515,7 +542,67 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
 </nav>
 
 <main>
-<section id="tab-wifi" class="active">
+<section id="tab-system" class="active">
+ <!-- Картки, а не .cols/.col: блоків тут забагато для жорсткої пари колонок
+      (на широкому екрані вони або наїжджають одна на одну, або лишають
+      порожнє поле - flex-wrap розкладає скільки влізе, як уже зроблено для
+      карток пристроїв EcoFlow, #ecoflow-devices). Memory/Storage/SD/NVS -
+      з /api/system/info: це flash I/O або дорогий розрахунок на кожен тік,
+      тому НЕ входять у 10-секундний автоопит (pollStatus()) - лише разова
+      підтяжка при відкритті вкладки і за клацанням Refresh (кнопка в
+      h2.hrow першої картки, Device - вона ж перша впадає в очі). Той самий
+      шаблон - для наступних дорогих/рідкісних блоків порталу. -->
+ <div id="sys-cards">
+  <div class="card">
+  <h2 class="hrow">Device <button class="act ghost" id="sys-refresh" type="button"
+      title="Refresh memory, storage, flash and NVS info">Refresh</button></h2>
+  <dl id="sys-device"></dl>
+  <!-- Chip size/speed - з /api/system/info (окремий dl, не змішаний із
+       sys-device: той перемальовується щотік, цей - лише за Refresh). -->
+  <dl id="sys-device-flash"></dl>
+  </div>
+
+  <div class="card">
+  <h2>Network</h2>
+  <dl id="sys-network"></dl>
+  </div>
+
+  <div class="card">
+  <h2>Memory</h2>
+  <dl id="sys-memory"><dt>Total</dt><dd class="muted">Press Refresh.</dd></dl>
+  </div>
+
+  <div class="card">
+  <h2>LittleFS</h2>
+  <dl id="sys-littlefs"></dl>
+  </div>
+
+  <div class="card" id="sys-sd-wrap" hidden>
+  <h2>SD card</h2>
+  <dl id="sys-sd"></dl>
+  </div>
+
+  <div class="card">
+  <h2>NVS</h2>
+  <dl id="sys-nvs"></dl>
+  </div>
+
+  <div class="card">
+  <h2>Modules</h2>
+  <p id="sys-modules" class="muted"></p>
+  </div>
+ </div>
+
+ <h2>Flash</h2>
+ <table id="sys-partitions" class="zebra">
+   <thead><tr>
+     <th>Label</th><th class="num">Size</th><th>Type</th><th class="opt">Subtype</th>
+     <th class="num opt">Offset</th><th class="num opt">Length</th>
+   </tr></thead>
+   <tbody><tr><td colspan="6" class="muted">Press Refresh.</td></tr></tbody>
+ </table>
+</section>
+<section id="tab-wifi">
  <div class="cols">
   <div class="col">
   <h2>Status</h2>
@@ -755,7 +842,7 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
   <dl id="ecoflow-status"></dl>
 
   <h2>Overview</h2>
-  <table id="ecoflow-table">
+  <table id="ecoflow-table" class="zebra">
     <thead><tr>
       <th class="opt2">#</th>
       <th class="opt2">Serial</th>
@@ -818,12 +905,30 @@ function toast(text, kind) {
   toast.timer = setTimeout(() => { el.style.display = "none"; }, 4000);
 }
 
+// Черга на всі запити порталу: наступний fetch стартує лише після того, як
+// попередній завершився (успіхом чи помилкою) - не покладаємось на те,
+// скільки паралельних з'єднань дозволить HttpServerConfig::maxClients.
+// Причина: сторінка сама тримає SSE-потік консолі відкритим постійно
+// (startStream) плюс кілька pollers'ів на завантаженні - без черги це
+// стільки одночасних fetch'ів, скільки взагалі є на сторінці, і зростає з
+// кожною новою вкладкою (docs/tech_debt.md §4 - maxClients=2 звідси й
+// зламався: 2 з'єднання не покривали навіть одне відкриття сторінки).
+let apiQueueTail = Promise.resolve();
+
 async function api(path, options) {
-  const res = await fetch(path, options);
-  if (res.status === 401) { toast("Authentication required", "err"); throw new Error("unauthorized"); }
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error((body && body.error) || ("HTTP " + res.status));
-  return body;
+  const previous = apiQueueTail;
+  let release;
+  apiQueueTail = new Promise((resolve) => { release = resolve; });
+  await previous;
+  try {
+    const res = await fetch(path, options);
+    if (res.status === 401) { toast("Authentication required", "err"); throw new Error("unauthorized"); }
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((body && body.error) || ("HTTP " + res.status));
+    return body;
+  } finally {
+    release();
+  }
 }
 
 function form(fields) {
@@ -865,31 +970,182 @@ async function job(path, options, busyEl) {
 
 /* ---------------- tabs ---------------- */
 
+// Винесено з обробника кліку по nav, щоб перемикати вкладку можна було й
+// звідкись іще (System -> Partitions -> клік по рядку "nvs"/"littlefs"
+// відкриває відповідну вкладку - той самий перехід, що й клік по кнопці nav).
+function activateTab(name) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll("section").forEach((s) => s.classList.toggle("active", s.id === "tab-" + name));
+  // Свіжий знімок одразу при відкритті - щоб вкладка не показувала старе,
+  // поки не настане наступний тік.
+  if (name === "system") { pollStatus(); refreshWifiStatus(); refreshSystemInfo(); }
+  if (name === "wifi") refreshWifi();
+  if (name === "commands") refreshShortcuts();
+  if (name === "screen") screenOpen();
+  // Саме nvsData.namespace, а не типове значення: інакше повернення на
+  // вкладку скидало б обраний namespace на власний.
+  if (name === "nvs") refreshNvs(nvsData.namespace);
+  // Так само, як із namespace NVS: повертаємось у той каталог, де були.
+  if (name === "files") refreshFiles(fsData.path);
+  if (name === "ecoflow") refreshEcoflow();
+  // Поки вкладка прихована, у #log clientHeight/scrollHeight - нулі, тому
+  // scrollTop = scrollHeight в appendTo() нічого не робить, і накопичені
+  // під час паузи рядки лишають стрічку прокрученою вгору. Довести вручну.
+  if (name === "console") {
+    const box = $("#log");
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
 document.querySelectorAll("nav button").forEach((btn) => {
-  btn.onclick = () => {
-    document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
-    document.querySelectorAll("section").forEach((s) =>
-      s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
-    // Свіжий знімок одразу при відкритті - щоб вкладка не показувала старе,
-    // поки не настане наступний тік.
-    if (btn.dataset.tab === "wifi") refreshWifi();
-    if (btn.dataset.tab === "commands") refreshShortcuts();
-    if (btn.dataset.tab === "screen") screenOpen();
-    // Саме nvsData.namespace, а не типове значення: інакше повернення на
-    // вкладку скидало б обраний namespace на власний.
-    if (btn.dataset.tab === "nvs") refreshNvs(nvsData.namespace);
-    // Так само, як із namespace NVS: повертаємось у той каталог, де були.
-    if (btn.dataset.tab === "files") refreshFiles(fsData.path);
-    if (btn.dataset.tab === "ecoflow") refreshEcoflow();
-    // Поки вкладка прихована, у #log clientHeight/scrollHeight - нулі, тому
-    // scrollTop = scrollHeight в appendTo() нічого не робить, і накопичені
-    // під час паузи рядки лишають стрічку прокрученою вгору. Довести вручну.
-    if (btn.dataset.tab === "console") {
-      const box = $("#log");
-      box.scrollTop = box.scrollHeight;
-    }
-  };
+  btn.onclick = () => activateTab(btn.dataset.tab);
 });
+
+/* ---------------- system ---------------- */
+
+const onSystemTab = () => $("#tab-system").classList.contains("active");
+
+// Дані ті самі, що вже їдуть у /api/status і /api/wifi/status - вкладка лише
+// перекладає наявний JSON у розмітку, окремого роута під неї не заводимо
+// (docs/tech_debt.md, "Нова вкладка System").
+//
+// #sys-device-flash (chip size/speed) - окремий dl поруч, свій, не той, що
+// перемальовує ця функція: заповнює його лише renderSystemInfo() нижче
+// (/api/system/info, за Refresh), і фоновий тік сюди не заглядає взагалі -
+// тому містити його в #sys-device небезпечно (щотіковий overwrite стер би
+// ці два рядки до наступного Refresh), а два сусідні dl - ні.
+function renderSystemStatus(s) {
+  const box = $("#sys-device");
+  if (!box) return;
+  box.innerHTML = [
+    ["Firmware env", s.env],
+    ["Uptime", hhmmss(s.uptimeMs)],
+    ["Free heap", Math.round(s.freeHeap / 1024) + " KB"],
+    ["Portal auth", s.auth ? "enabled" : "disabled"],
+    ["Pending jobs", String(s.pendingJobs)],
+  ].map(([k, v]) => "<dt>" + k + "</dt><dd>" + escapeHtml(String(v)) + "</dd>").join("");
+  $("#sys-modules").textContent = (s.modules && s.modules.length) ? s.modules.join(", ") : "–";
+}
+
+// Хелпер для dl - той самий рядок ["Заголовок", "значення"] .map()...join(),
+// що й статуси Wi-Fi/EcoFlow, лише винесений сюди - System збирає їх
+// найбільше блоків одразу (Memory/LittleFS/SD/NVS).
+function dlRows(rows) {
+  return rows.map(([k, v]) => "<dt>" + k + "</dt><dd>" + v + "</dd>").join("");
+}
+
+// Одна одиниця виміру на всю трійку used/total/free - "1.20 MB" і "0.32 MB"
+// вирівнюються по ширині, а "1.2 MB" поруч із "324.0 KB" (різні одиниці) ні.
+function fsUnit(bytes) {
+  if (bytes < 1024) return { div: 1, suffix: " B", digits: 0 };
+  if (bytes < 1024 * 1024) return { div: 1024, suffix: " KB", digits: 1 };
+  if (bytes < 1024 * 1024 * 1024) return { div: 1024 * 1024, suffix: " MB", digits: 2 };
+  return { div: 1024 * 1024 * 1024, suffix: " GB", digits: 2 };
+}
+function fsSizeIn(bytes, unit) { return (bytes / unit.div).toFixed(unit.digits) + unit.suffix; }
+
+// Total/Used/Free одним стовпчиком одиниць + відсоток на used/free - спільна
+// трійка рядків для LittleFS і SD (обидва - "used з total", лише джерело різне).
+function fsUsageRows(used, total) {
+  const unit = fsUnit(total);
+  const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+  return [
+    ["Total", fsSizeIn(total, unit)],
+    ["Used", fsSizeIn(used, unit) + " (" + pct + "%)"],
+    ["Free", fsSizeIn(total - used, unit) + " (" + (100 - pct) + "%)"],
+  ];
+}
+
+// Розширена діагностика (/api/system/info) - на відміну від renderSystemStatus()
+// вище, НЕ входить у fast poll: чіпає flash (NVS/partition table/SD), тому
+// підтягується лише при відкритті вкладки і за клацанням Refresh (кнопка
+// #sys-refresh). Той самий шаблон - для наступних дорогих/рідкісних блоків
+// порталу.
+function renderSystemInfo(r) {
+  const h = r.heap;
+  const memUnit = fsUnit(h.totalBytes || h.freeBytes);
+  const freePct = h.totalBytes > 0 ? Math.round((h.freeBytes / h.totalBytes) * 100) : null;
+  $("#sys-memory").innerHTML = dlRows([
+    ["Total", h.totalBytes ? fsSizeIn(h.totalBytes, memUnit) : "–"],
+    ["Free", fsSizeIn(h.freeBytes, memUnit) + (freePct != null ? " (" + freePct + "%)" : "")],
+    ["Largest free block", fsSizeIn(h.largestFreeBlockBytes, memUnit)],
+    ["Fragmentation", h.fragmentationPercent + "%"],
+    ["Min free ever", h.minFreeEverBytes ? fsSizeIn(h.minFreeEverBytes, memUnit) : "–"],
+  ]);
+
+  const fs = r.littlefs;
+  $("#sys-littlefs").innerHTML = fs.available
+    ? dlRows(fsUsageRows(fs.usedBytes, fs.totalBytes))
+    : "<dt>LittleFS</dt><dd class=\"muted\">not available</dd>";
+
+  const sdWrap = $("#sys-sd-wrap");
+  sdWrap.hidden = !r.sd.available;
+  if (r.sd.available) {
+    $("#sys-sd").innerHTML = r.sd.present
+      ? dlRows([["Type", escapeHtml(r.sd.type)], ...fsUsageRows(r.sd.usedBytes, r.sd.sizeBytes)])
+      : "<dt>Card</dt><dd class=\"muted\">not detected</dd>";
+  }
+
+  // Chip size/speed - у картці Device (не власна картка Flash: там лишається
+  // тільки таблиця розділів, див. #sys-partitions нижче).
+  $("#sys-device-flash").innerHTML = dlRows([
+    ["Chip size", fsSize(r.flash.sizeBytes)],
+    ["Chip speed", Math.round(r.flash.speedHz / 1e6) + " MHz"],
+  ]);
+
+  // nvs/littlefs(spiffs) - реальні розділи, за якими стоїть своя вкладка
+  // порталу; клік на такому рядку веде туди (data-sys-nav, activateTab()).
+  // Решта (app0, coredump, phy_init...) - інформаційні, без переходу.
+  const navByLabel = { nvs: "nvs", littlefs: "files", spiffs: "files" };
+  // Ведучі нулі - до довжини найбільшого офсету/розміру в ЦІЙ таблиці разом
+  // (Offset і Length - однакова ширина, "довжина" тут теж адреса в байтах),
+  // а не до фіксованого числа: на різних платах різний розмір флеша (4/8 МБ),
+  // і зайві нулі на маленькій платі виглядали б так само дивно, як брак нулів
+  // на великій.
+  const hexLen = Math.max(0, ...r.partitions.flatMap((p) => [p.offset, p.size].map((n) => n.toString(16).length)));
+  const hex = (n) => "0x" + n.toString(16).padStart(hexLen, "0");
+  $("#sys-partitions tbody").innerHTML = r.partitions.length === 0
+    ? '<tr><td colspan="6" class="muted">No partition table.</td></tr>'
+    : r.partitions.map((p) => {
+        const nav = navByLabel[p.label];
+        return `<tr${nav ? ` data-sys-nav="${nav}"` : ""}>
+          <td>${escapeHtml(p.label)}</td>
+          <td class="num">${fsSize(p.size)}</td>
+          <td>${escapeHtml(p.type)}</td>
+          <td class="opt">${escapeHtml(p.subtype)}</td>
+          <td class="num opt mono">${hex(p.offset)}</td>
+          <td class="num opt mono">${hex(p.size)}</td>
+        </tr>`;
+      }).join("");
+
+  const nvs = r.nvs;
+  $("#sys-nvs").innerHTML = nvs.available
+    ? dlRows((() => {
+        const pct = nvs.totalEntries > 0 ? Math.round((nvs.usedEntries / nvs.totalEntries) * 100) : 0;
+        return [
+          ["Total", nvs.totalEntries.toLocaleString()],
+          ["Used", nvs.usedEntries.toLocaleString() + " (" + pct + "%)"],
+          ["Free", nvs.freeEntries.toLocaleString() + " (" + (100 - pct) + "%)"],
+          ["Namespaces", String(nvs.namespaceCount)],
+        ];
+      })())
+    : "<dt>NVS</dt><dd class=\"muted\">not available</dd>";
+}
+
+async function refreshSystemInfo() {
+  try {
+    renderSystemInfo(await job("/api/system/info", undefined, $("#sys-refresh")));
+  } catch (e) { toast(e.message || "Refresh failed", "err"); }
+}
+
+// Клік по рядку розділу nvs/littlefs(spiffs) у таблиці Flash - те саме, що
+// клік по вкладці nav: та сама activateTab() (tabs, вище по файлу).
+$("#sys-partitions tbody").onclick = (ev) => {
+  const tr = ev.target.closest("tr[data-sys-nav]");
+  if (tr) activateTab(tr.dataset.sysNav);
+};
+
+$("#sys-refresh").onclick = refreshSystemInfo;
 
 /* ---------------- wi-fi ---------------- */
 
@@ -910,21 +1166,36 @@ function signal(rssi, quality) {
   return html + "</span>";
 }
 
+// Той самий /api/wifi/status малює і вкладку Wi-Fi, і блок "Network" на
+// System - тому рядки складені один раз тут, а не в кожному місці окремо.
+function statusRows(s) {
+  const ap = s.ap || {};
+  return [
+    ["State", s.state],
+    ["SSID", s.ssid || "–"],
+    ["IP address", s.ip || "–"],
+    ["Gateway", s.connected ? (s.gateway || "–") : "–"],
+    ["Signal", s.connected ? signal(s.rssi, s.quality) : "–", true],
+    ["Connection type", s.connected ? (s.phyMode || "–") : "–"],
+    ["MAC", s.mac],
+    ["Auto reconnect", s.autoReconnect ? "on" : "off"],
+    ["Hotspot", ap.active
+      ? ap.ssid + " · " + ap.ip + " · " + ap.clients + " client(s) · " + ap.security
+      : "off"],
+    // Третій елемент - позначка "це вже розмітка": решта значень тут рядки
+    // ззовні (SSID, стан), і їх екранувати обов'язково.
+  ];
+}
+
 function renderStatus(s) {
   const ap = s.ap || {};
   $("#devstate").textContent = s.connected ? s.ssid + " · " + s.ip
     : ap.active ? "hotspot " + ap.ssid : s.state;
-  $("#wifi-status").innerHTML = [
-    ["State", s.state],
-    ["SSID", s.ssid || "–"],
-    ["IP address", s.ip || "–"],
-    ["Signal", s.connected ? signal(s.rssi, s.quality) : "–", true],
-    ["MAC", s.mac],
-    ["Auto reconnect", s.autoReconnect ? "on" : "off"],
-    ["Hotspot", ap.active ? ap.ssid + " · " + ap.ip + " · " + ap.clients + " client(s)" : "off"],
-    // Третій елемент - позначка "це вже розмітка": решта значень тут рядки
-    // ззовні (SSID, стан), і їх екранувати обов'язково.
-  ].map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
+  const rows = statusRows(s)
+    .map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
+  $("#wifi-status").innerHTML = rows;
+  const sysNetwork = $("#sys-network");
+  if (sysNetwork) sysNetwork.innerHTML = rows;
 }
 
 // Пробіли на краю SSID - видимою міткою: без неї "Asus " і "Asus" у таблиці
@@ -1790,10 +2061,13 @@ function fsIsImage(path) {
   return dot > 0 && FS_IMAGES.includes(path.substring(dot + 1).toLowerCase());
 }
 
+// Спільна для Files і System (SD/flash/partitions там уже гігабайтної шкали,
+// тому GB-гілка тут, а не власна копія в кожній вкладці).
 function fsSize(n) {
   if (n < 1024) return n + " B";
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-  return (n / 1024 / 1024).toFixed(1) + " MB";
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+  return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
 }
 
 // Крихти замість поля вводу: шлях тут не набирають, по ньому ходять, а один
@@ -2564,7 +2838,7 @@ function ecoDeviceCard(d) {
 
   const paramCount = Object.keys(d.params).length;
   const dropped = d.droppedParams > 0 ? `, ${d.droppedParams} dropped (per-device limit)` : "";
-  return `<div class="ecoflow-device" data-sn="${escapeHtml(d.serialNumber)}">
+  return `<div class="card ecoflow-device" data-sn="${escapeHtml(d.serialNumber)}">
     <div class="row" style="justify-content:space-between">
       <b>${escapeHtml(d.name)}</b><span class="muted">${escapeHtml(d.serialNumber)} · ${escapeHtml(d.type)}</span>
     </div>
@@ -2635,6 +2909,7 @@ async function pollStatus() {
     }
     $("#uptime").textContent = "up " + hhmmss(s.uptimeMs);
     $("#heap").textContent = "heap " + Math.round(s.freeHeap / 1024) + " KB";
+    renderSystemStatus(s);
     // Вкладка з'являється сама, коли розділ реально є в прошивці - на платах
     // без HAS_SCREEN_MIRROR (без спрайта кадру, як esp32-c3, або з 1bpp-панеллю,
     // як esp8266) "screen" у списку "modules" немає, і показувати вкладку без
@@ -2658,10 +2933,14 @@ refreshWifi();
 loadCommands();
 refreshShortcuts();
 startStream();
+// System - типова активна вкладка при відкритті сторінки, тому й вона тягне
+// свій знімок одразу, а не чекає першого клацання Refresh.
+refreshSystemInfo();
 
-// Стан мережі - лише поки відкрита вкладка Wi-Fi; купа - раз на 10 с.
-// Раніше обидва йшли кожні 3 і 5 секунд незалежно від того, чи їх видно.
-poller(refreshWifiStatus, 5000, onWifiTab);
+// Стан мережі - лише поки відкрита вкладка Wi-Fi або System (обидві малюють
+// той самий /api/wifi/status); купа - раз на 10 с. Раніше обидва йшли кожні
+// 3 і 5 секунд незалежно від того, чи їх видно.
+poller(refreshWifiStatus, 5000, () => onWifiTab() || onSystemTab());
 poller(pollStatus, 10000);
 poller(refreshEcoflow, 5000, onEcoflowTab);
 </script>

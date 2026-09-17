@@ -150,6 +150,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <SerialCommander.hpp>
 #include <SystemReset.hpp>
 #include <TaskController.hpp>
+#include <Trace.hpp>
 #include <NetworkSupervisor.hpp>
 #include <RouterApiClient.hpp>
 #include <RouterClientListParser.hpp>
@@ -170,6 +171,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <WebFilesModule.hpp>
 #include <WebNvsModule.hpp>
 #include <WebPortal.hpp>
+#include <WebSystemModule.hpp>
 #include <WebWifiModule.hpp>
 #if HAS_SCREEN_MIRROR
 #include <WebScreenModule.hpp>
@@ -426,11 +428,22 @@ WebCommandsModule webCommandsModule(commandHandler,
 WebNvsModule webNvsModule(configStorage);
 // Місткість розділу окремим замиканням: usedBytes()/totalBytes() є в
 // LittleFSFS, але не в fs::FS, через яке модуль дивиться на файлову систему.
-WebFilesModule webFilesModule(LittleFS, "LittleFS", [](size_t& used, size_t& total) {
+// Спільна і для WebFilesModule, і для WebSystemModule (вкладка System) -
+// друге дзеркалило б перше, якби лишилось окремим замиканням там само.
+auto littleFsUsage = [](size_t& used, size_t& total) {
   used = LittleFS.usedBytes();
   total = LittleFS.totalBytes();
   return total > 0;
-});
+};
+WebFilesModule webFilesModule(LittleFS, "LittleFS", littleFsUsage);
+#if BOARD_HAS_SD
+// Визначена нижче, в ACTIVE_SD-блоці (dumpSDInfo() і сусіди) - саме там
+// відомо, яка шина (SD чи SD_MMC) підключена на цій платі.
+bool getSdCardInfo(WebSystemSdInfo& out);
+WebSystemModule webSystemModule(littleFsUsage, getSdCardInfo);
+#else
+WebSystemModule webSystemModule(littleFsUsage);
+#endif
 #if HAS_SCREEN_MIRROR
 // Дзеркало екрана. Плата без спрайта кадру (esp32-c3) або з 1bpp-панеллю
 // (esp8266) віддавати браузеру нічого не може - там розділу просто немає
@@ -1943,6 +1956,15 @@ void dumpSDlistDir(const char* dirname, uint8_t levels) {
   }
 }
 
+// Спільна для dumpSDInfo() (serial) і getSdCardInfo() (WebSystemModule,
+// вкладка System порталу) - одна таблиця замість двох, що розійдуться.
+const char* sdCardTypeName(uint8_t cardType) {
+  if (cardType == CARD_MMC) return "MMC";
+  if (cardType == CARD_SD) return "SDSC";
+  if (cardType == CARD_SDHC) return "SDHC";
+  return "UnknownType";
+}
+
 void dumpSDInfo() {
   // 1. Деактивируем выбор других устройств на шине
   // digitalWrite(15, HIGH); // Отключаем TFT_CS
@@ -1962,17 +1984,10 @@ void dumpSDInfo() {
   }
  
   Logger::info("✅ Card found!");
- 
+
   // Виводимо тип для деталізації
-  if (cardType == CARD_MMC)
-    Logger::info("Card type: %s", "MMC");
-  else if (cardType == CARD_SD)
-    Logger::info("Card type: %s", "SDSC");
-  else if (cardType == CARD_SDHC)
-    Logger::info("Card type: %s", "SDHC");
-  else
-    Logger::info("Card type: %s", "UnknownType");
- 
+  Logger::info("Card type: %s", sdCardTypeName(cardType));
+
   Logger::info("------------------------------------------------------------");
   dumpSDlistDir("/", 2);
   Logger::info("------------------------------------------------------------");
@@ -1988,7 +2003,23 @@ void dumpSDInfo() {
  
   Logger::info("============================================================");
 }
- 
+
+#if HAS_WEB_PORTAL
+// Для вкладки System порталу (WebSystemModule) - той самий ACTIVE_SD, що й
+// dumpSDInfo() вище, тому визначена в тому самому macro-блоці. Оголошена
+// наперед там, де конструюється webSystemModule (задовго до цього блоку).
+bool getSdCardInfo(WebSystemSdInfo& out) {
+  const uint8_t cardType = ACTIVE_SD.cardType();
+  out.present = cardType != CARD_NONE;
+  if (!out.present) return true;
+
+  out.cardType = sdCardTypeName(cardType);
+  out.sizeBytes = ACTIVE_SD.cardSize();
+  out.usedBytes = ACTIVE_SD.usedBytes();
+  return true;
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // Порятунок даних з картки, яку не бачить хост (команди "sdraw" / "sdext4").
 //
@@ -3265,8 +3296,10 @@ void setupSerialCommander() {
     _log.info("uptime       : %lu s", (unsigned long)(millis() / 1000UL));
   });
 
-  // ТИМЧАСОВА діагностика фрагментації heap (docs/tech_debt.md) - прибрати
-  // після завершення дослідження або перевести в постійний інтервал.
+  // Постійний інструмент діагностики heap (docs/tech_debt.md, розділ 4,
+  // "esp32-c3 - той самий конфлікт, лише повільніший крах"): портал+EcoFlow
+  // тут заганяють heap в той самий кут, що й на ttgo-t1/esp32-st7789, тож
+  // моніторинг лишається - знадобиться перевіряти кожну спробу це полікувати.
   // queueCommand(), а не прямий виклик - той самий шлях, що й у консолі/MQTT,
   // тож результат однаково потрапляє в journal і, за потреби, у console-mqtt.
   const TaskId heapWatchCronTaskId = scheduler.addCronTask(2 * 60 * 1000UL, []() {
@@ -4361,6 +4394,7 @@ void setupWebPortal() {
   webPortal.addModule(&webCommandsModule);
   webPortal.addModule(&webNvsModule);
    webPortal.addModule(&webFilesModule);
+  webPortal.addModule(&webSystemModule);
 #if HAS_SCREEN_MIRROR
   webPortal.addModule(&webScreenModule);
 #endif
@@ -4947,41 +4981,47 @@ void testRawTcpConnect() {
 #endif
 void setup() {
   uint32_t freeHeap = ESP.getFreeHeap();
-  setupSerial();
+  // Кожен крок ідеться через withTrace() (lib/Logger/Trace.hpp) - один
+  // debug-рядок на крок: тривалість і heap до/після/дельта під тегом "trace".
+  // Звідси видно, який саме setupXxx() важкий чи "з'їдає" heap, без ручного
+  // millis()/getFreeHeap() у кожній функції (docs/tech_debt.md §4 - портал+
+  // EcoFlow на тісному heap, для esp32-c3 саме там і знадобилось вперше).
+  withTrace("setupSerial", []() { setupSerial(); });
   Logger::info("free heap memory from scratch: %u", freeHeap);
 
-  setupI2C();  // обов'язково ДО setupTouchScreen()/setupImu() - шина спільна
+  withTrace("setupI2C", []() { setupI2C(); });  // обов'язково ДО setupTouchScreen()/setupImu() - шина спільна
 
-  setupSD();
-  setupLittleFS();
-  setupEventDispatcher();
-  setupConfigStorage();
-  setupSerialCommander();
-  setupBlinkLED();
-  setupDisplay();
-  setupTouchScreen();
-  setupImu();
-  setupNetworkSupervisor();
+  withTrace("setupSD", []() { setupSD(); });
+  withTrace("setupLittleFS", []() { setupLittleFS(); });
+  withTrace("setupEventDispatcher", []() { setupEventDispatcher(); });
+  withTrace("setupConfigStorage", []() { setupConfigStorage(); });
+  withTrace("setupSerialCommander", []() { setupSerialCommander(); });
+  withTrace("setupBlinkLED", []() { setupBlinkLED(); });
+  withTrace("setupDisplay", []() { setupDisplay(); });
+  withTrace("setupTouchScreen", []() { setupTouchScreen(); });
+  withTrace("setupImu", []() { setupImu(); });
+  withTrace("setupNetworkSupervisor", []() { setupNetworkSupervisor(); });
 #if HAS_WEB_PORTAL
   // Після setupNetworkSupervisor(): мережевий стек має бути ініціалізований
   // (WiFi.mode() всередині FSM), інакше AsyncTCP піднімається на ще
   // неіснуючому інтерфейсі. Самого ПІДКЛЮЧЕННЯ чекати не треба - його може
   // не бути взагалі.
-  setupWebPortal();
+  withTrace("setupWebPortal", []() { setupWebPortal(); });
 #endif
-  setupNtpService();
-  setupBackgroundImage();
-  setupTaskCommander();
-  setupLightSensor();
-  setupMqttClient();
+  withTrace("setupNtpService", []() { setupNtpService(); });
+  withTrace("setupBackgroundImage", []() { setupBackgroundImage(); });
+  withTrace("setupTaskCommander", []() { setupTaskCommander(); });
+  withTrace("setupLightSensor", []() { setupLightSensor(); });
+  withTrace("setupMqttClient", []() { setupMqttClient(); });
 #if HAS_ECOFLOW_CLIENT
   // Після setupNtpService(): REST-підпис EcoFlow використовує timestamp, а
   // MQTT-хендшейк - перевірку строку дії сертифіката.
-  setupEcoflow();
+  withTrace("setupEcoflow", []() { setupEcoflow(); });
 #endif
-  setupFlipButton();
-  setupDinoGame();  // після setupDisplay()/setupTouchScreen(): треба готові розміри екрана
-  setupWiFiIcon();
+  withTrace("setupFlipButton", []() { setupFlipButton(); });
+  // після setupDisplay()/setupTouchScreen(): треба готові розміри екрана
+  withTrace("setupDinoGame", []() { setupDinoGame(); });
+  withTrace("setupWiFiIcon", []() { setupWiFiIcon(); });
   loadConfig();
 
   display.flush();
