@@ -30,7 +30,9 @@ void WebPortal::_registerCoreRoutes() {
   AsyncWebServer& server = _httpServer.server();
 
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
-    String json = "{\"uptimeMs\":";
+    String json = "{\"env\":";
+    json += webjson::quote(PIO_PIOENV);
+    json += ",\"uptimeMs\":";
     json += millis();
     json += ",\"freeHeap\":";
     json += (uint32_t)ESP.getFreeHeap();

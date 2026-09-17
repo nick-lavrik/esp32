@@ -443,7 +443,7 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
 </head>
 <body>
 <header>
-  <h1>ESP32 portal</h1>
+  <h1 id="app-title">ESP32 portal</h1>
   <span id="devstate">connecting…</span>
   <span class="spacer"></span>
   <span id="uptime" class="muted"></span>
@@ -480,19 +480,16 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
     </svg>
     <span class="tab-label">Files</span>
   </button>
-  <button data-tab="screen" aria-label="Screen">
+  <!-- hidden за замовчуванням: показує лише pollStatus(), коли "screen" є
+       у списку "modules" з /api/status - на платах без HAS_SCREEN_MIRROR
+       (без спрайта кадру, як esp32-c3, або з 1bpp-панеллю, як esp8266;
+       src/Display.h) дзеркалити нема що, і розділу в прошивці просто немає. -->
+  <button data-tab="screen" aria-label="Screen" id="nav-screen" hidden>
     <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
       <rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
     </svg>
     <span class="tab-label">Screen</span>
-  </button>
-  <button data-tab="console" aria-label="Console">
-    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-      <path d="M4 17l6-6-6-6"/><path d="M12 19h8"/>
-    </svg>
-    <span class="tab-label">Console</span>
   </button>
   <!-- hidden за замовчуванням: показує лише pollStatus(), коли "ecoflow" є
        у списку "modules" з /api/status - на платах без HAS_ECOFLOW_CLIENT
@@ -505,6 +502,15 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
       <rect x="5" y="10" width="7" height="4" fill="currentColor" stroke="none"/>
     </svg>
     <span class="tab-label">EcoFlow</span>
+  </button>
+  <!-- Console - завжди остання вкладка (docs: web-portal SKILL.md, "Порядок
+       вкладок"): це журнал і аварійний доступ, а не робочий розділ. -->
+  <button data-tab="console" aria-label="Console">
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M4 17l6-6-6-6"/><path d="M12 19h8"/>
+    </svg>
+    <span class="tab-label">Console</span>
   </button>
 </nav>
 
@@ -2616,16 +2622,30 @@ function hhmmss(ms) {
 async function pollStatus() {
   try {
     const s = await api("/api/status");
+    // Вшита сторінка однакова для всіх плат, тому назву плати ставимо з
+    // відповіді, а не з build-time шаблону - інакше довелось би тримати
+    // окремий gzip-вміст на кожен env. h1 і title - той самий рядок, обидва
+    // за одним читанням.
+    if (s.env && document.title !== "ESP32 Portal - " + s.env) {
+      document.title = "ESP32 Portal - " + s.env;
+      $("#app-title").textContent = "ESP32 Portal - " + s.env;
+    }
     $("#uptime").textContent = "up " + hhmmss(s.uptimeMs);
     $("#heap").textContent = "heap " + Math.round(s.freeHeap / 1024) + " KB";
     // Вкладка з'являється сама, коли розділ реально є в прошивці - на платах
-    // без HAS_ECOFLOW_CLIENT "ecoflow" у списку "modules" немає (пристрій без
-    // PSRAM, портал+EcoFlow разом не вміщаються - docs/tech_debt.md §4), і
-    // мертву вкладку з вічним 404 показувати нема сенсу. Ніколи не ховаємо
-    // назад - перевіряти достатньо, поки вона ще прихована.
-    const nav = $("#nav-ecoflow");
-    if (nav.hidden && (s.modules || []).includes("ecoflow")) {
-      nav.hidden = false;
+    // без HAS_SCREEN_MIRROR (без спрайта кадру, як esp32-c3, або з 1bpp-панеллю,
+    // як esp8266) "screen" у списку "modules" немає, і показувати вкладку без
+    // фізичного дисплея за нею нема сенсу. Ніколи не ховаємо назад - перевіряти
+    // достатньо, поки вона ще прихована.
+    const navScreen = $("#nav-screen");
+    if (navScreen.hidden && (s.modules || []).includes("screen")) navScreen.hidden = false;
+    // Те саме для EcoFlow - на платах без HAS_ECOFLOW_CLIENT "ecoflow" у
+    // списку "modules" немає (пристрій без PSRAM, портал+EcoFlow разом не
+    // вміщаються - docs/tech_debt.md §4), і мертву вкладку з вічним 404
+    // показувати нема сенсу.
+    const navEcoflow = $("#nav-ecoflow");
+    if (navEcoflow.hidden && (s.modules || []).includes("ecoflow")) {
+      navEcoflow.hidden = false;
       if (onEcoflowTab()) refreshEcoflow();
     }
   } catch (e) { /* ignore */ }
