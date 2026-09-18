@@ -346,6 +346,48 @@ textarea:focus { outline: 1px solid var(--accent); }
 .ecoflow-device summary { cursor: pointer; color: var(--muted); margin-top: 10px; user-select: none; }
 .ecoflow-device table { margin-top: 8px; }
 .ecoflow-device table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+/* Компактний перелік пристроїв у картці EcoFlow на System (#sys-ecoflow-wrap):
+   БЕЗ вкладеної .card - усередині вже картка верхнього рівня, друга рамка тут
+   зайва. dl усередині <details> бере grid-template-columns з правила
+   ".card dl" вище - той самий вигляд, що й на повній картці вкладки EcoFlow.
+   Відступ від "Messages received" вище - на контейнері, не на першому
+   пристрої (:first-of-type), щоб він не зникав, коли пристрій єдиний. */
+#sys-ecoflow-devices { margin-top: 16px; }
+/* Рядки НЕ розділені лінією, поки згорнуті (список читається як таблиця, а
+   не перелік карток) - розділяє сама розгорнута рамка [open], і лише
+   навколо ТОГО пристрою, який зараз розгорнутий. */
+.sys-eco-device { padding: 3px 0; }
+.sys-eco-device[open] { border-top: 0 solid var(--line); border-bottom: 1px solid var(--line);
+  margin: 2px 0; padding: 3px 0 8px 0; }
+.sys-eco-device summary { cursor: pointer; user-select: none; list-style: none; }
+.sys-eco-device summary::-webkit-details-marker { display: none; }
+/* Каретка - руками замість штатного трикутника <summary>: штатний живе лише
+   при display:list-item, а рядок нижче - grid (охайна табличка
+   name/grid/charge, вирівняна однаково в кожному рядку - "fr" рахується від
+   ширини картки, однакової для всіх рядків). */
+.sys-eco-device summary { display: grid; grid-template-columns: 12px 1fr 62px 44px;
+  column-gap: 8px; align-items: baseline; }
+.sys-eco-device summary .eco-caret { color: var(--muted); transition: transform .15s; }
+.sys-eco-device[open] summary .eco-caret { transform: rotate(90deg); }
+.sys-eco-device summary .eco-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-eco-device summary .eco-charge, .sys-eco-device summary .eco-remain { text-align: right;
+  font-variant-numeric: tabular-nums; }
+/* Left - лише коли справді є місце (той самий поріг ширини, що ecoflow-wide
+   в Overview-таблиці вкладки EcoFlow) - інакше четверта колонка ламає
+   охайність таблички на вузькій картці. */
+.sys-eco-device summary .eco-remain { display: none; }
+@media (min-width: 1300px) {
+  .sys-eco-device summary { grid-template-columns: 12px 1fr 62px 44px 56px; }
+  .sys-eco-device summary .eco-remain { display: inline; }
+}
+.sys-eco-device dl { margin-top: 8px; }
+/* "Devices" на System (renderEcoflowSystemSummary): "N online · N offline"
+   одним рядком, поки влазить у ширину картки - flex-wrap сам переносить
+   категорію на новий рядок, коли ні, без підрахунку ширини в JS. Крапка -
+   ::after на самому елементі, тому лишається приклеєною до "свого" рядка й
+   при переносі. */
+.eco-counts { display: flex; flex-wrap: wrap; column-gap: 6px; row-gap: 2px; }
+.eco-counts span:not(:last-child)::after { content: " ·"; color: var(--muted); }
 /* Клікабельний увесь рядок - як у переліку команд: клік відкриває View, і
    цілитись у маленьку кнопку не треба. Рядки-заглушки ("Loading…", "Nothing
    matches.") атрибута не мають, тому не підсвічуються й не клікаються. */
@@ -565,6 +607,20 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
   <div class="card">
   <h2>Network</h2>
   <dl id="sys-network"></dl>
+  </div>
+
+  <!-- Прихована, поки в /api/status.modules немає "ecoflow" (та сама умова,
+       що відкриває #nav-ecoflow, pollStatus()) - на платах без
+       HAS_ECOFLOW_CLIENT картки просто нема. Огляд без переходу на окрему
+       вкладку: згорнутий рядок пристрою - охайна табличка name/grid/charge
+       (ecoSysDeviceRow), розгорнутий <details> додає ті самі поля, що повна
+       картка на вкладці EcoFlow (ecoDeviceDetailRows - спільна функція, без
+       дублювання розмітки). Одразу після Network, а не в кінці ряду карток -
+       перше, що варто перевірити після мережі. -->
+  <div class="card" id="sys-ecoflow-wrap" hidden>
+  <h2>EcoFlow <span id="sys-ecoflow-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+  <dl id="sys-ecoflow-summary"></dl>
+  <div id="sys-ecoflow-devices"></div>
   </div>
 
   <div class="card">
@@ -978,7 +1034,10 @@ function activateTab(name) {
   document.querySelectorAll("section").forEach((s) => s.classList.toggle("active", s.id === "tab-" + name));
   // Свіжий знімок одразу при відкритті - щоб вкладка не показувала старе,
   // поки не настане наступний тік.
-  if (name === "system") { pollStatus(); refreshWifiStatus(); refreshSystemInfo(); }
+  if (name === "system") {
+    pollStatus(); refreshWifiStatus(); refreshSystemInfo();
+    if (!$("#sys-ecoflow-wrap").hidden) refreshEcoflow();
+  }
   if (name === "wifi") refreshWifi();
   if (name === "commands") refreshShortcuts();
   if (name === "screen") screenOpen();
@@ -2819,9 +2878,13 @@ function ecoTableRow(d, index) {
   </tr>`;
 }
 
-function ecoDeviceCard(d) {
+// Спільний перелік dt/dd-рядків пристрою - і повна картка на вкладці EcoFlow
+// (ecoDeviceCard), і компактний блок на System (ecoSysDeviceRow) розгортають
+// той самий список у своїй обгортці, щоб поля не розходились між копіями
+// (DRY - CLAUDE.md).
+function ecoDeviceDetailRows(d) {
   const acVolts = ecoAcVolts(d);
-  const rows = [
+  return [
     ["Presence", ecoPresence(d.presence), true],
     ["Charge", ecoCharge(d)],
     ["Grid", ecoRow(ecoGrid(d.grid, d.gridInferred),
@@ -2835,14 +2898,16 @@ function ecoDeviceCard(d) {
     ["Last message", ecoRow(escapeHtml(ecoAgo(d.ageMs)), d.messageCount + " message(s)"), true],
     ["REST snapshot", d.snapshotAvailable ? "available" : "not allowed by device"],
   ].map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
+}
 
+function ecoDeviceCard(d) {
   const paramCount = Object.keys(d.params).length;
   const dropped = d.droppedParams > 0 ? `, ${d.droppedParams} dropped (per-device limit)` : "";
   return `<div class="card ecoflow-device" data-sn="${escapeHtml(d.serialNumber)}">
     <div class="row" style="justify-content:space-between">
       <b>${escapeHtml(d.name)}</b><span class="muted">${escapeHtml(d.serialNumber)} · ${escapeHtml(d.type)}</span>
     </div>
-    <dl>${rows}</dl>
+    <dl>${ecoDeviceDetailRows(d)}</dl>
     <details${ecoOpenDetails.has(d.serialNumber) ? " open" : ""}>
       <summary>Raw parameters (${paramCount}${dropped}, capture: ${d.captureAll ? "all" : "important only"})</summary>
       ${ecoParamsTable(d.params)}
@@ -2850,11 +2915,81 @@ function ecoDeviceCard(d) {
   </div>`;
 }
 
+// Куди фактично йде MQTT-сесія - proxy (rpi5, plain) чи прямий TLS до хмари
+// EcoFlow (brokerHost/brokerPort/viaProxy - EcoflowClient::brokerHost(),
+// той самий хост, що бачить makeMqttConfig() на платі). Спільне для повної
+// вкладки EcoFlow (renderEcoflow) і компактного блоку на System
+// (renderEcoflowSystemSummary) - DRY.
+function ecoBrokerText(data) {
+  return data.brokerHost ? data.brokerHost + ":" + data.brokerPort : "–";
+}
+function ecoTransportText(data) {
+  return data.viaProxy ? "proxy (plain MQTT)" : "direct (TLS)";
+}
+
+// Які пристрої розгорнуті в компактному блоці System - окремий Set від
+// ecoOpenDetails (вкладка EcoFlow): це різні <details>, той самий пристрій
+// може бути розгорнутий в одному місці й згорнутий в іншому.
+const ecoSysOpenDetails = new Set();
+
+// Згорнутий рядок - охайна табличка (grid у CSS, ".sys-eco-device summary"),
+// не вільний текст із " · ": caret замість штатного трикутника <summary>
+// (він живе лише при display:list-item, а тут grid), Left - лише на
+// широкому екрані (та сама межа, що .ecoflow-wide в Overview-таблиці) - на
+// вузькій картці четверта колонка ламала б табличку.
+function ecoSysDeviceRow(d) {
+  return `<details class="sys-eco-device"${ecoSysOpenDetails.has(d.serialNumber) ? " open" : ""}
+      data-sn="${escapeHtml(d.serialNumber)}">
+    <summary>
+      <span class="eco-caret">▸</span>
+      <span class="eco-name">${escapeHtml(d.name)}</span>
+      ${ecoGrid(d.grid, d.gridInferred)}
+      <span class="eco-charge">${ecoChargeRounded(d)}</span>
+      <span class="eco-remain">${ecoRemain(d.remainTimeMinutes)}</span>
+    </summary>
+    <dl>${ecoDeviceDetailRows(d)}</dl>
+  </details>`;
+}
+
+function renderEcoflowSystemSummary(data) {
+  const online = data.devices.filter((d) => d.presence === "online").length;
+  const offline = data.devices.filter((d) => d.presence === "offline").length;
+  const unknown = data.devices.length - online - offline;
+  // Нульові категорії не показуємо взагалі. .eco-counts - flex-wrap (CSS):
+  // "3 online · 1 offline" лишається одним рядком, поки влазить, і переносить
+  // категорії на власні рядки лише тоді, коли справді не влазить - без
+  // підрахунку ширини в JS.
+  const counts = [[online, "online"], [offline, "offline"], [unknown, "unknown"]]
+    .filter(([n]) => n > 0)
+    .map(([n, label]) => `<span>${n} ${label}</span>`)
+    .join("");
+
+  $("#sys-ecoflow-summary").innerHTML = [
+    ["Connection", data.connected ? "connected" : "disconnected"],
+    ["Broker", ecoBrokerText(data)],
+    ["Connection type", ecoTransportText(data)],
+    ["Devices", `<span class="eco-counts">${counts}</span>`, true],
+    ["Messages received", String(data.messageCount)],
+  ].map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(v)) + "</dd>").join("");
+
+  $("#sys-ecoflow-count").textContent = data.devices.length + " device(s)";
+  const box = $("#sys-ecoflow-devices");
+  ecoSysOpenDetails.clear();
+  box.querySelectorAll(".sys-eco-device").forEach((el) => {
+    if (el.open) ecoSysOpenDetails.add(el.dataset.sn);
+  });
+  box.innerHTML = data.devices.length === 0
+    ? '<p class="muted">No devices configured.</p>'
+    : data.devices.map(ecoSysDeviceRow).join("");
+}
+
 function renderEcoflow(data) {
   $("#ecoflow-status").innerHTML = [
     ["Connected", data.connected ? "yes" : "no"],
     ["MQTT session", data.running ? "running" : "stopped"],
     ["Channel", data.channel],
+    ["Broker", ecoBrokerText(data)],
+    ["Connection type", ecoTransportText(data)],
     ["Account", data.account || "–"],
     ["Messages received", String(data.messageCount)],
     ["Last topic", data.lastTopic || "–"],
@@ -2881,7 +3016,12 @@ function renderEcoflow(data) {
 
 async function refreshEcoflow() {
   try {
-    renderEcoflow(await api("/api/ecoflow/status"));
+    const data = await api("/api/ecoflow/status");
+    renderEcoflow(data);
+    // Той самий знімок живить і компактний блок на System - другого запиту
+    // під нього не заводимо (DRY), рендер лише перезаписує DOM, тому дешевий
+    // навіть коли ця вкладка зараз не видима.
+    renderEcoflowSystemSummary(data);
   } catch (e) { /* пристрій міг тимчасово не відповісти - наступний тік спробує знову */ }
 }
 
@@ -2920,11 +3060,13 @@ async function pollStatus() {
     // Те саме для EcoFlow - на платах без HAS_ECOFLOW_CLIENT "ecoflow" у
     // списку "modules" немає (пристрій без PSRAM, портал+EcoFlow разом не
     // вміщаються - docs/tech_debt.md §4), і мертву вкладку з вічним 404
-    // показувати нема сенсу.
+    // показувати нема сенсу. Той самий прапорець відкриває й компактний блок
+    // на System (#sys-ecoflow-wrap) - одна умова на обидва місця показу.
     const navEcoflow = $("#nav-ecoflow");
     if (navEcoflow.hidden && (s.modules || []).includes("ecoflow")) {
       navEcoflow.hidden = false;
-      if (onEcoflowTab()) refreshEcoflow();
+      $("#sys-ecoflow-wrap").hidden = false;
+      if (onEcoflowTab() || onSystemTab()) refreshEcoflow();
     }
   } catch (e) { /* ignore */ }
 }
@@ -2942,7 +3084,10 @@ refreshSystemInfo();
 // 3 і 5 секунд незалежно від того, чи їх видно.
 poller(refreshWifiStatus, 5000, () => onWifiTab() || onSystemTab());
 poller(pollStatus, 10000);
-poller(refreshEcoflow, 5000, onEcoflowTab);
+// Той самий знімок потрібен і повній вкладці EcoFlow, і компактному блоку на
+// System (renderEcoflowSystemSummary у refreshEcoflow) - тому опитує, поки
+// видима будь-яка з двох.
+poller(refreshEcoflow, 5000, () => onEcoflowTab() || onSystemTab());
 </script>
 </body>
 </html>

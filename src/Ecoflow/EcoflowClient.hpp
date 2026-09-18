@@ -52,6 +52,18 @@ public:
         // Логін застосунку - потрібен лише команді, що перевипускає app-креденшели.
         const char *email = nullptr;
         const char *emailPassword = nullptr;
+
+        // Якщо задано (!= nullptr) - MQTT-з'єднання йде через ЛОКАЛЬНИЙ non-TLS
+        // proxy (docs/tech_debt.md, "MQTT-проксі" стадія 1) замість прямого TLS
+        // до mqttHost:mqttPort. mqttUsername й далі визначає КАНАЛ і схему
+        // топіків (channelFromAccount/buildRootTopic/buildClientId) - справжню
+        // автентифікацію на брокері EcoFlow вже зробив сам proxy (mosquitto,
+        // remote_username/password). proxyUsername/proxyPassword - ОКРЕМІ,
+        // локальні LAN-креденшли для listener'а proxy, не облікові дані EcoFlow.
+        const char *proxyHost = nullptr;
+        uint16_t proxyPort = 1883;
+        const char *proxyUsername = nullptr;
+        const char *proxyPassword = nullptr;
     };
 
     using QuotaCallback = std::function<void(const String &serialNumber, JsonDocument &payload)>;
@@ -85,6 +97,15 @@ public:
 
     // Запас стеку мережевого таска (діагностика для підбору taskStackSize).
     size_t networkStackHeadroom() const { return _mqtt.networkTaskStackHeadroom(); }
+
+    // Реальні хост/порт MQTT-сесії - те саме, що бачить makeMqttConfig(): proxy
+    // (Config::proxyHost), якщо задано, інакше пряма TLS-сесія до
+    // mqttHost:mqttPort. На відміну від ECOFLOW_MQTT_HOST (build flag, завжди
+    // офіційний брокер акаунта) - для порталу/діагностики, де важливо саме
+    // ФАКТИЧНЕ місце підключення.
+    const char *brokerHost() const { return _config.proxyHost != nullptr ? _config.proxyHost : _config.mqttHost; }
+    uint16_t brokerPort() const { return _config.proxyHost != nullptr ? _config.proxyPort : _config.mqttPort; }
+    bool viaProxy() const { return _config.proxyHost != nullptr; }
 
     // Викликати з головного loop() - розбирає чергу вхідних повідомлень і
     // виконує колбеки в головному потоці.

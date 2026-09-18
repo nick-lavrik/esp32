@@ -63,9 +63,165 @@ fallback, якщо приватний API колись зламається.
 
 **MQTT-креденшели стабільні між викликами** — перевірено двома логінами поспіль. JWT
 потрібен лише щоб їх отримати, тому 30-денний TTL на постійну роботу не впливає:
-випустив раз (`ecoflow-app-login`), поклав у `secrets.ini` — і все.
+випустив раз (`ecoflow-login`), поклав у `secrets.ini` — і все.
 
 > `port` тут приходить **рядком** (`"8883"`), на відміну від Open Platform, де це число.
+
+### Перевипуск приватних (App) MQTT-креденшелів — покроково
+
+Коли потрібно: EcoFlow іноді відкликає креденшели без попередження (тиха
+відмова — `Connection Refused: not authorised` у лозі/`mosquitto.log`, див.
+пам'ять проєкту "EcoFlow: відкликані ключі"), змінився email/пароль
+акаунта, або весь стенд (проксі + плата) розгортається на новому обладнанні
+з нуля і `secrets.ini` ще порожній.
+
+#### Спосіб A — з наявної плати (найпростіше, якщо плата вже в мережі)
+
+Плата має самостійно виконати обидва HTTPS-запити нижче — потрібні лише
+`ecoflow_login`/`ecoflow_password` (email/пароль акаунта), уже зашиті як
+`ECOFLOW_LOGIN`/`ECOFLOW_PASSWORD` (`[common]` у `platformio.ini`, отже
+доступно на кожному env, де є `HAS_ECOFLOW_CLIENT`).
+
+Команда (серійна консоль, або портал: вкладка Console → поле команди, або
+`POST /api/commands/exec` з `cmd=ecoflow-login`):
+
+```
+ecoflow-login
+```
+
+Асинхронно, у власному таску (REST + TLS-хендшейк не влазять комфортно в
+стек головного `loop()`); MQTT-сесія на час запиту призупиняється
+(`withMqttSuspended`, ~2-5 с — телеметрія на ці кілька секунд просто не
+йде, це нормально). Результат з'являється в лозі:
+
+```
+[I][ecoflow] url=mqtt-e.ecoflow.com port=8883 protocol=mqtts
+[I][ecoflow] account  = app-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+[I][ecoflow] password = xxxxxxxxxxxxxxxxxxxxxxxx
+[I][ecoflow] user id  = xxxxxxxxxx  <- потрібен для clientId ANDROID_..._<userId>
+```
+
+Ті самі три значення одразу зберігаються в NVS
+(`EcoflowClient::onAppCredentials` → `configStorage`, `src/main.cpp`) — на
+випадок, якщо рядки в лозі прогорнулись. Namespace дорівнює env
+(`PIO_PIOENV`, напр. `esp32-c3`), ключі `ecoflow.acc`/`ecoflow.pass`/
+`ecoflow.uid` — портал, вкладка **NVS**, обрати відповідний namespace у
+випадаючому списку. Якщо щойно випущений `account` відрізняється від уже
+зашитого в прошивку — плата сама пише в лог попередження про це
+(`build-time account differs ... put the values above into secrets.ini and
+reflash`).
+
+**Застосування — виключно вручну, автоматики немає.** `makeEcoflowConfig()`
+(`src/main.cpp`) читає лише build-time прапорці
+(`ECOFLOW_MQTT_USERNAME`/`_PASSWORD`/`ECOFLOW_USER_ID`) — NVS-копія існує
+лише для того, щоб людина мала звідки їх переписати. Перенести три
+значення в `secrets.ini`:
+
+```ini
+ecoflow_mqtt_username = "app-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+ecoflow_mqtt_password = "xxxxxxxxxxxxxxxxxxxxxxxx"
+ecoflow_user_id       = "xxxxxxxxxx"
+```
+
+і перезібрати + перепрошити **кожен** env, що ходить цим акаунтом (не лише
+той, з якого був запущений `ecoflow-login`):
+
+```sh
+pio run -e esp32-c3 -t upload --upload-port <порт цієї плати>
+```
+
+#### Спосіб B — чистим `curl`, без жодної плати
+
+Потрібно, коли плати ще нема (новий стенд з нуля), вона не в мережі, або
+креденшели хочеться перевірити окремо від прошивки. Відтворює той самий
+двокроковий запит, що робить `EcoflowAppAuthClient`
+(`src/Ecoflow/EcoflowAppAuthClient.cpp`) — байт-у-байт ті самі URL,
+заголовки й поля тіла.
+
+**1. Base64 пароля** (API приймає лише так — сирий пароль відхилить):
+
+```sh
+PASS_B64=$(printf '%s' '<пароль акаунта EcoFlow>' | base64 -w0)
+```
+
+**2. Логін** — `POST /auth/login`, у відповідь JWT і `userId`:
+
+```sh
+curl -s -X POST 'https://api.ecoflow.com/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "email": "<email акаунта EcoFlow>",
+    "password": "'"$PASS_B64"'",
+    "scene": "IOT_APP",
+    "userType": "ECOFLOW",
+    "os": "android"
+  }' | tee /tmp/ecoflow_login.json | python3 -m json.tool
+```
+
+Очікується `"code": "0"` і в `data`: `token` (JWT) та `user.userId`. Будь-
+яке інше значення `code` — дивитись `message` в тій самій відповіді
+(невірний пароль, заблокований/недійсний акаунт тощо).
+
+**3. Витягти `token`/`userId`** без ручного копіювання з JSON:
+
+```sh
+TOKEN=$(python3 -c "import json;print(json.load(open('/tmp/ecoflow_login.json'))['data']['token'])")
+USER_ID=$(python3 -c "import json;print(json.load(open('/tmp/ecoflow_login.json'))['data']['user']['userId'])")
+```
+
+**4. Сертифікація** — `GET /iot-auth/app/certification` з тим-таки JWT,
+у відповідь справжні MQTT-креденшели:
+
+```sh
+curl -s 'https://api.ecoflow.com/iot-auth/app/certification' \
+  -H 'lang: en_US' \
+  -H "authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+Очікується `"code": "0"` і в `data`:
+
+| Поле відповіді | Куди йде в `secrets.ini` | Примітка |
+| :--- | :--- | :--- |
+| `certificateAccount` | `ecoflow_mqtt_username` | завжди з префіксом `app-` |
+| `certificatePassword` | `ecoflow_mqtt_password` | |
+| `url` | (звірити з `ecoflow_mqtt_host`) | зазвичай не змінюється, `mqtt-e.ecoflow.com` |
+| `port` | (звірити з `ecoflow_mqtt_port`) | приходить **рядком** (`"8883"`), не числом |
+| — (з кроку 3, `USER_ID`) | `ecoflow_user_id` | значення з логіну, не з цієї відповіді |
+
+**5. Прибрати сліди.** JWT і сирий пароль більше не потрібні — не лишати
+їх на диску чи в історії шелу:
+
+```sh
+shred -u /tmp/ecoflow_login.json
+unset PASS_B64 TOKEN USER_ID
+history -d $(history 1) 2>/dev/null  # якщо пароль потрапив у ~/.bash_history
+```
+
+**6. Ті самі три значення — у `secrets.ini`**, і той самий rebuild +
+reflash кожного залежного env, що й у способі A.
+
+#### Спільне для обох способів
+
+- **Формат `clientId` суворий.** І основний MQTT-клієнт плати
+  (`buildClientId()`, `src/Ecoflow/EcoflowClient.cpp`), і `remote_clientid`
+  mosquitto-проксі на rpi5 (`docs/ecoflow_mqtt_proxy_setup.md`) мають бути
+  `ANDROID_<будь-що>_<userId>` — без префікса `ANDROID_`, з `IOS_`, або з
+  чужим `userId` брокер миттєво відповідає `Connection Refused: not
+  authorised`. `<будь-що>` — довільне, але має лишатись УНІКАЛЬНИМ у межах
+  акаунта (інакше брокер по черзі вибиває клієнтів з однаковим id).
+- **Не перевипускати "про всяк випадок".** Креденшели стабільні між
+  викликами (перевірено двома логінами поспіль) — новий випуск виправданий
+  лише коли старі реально відмовили, а не як профілактика.
+- **API неофіційний.** Обидва запити йдуть до `api.ecoflow.com` — це
+  внутрішній API мобільного застосунку, задокументований лише через
+  реверс-інжиніринг; EcoFlow може змінити його в будь-якому релізі без
+  попередження (та сама причина, з якої канал зветься "приватним", на
+  відміну від Open Platform).
+
+**Тех.борг:** ручний `curl`-рецепт вище надійний, але багатокроковий і
+чутливий до людської помилки (забути base64, переплутати поле відповіді) —
+`docs/tech_debt.md` має пункт на shell-скрипт, що робить усе це одним
+викликом.
 
 ### Формула підпису — різна для GET і POST
 
@@ -215,7 +371,7 @@ EcoFlow віддає **одне** поле `remainTime` і на заряд, і �
 | `ecoflow-capture <on\|off> [sn\|index\|all]` | захоплення ВСІХ полів, не лише білого списку |
 | `ecoflow-sync` | REST-знімок повного стану для всіх пристроїв |
 | `ecoflow-devices` | список пристроїв із хмари (звірка з прошитим переліком) |
-| `ecoflow-app-login` | випуск app-креденшелів (email+password → account/password/userId) |
+| `ecoflow-login` | випуск приватних (App) MQTT-креденшелів (email+password → account/password/userId), покроково - вище |
 | `ecoflow-cert` | перевипуск Open Platform креденшелів |
 | `ecoflow-start` / `ecoflow-stop` | підняти / прибрати MQTT-сесію (звільняє ~57 КБ) |
 | `ecoflow-auto [on\|off]` | підключатись на старті (NVS, діє з наступного boot) |

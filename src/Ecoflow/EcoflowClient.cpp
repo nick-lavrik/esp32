@@ -51,18 +51,42 @@ String EcoflowClient::buildClientId(const Config &config) {
 MqttConfig EcoflowClient::makeMqttConfig(const Config &config, const std::string &rootTopic,
                                         const String &clientId) {
   MqttConfig mqttConfig;
-  mqttConfig.host = config.mqttHost;
-  mqttConfig.port = config.mqttPort;
   mqttConfig.clientId = clientId.c_str();
 
-  mqttConfig.useAuth = true;
-  mqttConfig.username = config.mqttUsername;
-  mqttConfig.password = config.mqttPassword;
+  if (config.proxyHost != nullptr) {
+    // Стадія 1 MQTT-проксі (docs/tech_debt.md): TLS уже знято проксі,
+    // сюди приходить plain MQTT довіреною LAN. ЛОКАЛЬНІ креденшли, не
+    // облікові дані EcoFlow (mqttUsername/mqttPassword тут НЕ йдуть на
+    // дріт - вони й далі лише визначають канал/схему топіків вище).
+    mqttConfig.host = config.proxyHost;
+    mqttConfig.port = config.proxyPort;
+    mqttConfig.useTls = false;
+    mqttConfig.useAuth = config.proxyUsername != nullptr;
+    mqttConfig.username = config.proxyUsername;
+    mqttConfig.password = config.proxyPassword;
+    // Без mbedTLS-хендшейку 8 КБ (дефолт MqttConfig) вистачає з запасом -
+    // немає сенсу тримати ті самі 16 КБ, що й для TLS-шляху нижче.
+    mqttConfig.taskName = "ecoflow-proxy-net";
+  } else {
+    mqttConfig.host = config.mqttHost;
+    mqttConfig.port = config.mqttPort;
+    mqttConfig.useAuth = true;
+    mqttConfig.username = config.mqttUsername;
+    mqttConfig.password = config.mqttPassword;
 
-  // Брокер EcoFlow приймає лише mqtts. caCert не задаємо -> setInsecure();
-  // TODO(production): закріпити CA-сертифікат, як і в EcoflowAuthClient.
-  mqttConfig.useTls = true;
-  mqttConfig.caCert = nullptr;
+    // Брокер EcoFlow приймає лише mqtts. caCert не задаємо -> setInsecure();
+    // TODO(production): закріпити CA-сертифікат, як і в EcoflowAuthClient.
+    mqttConfig.useTls = true;
+    mqttConfig.caCert = nullptr;
+
+    // 16 КБ. Спроба зрізати до 10 КБ (за заміром headroom 12 480 B з 16 384, тобто
+    // пік ~3.9 КБ) закінчилась ЗАВИСАННЯМ плати без panic-логу. Причина, найпевніше,
+    // у шляху, якого замір не покривав: 'DNS Failed' -> 'Connect fail' -> повторний
+    // хендшейк, де стек глибший за стабільну сесію. 6 КБ економії не варті цього -
+    // тим більше що RGB332-фон уже звільнив ~55 КБ.
+    mqttConfig.taskStackSize = 16 * 1024;
+    mqttConfig.taskName = "ecoflow-net";
+  }
 
   // Топіки EcoFlow передаються брокеру байт-у-байт разом із провідним '/'
   // (MqttKeyGenerator його зрізав би - див. MqttConfig::useKeyGenerator).
@@ -73,14 +97,6 @@ MqttConfig EcoflowClient::makeMqttConfig(const Config &config, const std::string
   // запасом: найбільше реально бачене повідомлення ~2 КБ. MQTT і так не
   // гарантує доставку, тож обрізаний викид - не втрата даних.
   mqttConfig.rootSubscribeBufferSize = 4 * 1024;
-
-  // 16 КБ. Спроба зрізати до 10 КБ (за заміром headroom 12 480 B з 16 384, тобто
-  // пік ~3.9 КБ) закінчилась ЗАВИСАННЯМ плати без panic-логу. Причина, найпевніше,
-  // у шляху, якого замір не покривав: 'DNS Failed' -> 'Connect fail' -> повторний
-  // хендшейк, де стек глибший за стабільну сесію. 6 КБ економії не варті цього -
-  // тим більше що RGB332-фон уже звільнив ~55 КБ.
-  mqttConfig.taskStackSize = 16 * 1024;
-  mqttConfig.taskName = "ecoflow-net";
 
   // LWT не задаємо: брокер EcoFlow не дозволяє публікацію в довільні топіки.
 

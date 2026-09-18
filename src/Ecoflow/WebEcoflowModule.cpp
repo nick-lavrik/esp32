@@ -75,6 +75,9 @@ void WebEcoflowModule::registerRoutes(AsyncWebServer& server, WebPortal& portal)
     json += ",\"running\":" + webjson::boolean(_client.isRunning());
     json += ",\"channel\":" + webjson::quote(EcoflowClient::channelName(_client.channel()));
     json += ",\"account\":" + webjson::quote(_client.account());
+    json += ",\"brokerHost\":" + webjson::quote(_client.brokerHost() ? _client.brokerHost() : "");
+    json += ",\"brokerPort\":" + String(_client.brokerPort());
+    json += ",\"viaProxy\":" + webjson::boolean(_client.viaProxy());
     json += ",\"messageCount\":" + String(_client.messageCount());
     json += ",\"lastTopic\":" + webjson::quote(_client.lastTopic());
     json += ",\"lastError\":" + webjson::quote(_client.lastError());

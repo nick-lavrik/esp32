@@ -373,6 +373,20 @@ EcoflowClient::Config makeEcoflowConfig() {
   // Окремий id від основного MQTT-клієнта: збіг id у межах акаунта змушує
   // брокер вибивати клієнтів по черзі.
   config.clientId = MQTT_CLIENT_ID "-ecoflow";
+#if defined(ECOFLOW_MQTT_PROXY_HOST)
+  // Стадія 1 підтверджена (docs/tech_debt.md, "MQTT-проксі"): на платах без
+  // PSRAM пряме TLS-з'єднання до mqtt-e.ecoflow.com і портал разом не
+  // влазять у heap (~57 КБ на mbedTLS-буфери). TLS переносимо на
+  // mosquitto-проксі (rpi5, тримає ОДНУ TLS-сесію на весь LAN), сюди
+  // приходить лише розшифрований plain MQTT. mqttUsername/mqttHost вище й
+  // далі визначають КАНАЛ і схему топіків (buildRootTopic/buildClientId) -
+  // це реальний акаунт EcoFlow, автентифікація на його брокері вже зроблена
+  // самим проксі. proxyUsername/Password - ОКРЕМІ, ЛОКАЛЬНІ LAN-креденшли
+  // listener'а на rpi5, не облікові дані EcoFlow.
+  config.proxyHost = ECOFLOW_MQTT_PROXY_HOST;
+  config.proxyUsername = ECOFLOW_MQTT_PROXY_USERNAME;
+  config.proxyPassword = ECOFLOW_MQTT_PROXY_PASSWORD;
+#endif
   return config;
 }
 
@@ -1496,6 +1510,7 @@ void setupEcoflow() {
       _logger.info("request sent, result will appear in the log (MQTT suspended ~2-5 s)");
     }
   );
+
 }
 #endif
 
