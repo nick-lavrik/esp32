@@ -1,0 +1,15 @@
+# Список повних топіків get/latestQuotas для "тихих" пристроїв App Private
+# каналу - по одному топіку на рядок, "#" на початку рядка - коментар.
+#
+# Формат топіка: /app/{userId}/{sn}/thing/property/get
+#   {userId} - той самий, що в remote_clientid бриджа
+#              (ANDROID_rpi5bridge_{userId}, ecoflow-proxy.conf), НЕ
+#              certificateAccount/app-...
+#   {sn}     - серійний номер пристрою (EcoflowDeviceRegistry.cpp, kDevices)
+#
+# Як перевірити, що топік справді працює для нового акаунта/пристрою -
+# docs/tech_debt.md, "Ручний тригер get/latestQuotas підтверджено".
+
+# DELTA 2 (R331ZEB4ZEBW0026) - аномально рідко шле дельти без цього тригера,
+# docs/tech_debt.md, "DELTA 2: аномально мало MQTT-повідомлень".
+/app/1595134606455103490/R331ZEB4ZEBW0026/thing/property/get

@@ -1,0 +1,8 @@
+[Unit]
+Description=EcoFlow MQTT-proxy keep-alive (get/latestQuotas) for quiet devices
+After=mosquitto.service
+Requires=mosquitto.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ecoflow-keepalive.sh

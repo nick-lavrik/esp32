@@ -346,6 +346,36 @@ textarea:focus { outline: 1px solid var(--accent); }
 .ecoflow-device summary { cursor: pointer; color: var(--muted); margin-top: 10px; user-select: none; }
 .ecoflow-device table { margin-top: 8px; }
 .ecoflow-device table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+/* Фото пристрою у вільному місці справа - лише водяний знак за текстом
+   (z-index: -1 у власному stacking context картки, .card фону не має, тож
+   контент лишається зверху), тому не заважає читати dl навіть якщо довге
+   значення "заїде" під картинку. Малюнок - лише для картки з відомою
+   моделлю (data-model, ECO_DEVICE_IMAGE_SLUG вище); невідома модель -
+   без фото, а не з биткою заглушкою. */
+/* z-index: 0 (не лише position: relative) - без нього сам елемент НЕ
+   утворює stacking context, і z-index: -1 у ::before "тікає" з картки в
+   контекст предка (body) - фото ховається під усією сторінкою, а не лише
+   під текстом картки. Перевірено вживу - без z-index тут фото не видно
+   зовсім. */
+.ecoflow-device { position: relative; z-index: 0; }
+/* top+height, а НЕ top+bottom: картка розтягується вниз, коли відкрито
+   "Raw parameters" (details/table нижче), і з bottom:4px водяний знак
+   центрувався б по всій новій висоті - тобто "з'їжджав" під таблицю і
+   ставав невидимим у верхній частині картки. Фіксована висота тримає
+   картинку біля заголовка завжди, незалежно від details.
+   top: 32px - НЕ 4px: перший рядок картки (назва + серійник/тип, .row) сам
+   займає верхні ~28px, і "high" фото (DELTA 2/mini - вузький вертикальний
+   кадр, contain розтягує його на всю висоту боксу) своїм верхнім краєм
+   наїжджало на цей рядок і забивало текст серійника. Побачено на живому
+   скріншоті - не теоретичний випадок. */
+.ecoflow-device[data-model]::before {
+  content: ""; position: absolute; z-index: -1; top: 48px; right: 10px; height: 130px;
+  width: 40%; max-width: 150px; background-repeat: no-repeat; background-position: right center;
+  background-size: contain; opacity: 0.5; pointer-events: none;
+}
+.ecoflow-device[data-model="delta2"]::before { background-image: url("/img/delta2.webp"); }
+.ecoflow-device[data-model="delta-mini"]::before { background-image: url("/img/delta-mini.webp"); }
+.ecoflow-device[data-model="delta-pro"]::before { background-image: url("/img/delta-pro.webp"); }
 /* Компактний перелік пристроїв у картці EcoFlow на System (#sys-ecoflow-wrap):
    БЕЗ вкладеної .card - усередині вже картка верхнього рівня, друга рамка тут
    зайва. dl усередині <details> бере grid-template-columns з правила
@@ -2900,10 +2930,17 @@ function ecoDeviceDetailRows(d) {
   ].map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
 }
 
+// Модель -> слаг файлу картинки в /img/ (assets/www/img/, tools/gen_web_assets.py).
+// Ключі - точні рядки ecoflowDeviceTypeName() (EcoflowDeviceRegistry.cpp); нового
+// типу без картинки тут просто нема - картка лишається без фонового фото.
+const ECO_DEVICE_IMAGE_SLUG = { "DELTA 2": "delta2", "DELTA mini": "delta-mini", "DELTA Pro": "delta-pro" };
+
 function ecoDeviceCard(d) {
   const paramCount = Object.keys(d.params).length;
   const dropped = d.droppedParams > 0 ? `, ${d.droppedParams} dropped (per-device limit)` : "";
-  return `<div class="card ecoflow-device" data-sn="${escapeHtml(d.serialNumber)}">
+  const imgSlug = ECO_DEVICE_IMAGE_SLUG[d.type] || "";
+  const imgAttr = imgSlug ? ` data-model="${imgSlug}"` : "";
+  return `<div class="card ecoflow-device" data-sn="${escapeHtml(d.serialNumber)}"${imgAttr}>
     <div class="row" style="justify-content:space-between">
       <b>${escapeHtml(d.name)}</b><span class="muted">${escapeHtml(d.serialNumber)} · ${escapeHtml(d.type)}</span>
     </div>

@@ -235,8 +235,118 @@ curl -s http://<IP плати>/api/ecoflow/status | python3 -m json.tool
 # connected: true, viaProxy: true, brokerHost: "<IP сервера>"
 ```
 
+## Крок 10 — keep-alive для «тихих» пристроїв (за потреби)
+
+Лише якщо в акаунті є пристрій, що на App Private каналі шле дельти вкрай
+рідко без активного запиту (у продакшні цього репозиторію - DELTA 2). Не
+обов'язковий крок для базового проксі - без нього все з кроків 1-9 працює
+як є. Навіщо взагалі потрібен цей keep-alive і чому інтервал саме 600с -
+`docs/tech_debt.md`, "DELTA 2: план інтеграції keep-alive (`ecoflow-keepalive`)".
+
+### Крок 10.1 — увімкнути health-notification бриджа
+
+У вже наявному `/etc/mosquitto/conf.d/ecoflow-proxy.conf` замінити:
+
+```
+notifications false
+```
+
+на
+
+```
+notifications true
+notifications_local_only true
+```
+
+`sudo systemctl restart mosquitto`.
+
+### Крок 10.2 — скрипт і список цілей
+
+Файли цього репозиторію - `tools/ecoflow-proxy/`:
+
+```sh
+scp tools/ecoflow-proxy/ecoflow-keepalive.sh tools/ecoflow-proxy/targets.conf.example <server>:/tmp/
+```
+
+На сервері:
+
+```sh
+sudo install -m 755 -o root -g root /tmp/ecoflow-keepalive.sh /usr/local/bin/ecoflow-keepalive.sh
+sudo mkdir -p /etc/ecoflow-keepalive
+sudo install -m 644 -o root -g root /tmp/targets.conf.example /etc/ecoflow-keepalive/targets.conf
+rm -f /tmp/ecoflow-keepalive.sh /tmp/targets.conf.example
+```
+
+`targets.conf` уже містить робочий рядок для DELTA 2 цього акаунта - для
+іншого акаунта/пристрою відредагувати `/etc/ecoflow-keepalive/targets.conf`
+за форматом, описаним у коментарях файлу (як перевірити новий топік -
+`docs/tech_debt.md`, "Ручний тригер get/latestQuotas підтверджено").
+
+### Крок 10.3 — systemd unit + timer
+
+```sh
+scp tools/ecoflow-proxy/ecoflow-keepalive.service tools/ecoflow-proxy/ecoflow-keepalive.timer <server>:/tmp/
+```
+
+На сервері:
+
+```sh
+sudo install -m 644 -o root -g root /tmp/ecoflow-keepalive.service /tmp/ecoflow-keepalive.timer /etc/systemd/system/
+rm -f /tmp/ecoflow-keepalive.service /tmp/ecoflow-keepalive.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now ecoflow-keepalive.timer
+```
+
+### Крок 10.4 — перевірка
+
+```sh
+systemctl list-timers ecoflow-keepalive.timer
+sudo systemctl start ecoflow-keepalive.service   # ручний прогін, не чекаючи 600с
+journalctl -u ecoflow-keepalive.service -n 20 --no-pager
+```
+
+Очікується `INFO: triggered N target(s)` без `WARN`/`ERROR`, і за кілька
+секунд - сплеск повідомлень від цільового пристрою (`ecoflow`/
+`/api/ecoflow/status` на платі). `WARN: bridge '...' state=<none>` означає,
+що крок 10.1 не застосовано (чи mosquitto ще не рестартували після нього) -
+дивитись у "Типові помилки" нижче.
+
 ## Обслуговування
 
+- **Зупинити keepalive (крок 10), тимчасово.**
+  ```sh
+  sudo systemctl stop ecoflow-keepalive.timer
+  ```
+  Unit-файли, скрипт і `targets.conf` лишаються на диску незмінними - бридж і
+  решта проксі далі працюють як є, зникає лише періодичний `latestQuotas`.
+  `systemctl status ecoflow-keepalive.timer` після цього показує
+  `inactive (dead)`.
+- **Запустити знову.**
+  ```sh
+  sudo systemctl start ecoflow-keepalive.timer
+  ```
+  Перший прогін - за `OnBootSec`/`OnUnitActiveSec` з
+  `/etc/systemd/system/ecoflow-keepalive.timer` (зараз - до 2 хв після
+  старту timer'а, потім кожні 600с); `systemctl list-timers
+  ecoflow-keepalive.timer` показує точний `NEXT`. Форсувати негайно, не
+  чекаючи розкладу: `sudo systemctl start ecoflow-keepalive.service`.
+- **Вимкнути й забути (переживає перезавантаження rpi5).**
+  `sudo systemctl disable --now ecoflow-keepalive.timer` - на відміну від
+  `stop` вище, це ще й знімає автозапуск при боті. Увімкнути назад:
+  `sudo systemctl enable --now ecoflow-keepalive.timer`.
+- **Змінити інтервал (наприклад, після заміру реального вікна "сну" -
+  `docs/tech_debt.md`, "DELTA 2: план інтеграції...").** Відредагувати
+  `OnUnitActiveSec` в `/etc/systemd/system/ecoflow-keepalive.timer` на
+  сервері (чи перекопіювати оновлений `tools/ecoflow-proxy/ecoflow-keepalive.timer`
+  з репозиторію - крок 10.3), тоді:
+  ```sh
+  sudo systemctl daemon-reload
+  sudo systemctl restart ecoflow-keepalive.timer
+  ```
+- **Додати ще один "тихий" пристрій під тригер.** Дописати рядок
+  `/app/{userId}/{sn}/thing/property/get` в
+  `/etc/ecoflow-keepalive/targets.conf` на сервері - наступний прогін
+  таймера підхопить його сам, рестарт нічого не потребує.
 - **Додати новий пристрій EcoFlow.** Дописати серійник в
   `EcoflowDeviceRegistry.cpp` (`kDevices`) і відповідний рядок
   `topic /app/device/property/<SN> in` у `ecoflow-proxy.conf`, потім
@@ -268,3 +378,6 @@ curl -s http://<IP плати>/api/ecoflow/status | python3 -m json.tool
 | `Connecting bridge` повторюється, без `running` | `remote_username`/`remote_password`/`remote_clientid` невірні або відкликані EcoFlow | звірити з `secrets.ini` (`ecoflow_mqtt_*`); типова тиха відмова описана в пам'яті проєкту "EcoFlow: відкликані ключі" |
 | Підписка проходить, дані порожні | акаунт не того каналу (Open Platform замість App Private чи навпаки) | `docs/ecoflow.md`, розділ "Два канали" - схема топіка інша |
 | mosquitto не стартує, порт зайнятий | інший listener/сервіс уже висить на тому ж порту | `sudo ss -ltnp \| grep 1883` |
+| `journalctl -u ecoflow-keepalive.service`: `WARN: bridge '...' state=<none>` | крок 10.1 (`notifications`) не застосовано або mosquitto не рестартували після нього | крок 10.1, потім `sudo systemctl restart mosquitto` |
+| `journalctl -u ecoflow-keepalive.service`: `WARN: bridge '...' state='0'` | бридж реально втратив з'єднання з хмарою EcoFlow (креденшли відкликані/мережа) | `sudo tail -f /var/log/mosquitto/mosquitto.log`, шукати повторний `Connecting bridge` без `running` - рядок вище в цій таблиці |
+| `ERROR: targets file not found` | крок 10.2 не виконано або `ECOFLOW_KEEPALIVE_TARGETS` вказує не туди | перевірити `/etc/ecoflow-keepalive/targets.conf` |

@@ -26,6 +26,7 @@ tools/pio_web_assets.py (див. extra_scripts у platformio.ini). Руками:
 
 import gzip
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -36,13 +37,17 @@ OUT = ROOT / "lib" / "WebPortal" / "WebPortalAssets.hpp"
 # файли (шрифти, картинки), яким у прошивці робити нічого.
 FILES = [
     ("index.html", "/index.html", "text/html; charset=utf-8"),
+    ("img/delta2.webp", "/img/delta2.webp", "image/webp"),
+    ("img/delta-mini.webp", "/img/delta-mini.webp", "image/webp"),
+    ("img/delta-pro.webp", "/img/delta-pro.webp", "image/webp"),
 ]
 
 CONTENT_TYPES_HINT = "\n".join(f"//   {src} -> {path}" for src, path, _ in FILES)
 
 
 def c_identifier(path: str) -> str:
-    return "k" + "".join(part.capitalize() for part in path.strip("/").replace(".", "_").split("_"))
+    parts = re.split(r"[/_.-]+", path.strip("/"))
+    return "k" + "".join(part.capitalize() for part in parts)
 
 
 def emit_array(name: str, data: bytes) -> str:

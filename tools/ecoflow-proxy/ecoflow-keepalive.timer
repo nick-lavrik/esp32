@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic EcoFlow keep-alive (get/latestQuotas) for quiet devices
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=600
+Unit=ecoflow-keepalive.service
+
+[Install]
+WantedBy=timers.target
