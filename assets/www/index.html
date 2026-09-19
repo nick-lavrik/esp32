@@ -367,7 +367,10 @@ textarea:focus { outline: 1px solid var(--accent); }
    займає верхні ~28px, і "high" фото (DELTA 2/mini - вузький вертикальний
    кадр, contain розтягує його на всю висоту боксу) своїм верхнім краєм
    наїжджало на цей рядок і забивало текст серійника. Побачено на живому
-   скріншоті - не теоретичний випадок. */
+   скріншоті - не теоретичний випадок.
+   Фінальні top/right - 48px/10px (не 32px/4px): за проханням присунути
+   картинки трохи вниз-вліво, перевірено вживу - зазор з краєм картки є,
+   обрізання немає. */
 .ecoflow-device[data-model]::before {
   content: ""; position: absolute; z-index: -1; top: 48px; right: 10px; height: 130px;
   width: 40%; max-width: 150px; background-repeat: no-repeat; background-position: right center;
