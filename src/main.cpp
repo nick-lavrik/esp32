@@ -219,6 +219,11 @@ const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
 const char* CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix";
 // runtime-override для ECOFLOW_AUTOCONNECT: "1"/"0"; порожнє -> build-time дефолт
 const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
+// runtime-override: чи тягнути REST-знімок ('ecoflow-sync all') ПЕРЕД MQTT-
+// конектом на старті (docs/tech_debt.md, розрив REST/MQTT); перемикається
+// тією ж командою - 'ecoflow-sync on|off'. "1"/"0"; порожнє -> build-time
+// дефолт. Не "ecoflow.sboot" - читається як "secure boot".
+const char* CFG_ECOFLOW_SYNC_BOOT = "ecoflow.sync";
 // dump ecoflow device status each minute
 const char* CFG_ECOFLOW_WATCH = "ecoflow.watch";
 // periodic 'heap' sampling (тимчасова діагностика фрагментації, docs/tech_debt.md)
@@ -1140,24 +1145,23 @@ void setupEcoflow() {
     ecoflowDevices.applyStatus(serialNumber, doc);
   });
 
-  // Стартуємо ОДРАЗУ: серійні номери прошиті, тому підписка не залежить ні від
-  // REST, ні від синхронізованого часу (раніше старт доводилось відкладати саме
-  // через підпис REST-запиту, що містить timestamp).
-  //
-  // ...але лише якщо auto-connect увімкнено: TLS-сесія коштує ~57 КБ heap, і на
-  // платі без PSRAM це може бути дорожче за саму телеметрію.
+  // ...лише якщо auto-connect увімкнено: TLS-сесія коштує ~57 КБ heap (пряма)
+  // чи менше (proxy), і на платі без PSRAM це може бути дорожче за саму
+  // телеметрію.
   String autoConnectStored = configStorage.getString(CFG_ECOFLOW_AUTOCONNECT, "");
-  const bool autoConnect = autoConnectStored.length() > 0 ? (autoConnectStored.toInt() != 0)
-                                                          : (ECOFLOW_AUTOCONNECT != 0);
-  if (autoConnect) {
-    ecoflow.begin();
-  } else {
+  static bool ecoflowAutoConnect = autoConnectStored.length() > 0 ? (autoConnectStored.toInt() != 0)
+                                                                  : (ECOFLOW_AUTOCONNECT != 0);
+  if (!ecoflowAutoConnect) {
     _logger.info("autoconnect is off - use 'ecoflow-start' to connect");
   }
 
-  // Одноразова звірка з хмарою, коли зʼявиться час: REST потрібен лише щоб
-  // помітити пристрій, доданий у застосунку, але відсутній у прошитому
-  // переліку. Задача знімає себе після першої вдалої спроби.
+  // Чи чекати на REST-знімок ПЕРЕД MQTT-конектом на старті (нижче), а чи
+  // конектитись одразу. 'ecoflow-sync' лишається доступною командою в БУДЬ-
+  // якому разі - це лише про порядок на старті, не про наявність REST узагалі.
+  String syncBootStored = configStorage.getString(CFG_ECOFLOW_SYNC_BOOT, "");
+  static bool ecoflowSyncOnBoot = syncBootStored.length() > 0 ? (syncBootStored.toInt() != 0)
+                                                               : (ECOFLOW_SYNC_ON_BOOT != 0);
+
   ecoflow.setRegistry(&ecoflowDevices);
 
   ecoflow.onAppCredentials([](const EcoflowMqttCredentials& credentials, const String& userId) {
@@ -1174,14 +1178,70 @@ void setupEcoflow() {
     }
   });
 
-  // Щойно зʼявиться час (REST-підпис містить timestamp) - тягнемо ПОВНИЙ знімок
-  // стану кожного пристрою. Без цього наявність мережі лишається unknown до
-  // першої реальної зміни: MQTT-quota шле лише дельти.
+  // Порядок навмисно REST -> MQTT, а не навпаки (раніше MQTT конектився
+  // одразу на старті, а REST-знімок - через 30с після NTP, поверх уже
+  // піднятого MQTT). REST-виклик EcoFlow (EcoflowAuthClient::signedGet)
+  // піднімає ПРЯМИЙ TLS до api-e.ecoflow.com незалежно від того, чи MQTT іде
+  // через proxy - і йому потрібен один суцільний блок (~57 КБ), який
+  // найлегше знайти, поки MQTT ще нічого не займав. Тому спершу тягнемо
+  // ПОВНИЙ знімок стану кожного пристрою (MQTT-quota шле лише дельти, і без
+  // знімка наявність мережі лишається unknown до першої зміни).
+  //
+  // ecoflowSyncOnBoot=false пропускає це чекання цілком: MQTT конектиться
+  // одразу, щойно з'явиться NTP+WiFi, без жодного REST-виклику. Блокуючим
+  // для MQTT-конекту REST лишається лише КОЛИ увімкнений - вимкнути його
+  // цілком (напр. плата з тісним heap, де навіть короткий REST - зайвий
+  // ризик) не означає "MQTT теж не чекає нічого".
+  static uint32_t ecoflowRestBaselineLargestBlock = 0;
+  static bool ecoflowRestRequested = false;
   static TaskId ecoflowAuditTaskId = 0;
-  ecoflowAuditTaskId = scheduler.addCronTask(30 * 1000UL, []() {
-    if (!ntp.isSynced() || !WiFi.isConnected() || ecoflow.isBusy()) { return; }
+  ecoflowAuditTaskId = scheduler.addCronTask(2 * 1000UL, []() {
+    if (!ntp.isSynced() || !WiFi.isConnected()) { return; }
+
+    if (!ecoflowSyncOnBoot) {
+      scheduler.removeTask(ecoflowAuditTaskId);
+      if (ecoflowAutoConnect) { ecoflow.begin(); }
+      return;
+    }
+
+    if (!ecoflowRestRequested) {
+      if (ecoflow.isBusy()) { return; }
+      ecoflowRestBaselineLargestBlock = ESP.getMaxAllocHeap();
+      _logger.info("REST snapshots: %u B free (largest block %u B) before requests",
+                   (unsigned)ESP.getFreeHeap(), (unsigned)ecoflowRestBaselineLargestBlock);
+      ecoflowRestRequested = true;
+      ecoflow.syncSnapshotsAsync();
+      return;
+    }
+
+    if (ecoflow.isBusy()) { return; }  // знімки ще тягнуться
     scheduler.removeTask(ecoflowAuditTaskId);
-    ecoflow.syncSnapshotsAsync();
+
+    const uint32_t largestAfter = ESP.getMaxAllocHeap();
+    _logger.info("REST snapshots: %u B free (largest block %u B) after requests",
+                 (unsigned)ESP.getFreeHeap(), (unsigned)largestAfter);
+
+    if (!ecoflowAutoConnect) { return; }
+
+    // НЕ "чи повернулись до baseline" (виміряного ДО жодної TLS-сесії за
+    // весь uptime - він завжди значно вищий за усталений стан, і порівняння
+    // з ним раз у раз блокувало автоконект навіть коли largest block цілком
+    // достатній: заміряно 42996 B стабільно з прогону в прогін, не деградує
+    // далі під повторними REST/heap-командами). Поріг - чи вистачає largest
+    // block САМЕ на той конект, що зараз станеться: plain MQTT через proxy
+    // не піднімає mbedTLS узагалі (тека tech_debt.md, "MQTT-проксі"), а прямий
+    // TLS - ще один такий самий суцільний блок, що й щойно пішов на REST
+    // (~57 КБ, там-таки заміряно).
+    const uint32_t kMinLargestBlock = ecoflow.viaProxy() ? 12 * 1024 : 57 * 1024;
+    if (largestAfter < kMinLargestBlock) {
+      _logger.error("largest block %u B too small for %s MQTT connect (need >= %u B) - "
+                    "autoconnect skipped, investigate before 'ecoflow-start'",
+                    (unsigned)largestAfter, ecoflow.viaProxy() ? "proxy" : "direct TLS",
+                    (unsigned)kMinLargestBlock);
+      return;
+    }
+
+    ecoflow.begin();
   });
 
   const TaskId ecoflowShowCronTaskId = scheduler.addCronTask(60 * 1000UL, []() {
@@ -1194,10 +1254,11 @@ void setupEcoflow() {
     _logger.info("================= ECOFLOW ================= %s ================",
       ntp.ftime("%Y-%m-%d %H:%M:%S", buf, sizeof(buf)));
     _logger.debug("connected = %s, account = %s", ecoflow.isConnected() ? "yes" : "no",
-                 ecoflow.account().c_str());
-    _logger.debug("broker = %s:%d, channel = %s, verbose = %s", ECOFLOW_MQTT_HOST,
-                 ECOFLOW_MQTT_PORT, EcoflowClient::channelName(ecoflow.channel()),
-                 ecoflowVerbose ? "on" : "off");
+                  ecoflow.account().c_str());
+    _logger.debug("broker = %s:%d (%s), channel = %s, verbose = %s", ecoflow.brokerHost(), ecoflow.brokerPort(),
+                  ecoflow.viaProxy() ? "proxy" : "tls",
+                  EcoflowClient::channelName(ecoflow.channel()),
+                  ecoflowVerbose ? "on" : "off");
     // TLS-сесія - найбільший споживач heap у цьому клієнті, тому цифри тут
     // корисніші за загальний 'dump-heap': саме вони кажуть, чи пройде REST.
     _logger.debug("running = %s, heap = %u B free, largest block = %u B",
@@ -1432,9 +1493,39 @@ void setupEcoflow() {
 
   // command: ecoflow-sync
   commandHandler.registerCommand(
-    "ecoflow-sync", "pull full state snapshot for every device over REST",
+    "ecoflow-sync",
+    "REST snapshot: ecoflow-sync <on|off|all|sn|index> - on/off toggles sync-before-MQTT "
+    "on boot, all/sn/index pulls a snapshot now",
     [](const String args) {
-      if (!ecoflow.syncSnapshotsAsync()) {
+      String value = args;
+      value.trim();
+
+      if (value.length() == 0) {
+        String stored = configStorage.getString(CFG_ECOFLOW_SYNC_BOOT, "");
+        _logger.info("use: ecoflow-sync <on|off|all|sn|index>");
+        _logger.info("sync-on-boot = %s%s",
+                     stored.length() > 0 ? (stored.toInt() ? "on" : "off")
+                                         : (ECOFLOW_SYNC_ON_BOOT ? "on" : "off"),
+                     stored.length() > 0 ? "" : " (build-time default)");
+        return;
+      }
+
+      if (value == "on" || value == "off") {
+        const bool on = (value == "on");
+        configStorage.setString(CFG_ECOFLOW_SYNC_BOOT, on ? "1" : "0");
+        _logger.info("sync-on-boot = %s (applies on next boot)", on ? "on" : "off");
+        return;
+      }
+
+      // Порожній serial у syncSnapshotsAsync() означає "усі пристрої" - той
+      // самий контракт, що й setCaptureAll() (ecoflow-capture).
+      String serial;
+      if (value != "all") {
+        serial = ecoflowSerialFromKey(value);
+        if (serial.length() == 0) { return; }
+      }
+
+      if (!ecoflow.syncSnapshotsAsync(serial)) {
         _logger.error("not started: %s", ecoflow.lastError().c_str());
         return;
       }

@@ -1,6 +1,7 @@
 #include "EcoflowClient.hpp"
 
 #include <TLogger.hpp>
+#include <Trace.hpp>
 #include <WiFi.h>
 
 #include "EcoflowAppAuthClient.hpp"
@@ -222,15 +223,17 @@ static constexpr uint32_t kRestTaskStackSize = 16 * 1024;
 struct EcoflowRestTaskArg {
   EcoflowClient *self;
   int job;
+  String serialNumber;  // лише для kSnapshots: порожній = усі пристрої
 };
 
 void EcoflowClient::restTaskTrampoline(void *param) {
   auto *arg = static_cast<EcoflowRestTaskArg *>(param);
   EcoflowClient *self = arg->self;
   const RestJob job = static_cast<RestJob>(arg->job);
+  const String serialNumber = arg->serialNumber;
   delete arg;
 
-  self->runRestJob(job);
+  self->runRestJob(job, serialNumber);
 
   // Скільки стеку лишилось невикористаним - якщо тут близько до нуля,
   // kRestTaskStackSize треба піднімати.
@@ -241,7 +244,7 @@ void EcoflowClient::restTaskTrampoline(void *param) {
   vTaskDelete(nullptr);
 }
 
-void EcoflowClient::runRestJob(RestJob job) {
+void EcoflowClient::runRestJob(RestJob job, const String &serialNumber) {
   if (job == RestJob::kStart) {
     begin();
     return;
@@ -283,16 +286,36 @@ void EcoflowClient::runRestJob(RestJob job) {
       return;
     }
     // Один suspend на ВСІ пристрої: кожен окремий коштував би розриву й
-    // підняття TLS-сесії (~57 КБ і кілька секунд).
-    withMqttSuspended("snapshots", [this]() {
+    // підняття TLS-сесії (~57 КБ і кілька секунд). Те саме - і на один
+    // пристрій (serialNumber непорожній): MQTT все одно доведеться
+    // призупинити на час запиту.
+    withMqttSuspended("snapshots", [this, serialNumber]() {
+      logger.info("snapshots: starting, %u B free (largest block %u B)", (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap());
       size_t ok = 0, skipped = 0;
+      bool first = true;
       for (const auto &state : _registry->devices()) {
+        if (!serialNumber.isEmpty() && serialNumber != state.info->serialNumber) { continue; }
         if (!state.snapshotAvailable) { skipped++; continue; }
+
+        // Невеликий інтервал між запитами: попередній TLS-клієнт (локальний
+        // у signedGet()) встигає розібратись і повернути свій блок у купу до
+        // старту наступного хендшейку.
+        if (!first) { delay(300); }
+        first = false;
 
         const String sn = state.info->serialNumber;
         JsonDocument doc;
         bool notAllowed = false;
-        if (_auth.fetchQuotaAll(sn, doc, notAllowed)) {
+        bool fetched = false;
+        // withTrace() (lib/Logger/Trace.hpp) - той самий замір "тривалість +
+        // heap до/після", що й на кожен setupXxx() при старті, а не свій
+        // окремий millis()/ESP.getFreeHeap() тут. Largest block per-пристрій
+        // уже перевірено окремо (не накопичується від пристрою до пристрою,
+        // просідає раз на весь suspend) - далі досить сумарного "starting/
+        // when done" вище й нижче.
+        withTrace(state.info->name, [&]() { fetched = _auth.fetchQuotaAll(sn, doc, notAllowed); });
+        if (fetched) {
           if (_registry->applySnapshot(sn, doc)) { ok++; }
         } else if (notAllowed) {
           // Постійна властивість пристрою, не збій: більше не питаємо.
@@ -305,7 +328,9 @@ void EcoflowClient::runRestJob(RestJob job) {
                       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
         }
       }
-      logger.info("snapshots: %u applied, %u skipped", (unsigned)ok, (unsigned)skipped);
+      logger.info("snapshots: %u applied, %u skipped, %u B free (largest block %u B) when done",
+                  (unsigned)ok, (unsigned)skipped, (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap());
       return true;
     });
     return;
@@ -337,14 +362,14 @@ void EcoflowClient::runRestJob(RestJob job) {
               credentials.certificatePassword.c_str());
 }
 
-bool EcoflowClient::startRestTask(RestJob job) {
+bool EcoflowClient::startRestTask(RestJob job, const String &serialNumber) {
   if (_restBusy) {
     _lastError = "a REST request is already running";
     return false;
   }
   _restBusy = true;
 
-  auto *arg = new EcoflowRestTaskArg{this, static_cast<int>(job)};
+  auto *arg = new EcoflowRestTaskArg{this, static_cast<int>(job), serialNumber};
   // xTaskCreate без пінінгу - ESP32-C6 single-core (див. MqttClient::begin()).
   if (xTaskCreate(&EcoflowClient::restTaskTrampoline, "ecoflow-rest", kRestTaskStackSize, arg,
                   tskIDLE_PRIORITY + 1, nullptr) != pdPASS) {
@@ -360,7 +385,9 @@ bool EcoflowClient::beginAsync() { return startRestTask(RestJob::kStart); }
 
 bool EcoflowClient::refreshDevicesAsync() { return startRestTask(RestJob::kDevices); }
 
-bool EcoflowClient::syncSnapshotsAsync() { return startRestTask(RestJob::kSnapshots); }
+bool EcoflowClient::syncSnapshotsAsync(const String &serialNumber) {
+  return startRestTask(RestJob::kSnapshots, serialNumber);
+}
 
 bool EcoflowClient::issueAppCredentialsAsync() { return startRestTask(RestJob::kAppLogin); }
 

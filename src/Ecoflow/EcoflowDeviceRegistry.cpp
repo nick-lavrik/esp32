@@ -367,6 +367,15 @@ bool EcoflowDeviceRegistry::applySnapshot(const String &serialNumber, JsonDocume
   }
   JsonObjectConst data = doc["data"].as<JsonObjectConst>();
   if (data.isNull()) {
+    // Раніше цей шлях мовчав, і "0 applied" не відрізнялось від "усі
+    // пристрої not permitted" в лозі. code/message тут - не 1006 (той іде
+    // окремою гілкою в EcoflowClient::runRestJob через notAllowed), тому
+    // "success, але без даних" - досі не пояснена властивість саме ЦЬОГО
+    // акаунта/каналу (docs/ecoflow.md фіксує 242-353 поля як норму).
+    const char *code = doc["code"] | "?";
+    const char *message = doc["message"] | "?";
+    logger.warn("%s: REST snapshot has no 'data' field (code=%s, message=%s)", state->info->name,
+                code, message);
     return false;
   }
   return applyParams(*state, data);

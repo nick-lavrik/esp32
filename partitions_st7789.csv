@@ -14,13 +14,22 @@
 # дамп пам'яті після краху для подальшого аналізу через espcoredump.py.
 # Без нього застосунок працює нормально, лише пише попередження при бут.
 #
-# app      - 0x1E3000 - 1.9Mb
-# nvs      - 0x07D000 - 500Kb
+# app-розділ БУВ 0x1E3000 (1.9Mb) — debug-збірка (build_type=debug, без
+# оптимізації розміру симетрично з release) вже не влазить: 2005968 Б
+# проти 1978368 Б розділу ("Image length ... doesn't fit in partition
+# length ..."), плата не завантажується. Розкладка нижче — та сама, що
+# вже перевірена на esp32-c3 і esp32-c6-lcd096 (теж 4MB flash, той самий
+# набір фіч HAS_WEB_PORTAL/HAS_ECOFLOW_CLIENT): app 2Mb за рахунок nvs
+# 500Kb -> 384Kb, якого ConfigStorage на тих платах вистачає з запасом.
+#
+# app      - 0x200000 - 2Mb
+# coredump - 0x010000 - 64Kb
+# nvs      - 0x060000 - 384Kb  (з запасом під ConfigStorage)
 # littlefs - 0x180000 - 1.5Mb
 #
 # Name,      Type,  SubType,   Offset,    Size,      Flags
 phy_init,    data,  phy,       0x009000,  0x001000,
-app,         app,   factory,   0x010000,  0x1E3000,
-coredump,    data,  coredump,  0x1F3000,  0x010000,
-nvs,         data,  nvs,       0x203000,  0x07D000,
+app,         app,   factory,   0x010000,  0x200000,
+coredump,    data,  coredump,  0x210000,  0x010000,
+nvs,         data,  nvs,       0x220000,  0x060000,
 spiffs,      data,  spiffs,    0x280000,  0x180000,

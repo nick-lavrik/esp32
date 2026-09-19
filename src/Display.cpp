@@ -19,14 +19,22 @@ static inline const uint16_t* spritePixels(TFT_eSprite& sprite) {
 #endif
 }
 
-// LovyanGFX тримає 16-бітний спрайт у swap565 (старший байт першим),
-// TFT_eSPI і Arduino_Canvas - у рідному порядку. Клієнту цей порядок
-// повідомляється заголовком відповіді, тому перевертати байти на платі
-// не треба - вистачає сказати, які вони.
+// LovyanGFX тримає 16-бітний спрайт у swap565 (старший байт першим).
+// Справжній bodmer/TFT_eSPI - так само: TFT_eSprite::drawPixel/fillRect/...
+// для 16bpp завжди роблять color=(color>>8)|(color<<8) перед записом у _img
+// (Extensions/Sprite.cpp) - це властивість запису в буфер, а не setSwapBytes()
+// (той керує лише pushImage() і сюди не стосується). Свопу нема лише в
+// Arduino_GFX Canvas (esp32-c6, esp32-c6-lcd096): writePixelPreclipped() кладе
+// *fb = color без перетворень. Клієнту порядок повідомляється заголовком
+// відповіді, тому перевертати байти на платі не треба - вистачає сказати, які
+// вони; помилка тут мовчазна - і плата, і картинка валідні, лише кольори на
+// сторінці розсипаються шумом.
 #if defined(BOARD_4848S040)
-constexpr bool kSpriteSwapped565 = true;
+constexpr bool kSpriteSwapped565 = true;   // LovyanGFX
+#elif defined(BOARD_ESP32_C6) || defined(BOARD_ESP32_C6_LCD096)
+constexpr bool kSpriteSwapped565 = false;  // Arduino_GFX Canvas
 #else
-constexpr bool kSpriteSwapped565 = false;
+constexpr bool kSpriteSwapped565 = true;   // справжній bodmer TFT_eSPI (esp32-st7789, ttgo-t1, esp32-s3-lcd147)
 #endif
 #endif  // HAS_SCREEN_MIRROR
 

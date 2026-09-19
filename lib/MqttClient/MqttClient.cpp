@@ -868,8 +868,19 @@ void MqttClient::enqueueIncoming(const char* topic, const uint8_t* payload, unsi
   }
 
   MqttIncomingMessage msg;
-  msg.topic.assign(topic);
-  msg.payload.assign(payload, payload + length);
+  try {
+    msg.topic.assign(topic);
+    msg.payload.assign(payload, payload + length);
+  } catch (const std::bad_alloc&) {
+    // Купа не дала суцільного блоку під це повідомлення - без цього catch()
+    // виняток летів необробленим до networkTaskLoop() і клав усю плату
+    // (std::terminate -> abort), хоча дроп ОДНОГО повідомлення при
+    // фрагментованій купі - штатна, вже прийнята тут поведінка (drop-oldest
+    // нижче). Той самий лічильник/попередження, що й для drop-oldest -
+    // reportDroppedMessages() не розрізняє причину.
+    _droppedIncoming.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
 
   MutexGuard guard(_queueMutex);
   // drop-oldest: краще втратити найстаріше повідомлення, ніж купу (див.

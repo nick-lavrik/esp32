@@ -276,8 +276,10 @@ REST-знімком (нижче).
 
 ## REST-знімок: `GET /iot-open/sign/device/quota/all?sn=…`
 
-Повертає **повний** стан (242–353 поля), зокрема `inv.acInVol`. Викликається один раз
-після появи NTP-часу (підпис містить `timestamp`) і командою `ecoflow-sync`.
+Повертає **повний** стан (242–353 поля), зокрема `inv.acInVol`. Викликається (якщо
+`ecoflow-sync on`, дефолт) один раз після появи NTP-часу — і ПЕРЕД MQTT-конектом,
+`docs/tech_debt.md`, розрив REST/MQTT — і будь-коли командою `ecoflow-sync all`
+(чи `ecoflow-sync <sn|index>` для одного пристрою) незалежно від цього налаштування.
 
 Один `suspend()` MQTT на всі пристрої, а не на кожен: розрив і підняття TLS коштують
 ~57 КБ heap і кілька секунд.
@@ -369,7 +371,7 @@ EcoFlow віддає **одне** поле `remainTime` і на заряд, і �
 | `ecoflow` | таблиця: `# SERIAL NAME PRESENCE CHARGE GRID TIME SPAN` |
 | `ecoflow-params [sn\|index] [pattern]` | захоплені параметри; patttern — glob по нормалізованому ключу (`*_in_*`) |
 | `ecoflow-capture <on\|off> [sn\|index\|all]` | захоплення ВСІХ полів, не лише білого списку |
-| `ecoflow-sync` | REST-знімок повного стану для всіх пристроїв |
+| `ecoflow-sync <on\|off\|all\|sn\|index>` | `on`/`off` — REST-знімок перед MQTT-конектом на старті (NVS, діє з наступного boot); `all` — REST-знімок для всіх пристроїв зараз; `sn`/`index` — лише для одного |
 | `ecoflow-devices` | список пристроїв із хмари (звірка з прошитим переліком) |
 | `ecoflow-login` | випуск приватних (App) MQTT-креденшелів (email+password → account/password/userId), покроково - вище |
 | `ecoflow-cert` | перевипуск Open Platform креденшелів |

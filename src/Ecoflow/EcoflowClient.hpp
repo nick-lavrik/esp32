@@ -135,11 +135,12 @@ public:
     // Результат друкується в лог. Повертають false, якщо запит уже виконується.
     bool refreshDevicesAsync();
 
-    // Тягне REST-знімок стану для КОЖНОГО пристрою і згодовує його реєстру.
+    // Тягне REST-знімок стану для КОЖНОГО пристрою (serialNumber порожній) або
+    // лише для ОДНОГО (ecoflow-sync <sn|index>) і згодовує його реєстру.
     // Закриває головну ваду MQTT-quota: вона приходить дельтами, тому після
     // старту наявність мережі (inv.acInVol) лишається невідомою, доки реально
     // не зміниться. Один suspend MQTT на всі запити, не на кожен окремо.
-    bool syncSnapshotsAsync();
+    bool syncSnapshotsAsync(const String &serialNumber = String());
 
     // Перевипускає MQTT-креденшели приватного API (email+password -> JWT ->
     // certification), друкує їх у лог і зберігає в NVS. Потрібно раз: самі
@@ -236,9 +237,11 @@ private:
     enum class RestJob { kDevices, kCredentials, kStart, kSnapshots, kAppLogin };
     EcoflowDeviceRegistry *_registry = nullptr;
     AppCredentialsCallback _appCredentialsCallback;
-    bool startRestTask(RestJob job);
+    // serialNumber - лише для kSnapshots: порожній = усі пристрої реєстру,
+    // непорожній = один. Інші job'и параметр ігнорують.
+    bool startRestTask(RestJob job, const String &serialNumber = String());
     static void restTaskTrampoline(void *param);
-    void runRestJob(RestJob job);
+    void runRestJob(RestJob job, const String &serialNumber);
 
     // Витягує {sn} з "/open/{account}/{sn}/quota". Порожній рядок, якщо топік
     // не відповідає схемі.
