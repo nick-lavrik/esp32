@@ -813,8 +813,12 @@ EcoFlow-розділу вище: `MqttClient` і `ConsoleMqtt` - обидва в
 **Що на картці/вкладці:**
 
 - **Connection** - `connected`, `host:port`, `security` (`plain`/`tls`,
-  `MqttConfig::useTls`), `clientId`, topic-префікс
-  (`MqttKeyGenerator::prefix()`).
+  `MqttConfig::useTls`), `clientId`, `login` (`MqttClient::username()` -
+  `null`/"(anonymous)", якщо `MqttConfig::useAuth == false`, а не порожній
+  рядок - інакше виглядало б як логін-пусто, а не як вимкнена автентифікація),
+  topic-префікс (`MqttKeyGenerator::prefix()`). Той самий набір полів, що й
+  serial-команда `dump-mqtt` (`src/main.cpp`) - обидва читають одні й ті самі
+  геттери `MqttClient`, друга копія значень не заводиться.
 - **Published / received** - накопичувальні лічильники (`MqttClient::_publishedCount`/
   `_receivedCount`), НЕ атомарні: обидва чіпає лише головний потік
   (`publish()` викликається з коду скетчу, `dispatchMessage()` - з `loop()`),

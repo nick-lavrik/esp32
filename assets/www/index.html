@@ -3120,6 +3120,7 @@ function mqttConnectionRows(data) {
     ["Broker", data.host + ":" + data.port],
     ["Security", data.security === "tls" ? "TLS" : "plain"],
     ["Client ID", data.clientId],
+    ["Login", data.login == null ? "(anonymous)" : data.login],
     ["Topic prefix", data.topicPrefix],
     ["Published / received", data.publishedCount + " / " + data.receivedCount],
     ["Subscribe denied", mqttDeniedText(data.subscribeDeniedCount), true],
