@@ -37,9 +37,9 @@ header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
 header h1 { font-size: var(--font-size-medium); margin: 0; font-weight: 600; }
 header .spacer { flex: 1; }
-header #uptime, header #heap { font-variant-numeric: tabular-nums; }
-header #uptime + #heap { margin-left: 12px; }
 #devstate { color: var(--muted); font-size: var(--font-size-small); }
+/* "Resume polling" (14) - найдовший варіант підпису, під нього й ширина. */
+#btn-pause-poll { min-width: calc(14ch + 28px); }
 /* overflow-x на nav, а не wrap: шести вкладкам на телефоні місця не вистачає, і
    без цього flexbox стискає кнопки нижче ширини тексту ("Wi-Fi" ламалось на
    "Wi-" / "Fi"), а сама nav розпирає body - сторінка отримує зайвий
@@ -540,8 +540,11 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
   <h1 id="app-title">ESP32 portal</h1>
   <span id="devstate">connecting…</span>
   <span class="spacer"></span>
-  <span id="uptime" class="muted"></span>
-  <span id="heap" class="muted"></span>
+  <!-- uptime/heap уже є на System (#sys-device) - друга копія в шапці лише
+       займала місце. Тут натомість перемикач, що зупиняє геть усі ajax-опитувальники
+       порталу (docs/tech_debt.md, "швидкий борг"). -->
+  <button class="act ghost" id="btn-pause-poll" type="button"
+    title="Stop/resume all periodic status requests">Pause polling</button>
 </header>
 
 <nav>
@@ -1212,11 +1215,15 @@ function renderSystemInfo(r) {
       : "<dt>Card</dt><dd class=\"muted\">not detected</dd>";
   }
 
-  // Chip size/speed - у картці Device (не власна картка Flash: там лишається
-  // тільки таблиця розділів, див. #sys-partitions нижче).
+  // Паспорт чипа + флеша - у картці Device (не власна картка Flash: там
+  // лишається тільки таблиця розділів, див. #sys-partitions нижче).
+  const chip = r.chip || {};
   $("#sys-device-flash").innerHTML = dlRows([
-    ["Chip size", fsSize(r.flash.sizeBytes)],
-    ["Chip speed", Math.round(r.flash.speedHz / 1e6) + " MHz"],
+    ["Chip model", escapeHtml(chip.model || "–") + (chip.revision != null ? " (rev " + chip.revision + ")" : "")],
+    ["CPU", (chip.cores || "–") + " core" + (chip.cores === 1 ? "" : "s") + " @ " + (chip.cpuFreqMHz || "–") + " MHz"],
+    ["PSRAM", chip.psramFound ? fsSize(chip.psramBytes) : "not present"],
+    ["Flash size", fsSize(r.flash.sizeBytes)],
+    ["Flash speed", Math.round(r.flash.speedHz / 1e6) + " MHz"],
   ]);
 
   // nvs/littlefs(spiffs) - реальні розділи, за якими стоїть своя вкладка
@@ -1492,13 +1499,18 @@ function renderScan(networks) {
 // десятки паралельних fetch'ів з однаковим ?since= - плата не встигала
 // відповідати, а сторінка сипала ще й ще. Плюс пауза, коли вкладка невидима:
 // фонові вкладки не мають нічого вантажити.
+// Глобальна пауза - одна точка на всі виклики poller(), а не прапорець у
+// кожного окремо: кнопка #btn-pause-poll в шапці має зупиняти геть усі
+// ajax-опитувальники сторінки одним кліком (docs/tech_debt.md, "швидкий борг").
+let pollingPaused = false;
+
 function poller(fn, ms, isActive) {
   let stopped = false;
   let failures = 0;
   const tick = async () => {
     if (stopped) return;
     let delay = ms;
-    if (!document.hidden && (!isActive || isActive())) {
+    if (!document.hidden && !pollingPaused && (!isActive || isActive())) {
       try {
         await fn();
         failures = 0;
@@ -1515,6 +1527,11 @@ function poller(fn, ms, isActive) {
   tick();
   return { stop() { stopped = true; } };
 }
+
+$("#btn-pause-poll").onclick = () => {
+  pollingPaused = !pollingPaused;
+  $("#btn-pause-poll").textContent = pollingPaused ? "Resume polling" : "Pause polling";
+};
 
 const onWifiTab = () => $("#tab-wifi").classList.contains("active");
 
@@ -3188,8 +3205,6 @@ async function pollStatus() {
       document.title = "ESP32 Portal - " + s.env;
       $("#app-title").textContent = "ESP32 Portal - " + s.env;
     }
-    $("#uptime").textContent = "up " + hhmmss(s.uptimeMs);
-    $("#heap").textContent = "heap " + Math.round(s.freeHeap / 1024) + " KB";
     renderSystemStatus(s);
     // Вкладка з'являється сама, коли розділ реально є в прошивці - на платах
     // без HAS_SCREEN_MIRROR (без спрайта кадру, як esp32-c3, або з 1bpp-панеллю,

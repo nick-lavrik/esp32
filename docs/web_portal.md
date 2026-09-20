@@ -182,6 +182,12 @@ web auth off                # вимкнути автентифікацію
 > не йде, а стан Wi-Fi опитується лише поки відкрита його вкладка. Список
 > профілів по таймеру не тягнеться взагалі — лише при відкритті вкладки й після
 > дій, що його змінюють.
+>
+> **Глобальна пауза — один прапорець на всі виклики `poller()`.** Кнопка
+> «Pause polling» у шапці (`#btn-pause-poll`) виставляє `pollingPaused`, і
+> кожен `poller()` перевіряє його поруч із `document.hidden` — окремого
+> прапорця чи реєстру активних опитувальників не заведено: усі вони й так
+> ідуть через одну функцію.
 
 > **Пастка `AsyncEventSource`, яка коштувала пів дня.** `_addClient()` бере
 > `std::mutex` списку клієнтів і кличе `onConnect`, не відпустивши його. Мьютекс
@@ -219,11 +225,24 @@ web auth off                # вимкнути автентифікацію
   pending jobs — `/api/status`) і Network (стан Wi-Fi, IP, шлюз, тип
   з'єднання, точка доступу — `/api/wifi/status`, той самий, що й вкладка
   Wi-Fi). Оновлюються самі, разів на 5-10 с, поки вкладка відкрита.
-- **Дорогі/рідкісні, лише за запитом** — Memory (деталі heap: total/largest
-  block/фрагментація/min free ever), Storage (LittleFS + SD-картка, якщо є),
-  Flash (розмір/швидкість чипа, таблиця розділів), NVS (used/free/total
-  entries, кількість namespace'ів) — усі одним `GET /api/system/info`
+- **Дорогі/рідкісні, лише за запитом** — Chip (модель, ревізія, ядра, частота
+  CPU, PSRAM), Memory (деталі heap: total/largest block/фрагментація/min free
+  ever), Storage (LittleFS + SD-картка, якщо є), Flash (розмір/швидкість
+  флеш-чипа, таблиця розділів), NVS (used/free/total entries, кількість
+  namespace'ів) — усі одним `GET /api/system/info`
   (`lib/WebPortal/WebSystemModule.{hpp,cpp}`).
+
+**Паспорт чипа (18-20.09.2026).** `ESP.getChipModel()`/`getChipRevision()`/
+`getChipCores()`/`getCpuFreqMHz()`/PSRAM — та сама інформація, що вже друкує
+серійна команда `sysinfo` (`dumpSystemInfo()`, `src/main.cpp`), тепер і в
+JSON (`chipInfoJson()`, `WebSystemModule.cpp`), у тому ж `dl`, що й
+розмір/швидкість флеша (`#sys-device-flash`) — обидва описують один фізичний
+модуль. На ESP8266 (без `getChipModel()`/`getChipRevision()`) — лише назва
+чипа й одне ядро, за зразком гілки ESP32/ESP8266 у `heapStatsJson()`. Частота
+кристала (26 МГц у виводі `esptool`) не увійшла — на платі це число з
+build-time визначення чипа при прошивці, рантайм-API для нього
+чіп-специфічне (різні заголовки на ESP32/C3/C6/S3) і не варте ускладнення
+заради однієї строки на сторінці.
 
 **Чому другий блок не в `/api/status`.** Ці дані або чіпають flash (NVS
 stats, partition table, SD), або дорого рахувати щотік (heap_caps_* по всій

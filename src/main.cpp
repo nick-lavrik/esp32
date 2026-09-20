@@ -3420,7 +3420,13 @@ void setupSerialCommander() {
     _log.info("fragmentation: %u%%  (free minus largest = %u B in holes)",
               (unsigned)ESP.getHeapFragmentation(), (unsigned)(freeNow - largest));
 #endif
-    _log.info("uptime       : %lu s", (unsigned long)(millis() / 1000UL));
+    const unsigned long uptimeSec = millis() / 1000UL;
+    const unsigned long uptimeDays = uptimeSec / 86400UL;
+    const unsigned long uptimeHours = (uptimeSec % 86400UL) / 3600UL;
+    const unsigned long uptimeMins = (uptimeSec % 3600UL) / 60UL;
+    const unsigned long uptimeSecs = uptimeSec % 60UL;
+    _log.info("uptime       : %lu s  (%lud %02luh %02lum %02lus)", uptimeSec, uptimeDays, uptimeHours,
+              uptimeMins, uptimeSecs);
   });
 
   // Постійний інструмент діагностики heap (docs/tech_debt.md, розділ 4,

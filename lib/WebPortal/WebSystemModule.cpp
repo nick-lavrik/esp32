@@ -52,6 +52,35 @@ String heapStatsJson() {
 #endif
 }
 
+// Паспорт самого чипа (модель, ревізія, ядра, частота, PSRAM) - статичні дані,
+// які ніде на порталі ще не показано; та сама інформація вже друкує серійна
+// команда 'sysinfo' (dumpSystemInfo(), src/main.cpp), тут лише її JSON-зріз.
+String chipInfoJson() {
+#if defined(ESP32)
+  String json = "{\"model\":";
+  json += webjson::quote(ESP.getChipModel());
+  json += ",\"revision\":";
+  json += (int)ESP.getChipRevision();
+  json += ",\"cores\":";
+  json += (int)ESP.getChipCores();
+  json += ",\"cpuFreqMHz\":";
+  json += (int)ESP.getCpuFreqMHz();
+  json += ",\"psramFound\":";
+  json += webjson::boolean(psramFound());
+  json += ",\"psramBytes\":";
+  json += psramFound() ? (uint32_t)ESP.getPsramSize() : 0;
+  json += "}";
+  return json;
+#else
+  // ESP8266 не має getChipModel()/getChipRevision() (той самий виняток, що в
+  // heapStatsJson() вище) - лишається ChipId і єдине ядро.
+  String json = "{\"model\":\"ESP8266\",\"cores\":1,\"cpuFreqMHz\":";
+  json += (int)ESP.getCpuFreqMHz();
+  json += ",\"psramFound\":false,\"psramBytes\":0}";
+  return json;
+#endif
+}
+
 String flashStatsJson() {
   String json = "{\"sizeBytes\":";
   json += (uint32_t)ESP.getFlashChipSize();
@@ -122,7 +151,9 @@ void WebSystemModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) 
 }
 
 String WebSystemModule::_infoJob() {
-  String json = "{\"ok\":true,\"heap\":";
+  String json = "{\"ok\":true,\"chip\":";
+  json += chipInfoJson();
+  json += ",\"heap\":";
   json += heapStatsJson();
   json += ",\"flash\":";
   json += flashStatsJson();
