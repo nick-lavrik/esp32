@@ -149,6 +149,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <RwLock.hpp>
 #include <SerialCommander.hpp>
 #include <SystemReset.hpp>
+#include <Watchdog.hpp>
 #include <TaskController.hpp>
 #include <Trace.hpp>
 #include <NetworkSupervisor.hpp>
@@ -229,6 +230,18 @@ const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
 const char* CFG_ECOFLOW_SYNC_BOOT = "ecoflow.sync";
 // dump ecoflow device status each minute
 const char* CFG_ECOFLOW_WATCH = "ecoflow.watch";
+// Build-time дефолт для Watchdog::begin() (Watchdog.hpp, озброюється в кінці
+// setup()) - визначено ТУТ, а не біля виклику в setup(), бо
+// setupSerialCommander() (команда 'watchdog', вище файлом) теж на нього
+// дивиться, а препроцесор бачить лише те, що визначено ВИЩЕ по файлу.
+#ifndef WATCHDOG_ENABLED
+#define WATCHDOG_ENABLED 1
+#endif
+// runtime-override для WATCHDOG_ENABLED: "1"/"0"; порожнє -> build-time
+// дефолт. Вимикати перед довгими SD-командами (sdbench/sdcrc/sdmap - свідомо
+// блокують loop() на десятки секунд, CommandQueue.cpp) - інакше watchdog
+// зніме плату посеред легітимного вимірювання. Команда 'watchdog on|off'.
+const char* CFG_WATCHDOG = "watchdog";
 // periodic 'heap' sampling (тимчасова діагностика фрагментації, docs/tech_debt.md)
 const char* CFG_HEAP_WATCH = "heap.watch";
 // Останні випущені app-креденшели (команда 'ecoflow-login'). Зберігаються
@@ -3586,6 +3599,33 @@ void setupSerialCommander() {
 #endif
   });
 
+  // command: watchdog
+  //
+  // Той самий патерн, що ecoflow-auto/ecoflow-sync: build-time дефолт
+  // (WATCHDOG_ENABLED) + runtime-override у ConfigStorage, що діє з
+  // наступного ребуту - не живий перемикач посеред сесії. Вимикати перед
+  // sdbench/sdcrc/sdmap (свідомо блокують loop() на десятки секунд) і
+  // вмикати назад після.
+  commandHandler.registerCommand(
+      "watchdog",
+      "loop() hang watchdog, auto-reset on freeze: watchdog [on|off] (applies on next boot)",
+      [](const String args) {
+        static const TLogger _log{"wdog"};
+        String value = args;
+        value.trim();
+        if (value.length() == 0) {
+          String stored = configStorage.getString(CFG_WATCHDOG, "");
+          _log.info("watchdog = %s%s",
+                    stored.length() > 0 ? (stored.toInt() ? "on" : "off")
+                                        : (WATCHDOG_ENABLED ? "on" : "off"),
+                    stored.length() > 0 ? "" : " (build-time default)");
+          return;
+        }
+        const bool on = (value == "on" || value == "1" || value == "true");
+        configStorage.setString(CFG_WATCHDOG, on ? "1" : "0");
+        _log.info("watchdog = %s (applies on next boot)", on ? "on" : "off");
+      });
+
   registerNetCommand(commandHandler, netSupervisor);
   registerJournalCommand(commandHandler);
 
@@ -5165,6 +5205,25 @@ void setup() {
   Logger::debug("free heap memory: %u", ESP.getFreeHeap());
   Logger::info("");
   Logger::info("> Ready. Enter 'list' for comand list.");
+
+  // Останнім рядком - після setup(), а не на початку: сам setup() законно
+  // довший за timeoutMs (TLS-хендшейки EcoFlow/MQTT, декодування фону), і
+  // жоден з його кроків не годує watchdog.
+  //
+  // Опційний, за зразком ECOFLOW_AUTOCONNECT/ECOFLOW_SYNC_ON_BOOT: build-time
+  // дефолт (WATCHDOG_ENABLED, визначено вище файлом) + runtime-override у
+  // ConfigStorage ('watchdog on|off', застосовується з наступного ребуту).
+  // Вимикається свідомо, а не годується з довгих SD-команд (sdbench/sdcrc/
+  // sdmap) - ці команди живуть у lib/SDRawReader, яка НЕ повинна знати про
+  // Watchdog застосунку (lib/SystemReset/Watchdog.hpp).
+  String watchdogStored = configStorage.getString(CFG_WATCHDOG, "");
+  const bool watchdogEnabled =
+      watchdogStored.length() > 0 ? (watchdogStored.toInt() != 0) : (WATCHDOG_ENABLED != 0);
+  if (watchdogEnabled) {
+    Watchdog::begin();
+  } else {
+    Logger::warn("watchdog disabled ('watchdog on' + reboot to re-enable)");
+  }
 }
 
 #if ESP32
@@ -5172,6 +5231,11 @@ void setup() {
 #endif
 int wifi_state = 0;
 void loop() {
+  // Найперший рядок - до будь-яких ранніх return (напр. isSdImageModeActive()
+  // нижче): інакше та гілка, що їх має, watchdog не годує, і він спрацював
+  // би на легітимному, просто довшому шляху.
+  Watchdog::keepalive();
+
 #if defined(BOARD_ESP32_S3_LCD147)
   remountCardIfMscAsked();
 #endif
