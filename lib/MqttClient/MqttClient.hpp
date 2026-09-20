@@ -180,6 +180,39 @@ public:
 
   bool isConnected() const { return _connected; };
 
+  // Host/port/security/clientId - та сама MqttConfig, з якою клієнт піднявся
+  // (begin()), тому завжди відповідає реальному з'єднанню. Для веб-порталу
+  // (WebMqttModule) і команди 'dump-mqtt' (src/main.cpp) - щоб не тримати
+  // другу копію цих значень поза MqttConfig (DRY).
+  const char* host() const { return _config.host; }
+  uint16_t port() const { return _config.port; }
+  bool usesTls() const { return _config.useTls; }
+  const char* clientId() const { return _config.clientId; }
+  // nullptr, якщо useAuth == false (анонімний конект) - той самий прапорець,
+  // що вирішує, чи взагалі передавати креденшли в connect().
+  const char* username() const { return _config.useAuth ? _config.username : nullptr; }
+
+  // Скільки повідомлень реально опубліковано/доставлено дзвінком слухача
+  // з моменту старту клієнта - той самий сенс, що messageCount() у
+  // EcoflowClient, для показу "активності" в UI. Рахує КОЖЕН publish()
+  // (незалежно від успіху) і кожне повідомлення, що дійшло до dispatchMessage()
+  // (тобто пройшло echo-фільтр) - НЕ атомарні: обидва лічильники чіпає лише
+  // головний потік (publish() з коду скетчу, dispatchMessage() з loop()), як і
+  // EcoflowClient::_messageCount.
+  uint32_t publishedCount() const { return _publishedCount; }
+  uint32_t receivedCount() const { return _receivedCount; }
+
+#if defined(ESP32)
+  // Скільки разів брокер за весь час роботи відхилив SUBSCRIBE (SUBACK=0x80) -
+  // накопичувальна версія _subscribeDenied (та скидається кожен звіт у
+  // reportDroppedMessages(), ця - ні). Головний сигнал "ACL зламано" для UI:
+  // isConnected() лишається true, а підписки мовчки порожні (EcoFlow-урок,
+  // docs/tech_debt.md, "відкликані ключі").
+  uint32_t subscribeDeniedCount() const { return _subscribeDeniedTotal; }
+#else
+  uint32_t subscribeDeniedCount() const { return 0; }
+#endif
+
 private:
   std::atomic<bool> _connected{false};
 
@@ -260,6 +293,11 @@ private:
   MqttListenerId _nextListenerId = 1;
   uint32_t _lastReconnectAttempt = 0;
 
+  // Накопичувальні лічильники для UI (host()/port()/... вище) - див.
+  // коментар біля publishedCount()/receivedCount().
+  uint32_t _publishedCount = 0;
+  uint32_t _receivedCount = 0;
+
   // Переюзний буфер під колбеки, що підійшли під топік - див. dispatchMessage().
   std::vector<MqttListenerCallback> _dispatchScratch;
 
@@ -317,6 +355,8 @@ private:
   // поводиться EcoFlow, коли accessKey відкликано: конект проходить, права -
   // порожні. Інкрементує мережевий таск, читає й скидає loop().
   std::atomic<uint32_t> _subscribeDenied{0};
+  // Та сама подія, але без скидання - джерело subscribeDeniedCount() вище.
+  std::atomic<uint32_t> _subscribeDeniedTotal{0};
 
 #if __has_include(<PicoMQTT.h>)
   // Черга вихідних команд (тільки PicoMQTT) - див. коментар вище біля

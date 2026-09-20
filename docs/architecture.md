@@ -1177,6 +1177,52 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-09-20 — **новий розділ веб-порталу «MQTT»** (`lib/WebPortal/WebMqttModule`,
+  `docs/web_portal.md`) + однойменна картка на System — стан ЗАГАЛЬНОГО
+  клієнта (`mqtt`/`ConsoleMqtt`, не EcoFlow — у того свій розділ): host/port/
+  security, накопичувальні `publishedCount()`/`receivedCount()` (нові поля
+  `MqttClient`, не атомарні — головний потік і так єдиний власник, як і
+  `EcoflowClient::_messageCount`), `subscribeDeniedCount()` (накопичувальна
+  версія `_subscribeDenied`, той самий симптом, що «EcoFlow: відкликані
+  ключі» — конект живий, а ACL мовчки порожній) і стан дзеркала консолі
+  (`ConsoleMqtt::topic()`/`publishedCount()`/`droppedByRateLimitCount()`/
+  `allowRules()`/`denyRules()` — нові геттери, `dumpStatus()` перероблено на
+  них же, DRY). Привід — сама сесія переносу MQTT на rpi5 нижче: ACL для
+  нових плат забули додати мовчки, і про це дізнались лише з прямого
+  питання, а не з порталу. Нове правило — `CLAUDE.md`, «Видимість
+  MQTT-трафіку на веб-порталі»: новий канал, вартий власного стану
+  (перемикач, лічильник помилок), має лишитись видимим тут, а не тільки в
+  логу/serial. Технічний борг з тим самим підходом для `TaskController`
+  (картка System + вкладка Cron/Scheduler) — `docs/tech_debt.md`.
+- 2026-09-20 — **загальний MQTT-клієнт (`mqtt`/`ConsoleMqtt`) перенесено з
+  публічного `broker.hivemq.com` на локальний mosquitto rpi5 (192.168.1.22)**,
+  той самий хост, що вже слугує EcoFlow-проксі (`docs/ecoflow_mqtt_proxy_setup.md`).
+  `secrets.ini`: `mqtt_host` → `192.168.1.22`, `mqtt_username`/`mqtt_password`
+  тепер посилаються на `${secrets.ecoflow_proxy_username}`/`${secrets.ecoflow_proxy_password}`
+  (ті самі LAN-креденшли, не дублюємо секрет удруге - DRY). Колізії з
+  EcoFlow-клієнтом нема: два клієнти на тому самому брокері мають різні
+  `clientId` (`mqtt-<env>` проти `ANDROID_mqtt-<env>-ecoflow_<userId>`) — саме
+  для цього вони й були розведені раніше (коментар у `makeEcoflowConfig()`,
+  `src/main.cpp`). ACL на rpi5 - глобальний `/etc/mosquitto/aclfile`
+  (підключений з `mosquitto.conf`, не з `conf.d/ecoflow-proxy.conf`, де
+  однойменна директива лишилась закоментованою старим слідом - уточнено
+  `docs/tech_debt.md`) - і він enforced: без явного дозволу все за
+  замовчуванням заборонено. Кожному з 8 користувачів дописано `topic
+  readwrite mykola-lavryk/#` - без цього рядка загальний клієнт мовчки не
+  зміг би публікувати й підписуватись на власні топіки (та сама пастка, що
+  вже відома з EcoFlow-проксі). Окремого правила під LWT-топік
+  (`devices/<env>/status`) не треба - `MqttKeyGenerator`
+  (`lib/MqttClient/MqttKeyGenerator.cpp`) загортає геть усе, що йде через цей
+  клієнт, під той самий префікс `mykola-lavryk`, LWT не виняток.
+  На rpi5 акаунт (`/etc/mosquitto/ecoflow_proxy_passwd`) до цього мали лише 4
+  плати, що вже ходять через EcoFlow-проксі (`ttgo-t1`/`esp32-c3`/`esp32-st7789`/
+  `esp32-c6`) — дописано ще 4 (`esp32-4848s040`/`esp32-s3-lcd147`/`esp8266`/
+  `esp32-c6-lcd096`), тим самим паролем-гейта, через `mosquitto_passwd -b` без
+  `-c` (не чіпає наявні записи) і `systemctl reload` (SIGHUP), а не `restart` -
+  перезавантаження зняло б бридж і всі активні сесії плат, чого свідомо
+  уникнули: якраз ішов замір "коли DELTA 2 замовкне" (`docs/tech_debt.md`),
+  і reload підтверджено не перервав його (лічильник ріс без розриву до і
+  після).
 - 2026-09-16 — **тестова таблиця дисплея** (`src/TestGfx.hpp`/`.cpp`, команда
   `test-gfx on|off|<pattern>`) — усі плати з дисплеєм. Закриває борг із
   `docs/tech_debt.md` розділ 3 («Команда перевірки дисплея»). Шість патернів

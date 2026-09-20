@@ -176,6 +176,9 @@ using ActiveBulkReader = SdSpiBulkReader;
 #if HAS_SCREEN_MIRROR
 #include <WebScreenModule.hpp>
 #endif
+#if HAS_MQTT_CLIENT
+#include <WebMqttModule.hpp>
+#endif
 #endif
 
 // HAS_ECOFLOW_CLIENT приходить з build_flags (див. platformio.ini, env з
@@ -468,6 +471,15 @@ WebSystemModule webSystemModule(littleFsUsage);
 // (esp8266) віддавати браузеру нічого не може - там розділу просто немає
 // (див. HAS_SCREEN_MIRROR у src/Display.h).
 WebScreenModule webScreenModule;
+#endif
+#if HAS_MQTT_CLIENT
+// Розділ "mqtt": стан ЗАГАЛЬНОГО клієнта (mqtt/consoleMqtt, оголошені вище,
+// стор. 345-357) - НЕ EcoflowClient, у нього свій розділ нижче.
+#if HAS_CONSOLE_MQTT
+WebMqttModule webMqttModule(mqtt, consoleMqtt);
+#else
+WebMqttModule webMqttModule(mqtt);
+#endif
 #endif
 #if HAS_ECOFLOW_CLIENT
 // Розділ живе в src/Ecoflow, не в lib/WebPortal - див. коментар у
@@ -1695,13 +1707,22 @@ void setupMqttClient() {
 #endif
 
   commandHandler.registerCommand("dump-mqtt", "show MQTT status", [](const String args) {
-    _logger.info("isConnected = %s, topic prefix = '%s'", mqtt.isConnected() ? "yes" : "no",
-                 mqtt.keyGenerator().prefix().c_str());
+    // Охайна табличка (CLAUDE.md, "Охайні логи") - той самий підхід, що
+    // 'web status' (label, вирівняний на 9 символів, ':' одним стовпчиком).
+    _logger.info("connected : %s", mqtt.isConnected() ? "yes" : "no");
+    _logger.info("broker    : %s:%d", mqtt.host() ? mqtt.host() : "", (int)mqtt.port());
+    _logger.info("security  : %s", mqtt.usesTls() ? "TLS" : "plain");
+    _logger.info("client    : %s", mqtt.clientId() ? mqtt.clientId() : "");
+    _logger.info("login     : %s", mqtt.username() ? mqtt.username() : "(anonymous)");
+    _logger.info("prefix    : '%s'", mqtt.keyGenerator().prefix().c_str());
+    _logger.info("published : %u", (unsigned)mqtt.publishedCount());
+    _logger.info("received  : %u", (unsigned)mqtt.receivedCount());
+    _logger.info("denied    : %u subscribe(s) rejected by broker (ACL)", (unsigned)mqtt.subscribeDeniedCount());
     // Запас стека мережевого таска. Потрібен не з цікавості: фільтр дзеркала
     // консолі (lib/ConsoleMqtt) виконує regexec() у КОЖНОМУ таску, що логує -
     // тобто й тут. У проєкті вже є урок про зрізаний стек TLS-таска, який
     // закінчився зависанням без panic-логу, тому це має бути видно командою.
-    _logger.info("network task stack headroom = %u B", (unsigned)mqtt.networkTaskStackHeadroom());
+    _logger.info("stack     : %u B headroom (network task)", (unsigned)mqtt.networkTaskStackHeadroom());
   });
 
   commandHandler.registerCommand(
@@ -4503,6 +4524,9 @@ void setupWebPortal() {
   webPortal.addModule(&webSystemModule);
 #if HAS_SCREEN_MIRROR
   webPortal.addModule(&webScreenModule);
+#endif
+#if HAS_MQTT_CLIENT
+  webPortal.addModule(&webMqttModule);
 #endif
 #if HAS_ECOFLOW_CLIENT
   webPortal.addModule(&webEcoflowModule);

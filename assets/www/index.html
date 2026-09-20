@@ -605,6 +605,17 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
     </svg>
     <span class="tab-label">EcoFlow</span>
   </button>
+  <!-- hidden за замовчуванням: показує лише pollStatus(), коли "mqtt" є
+       у списку "modules" з /api/status - на платах без HAS_MQTT_CLIENT
+       розділу в прошивці просто немає. -->
+  <button data-tab="mqtt" aria-label="MQTT" id="nav-mqtt" hidden>
+    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/>
+      <path d="M7 7.5 10.3 16.5M17 7.5 13.7 16.5"/>
+    </svg>
+    <span class="tab-label">MQTT</span>
+  </button>
   <!-- Console - завжди остання вкладка (docs: web-portal SKILL.md, "Порядок
        вкладок"): це журнал і аварійний доступ, а не робочий розділ. -->
   <button data-tab="console" aria-label="Console">
@@ -654,6 +665,17 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
   <h2>EcoFlow <span id="sys-ecoflow-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
   <dl id="sys-ecoflow-summary"></dl>
   <div id="sys-ecoflow-devices"></div>
+  </div>
+
+  <!-- Прихована, поки в /api/status.modules немає "mqtt" (та сама умова, що
+       відкриває #nav-mqtt, pollStatus()) - на платах без HAS_MQTT_CLIENT
+       картки просто нема. CLAUDE.md, "Видимість MQTT-трафіку на веб-порталі":
+       нова публікація/підписка на загальному клієнті лишається видимою тут
+       (лічильники publishedCount/receivedCount ростуть на будь-якому трафіку,
+       а не лише на перелічених у renderMqttSystemSummary рядках). -->
+  <div class="card" id="sys-mqtt-wrap" hidden>
+  <h2>MQTT</h2>
+  <dl id="sys-mqtt-summary"></dl>
   </div>
 
   <div class="card">
@@ -960,6 +982,16 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
   </details>
 </section>
 
+<section id="tab-mqtt">
+  <h2>Connection</h2>
+  <dl id="mqtt-status"></dl>
+
+  <h2>Console mirror</h2>
+  <p class="muted">Same on/off state and rules as the <code>console-mqtt</code> serial command - this
+     is a read-only view, change it from Commands or the serial console.</p>
+  <dl id="mqtt-console"></dl>
+</section>
+
 <section id="tab-console">
   <h2 class="hrow">Log <span id="feed" class="muted" style="font-size:.75em; font-weight:400; cursor:pointer"></span>
     <!-- За замовчуванням увімкнено (без .ghost): вивід команд - таблиці,
@@ -1070,6 +1102,7 @@ function activateTab(name) {
   if (name === "system") {
     pollStatus(); refreshWifiStatus(); refreshSystemInfo();
     if (!$("#sys-ecoflow-wrap").hidden) refreshEcoflow();
+    if (!$("#sys-mqtt-wrap").hidden) refreshMqtt();
   }
   if (name === "wifi") refreshWifi();
   if (name === "commands") refreshShortcuts();
@@ -1080,6 +1113,7 @@ function activateTab(name) {
   // Так само, як із namespace NVS: повертаємось у той каталог, де були.
   if (name === "files") refreshFiles(fsData.path);
   if (name === "ecoflow") refreshEcoflow();
+  if (name === "mqtt") refreshMqtt();
   // Поки вкладка прихована, у #log clientHeight/scrollHeight - нулі, тому
   // scrollTop = scrollHeight в appendTo() нічого не робить, і накопичені
   // під час паузи рядки лишають стрічку прокрученою вгору. Довести вручну.
@@ -3065,6 +3099,72 @@ async function refreshEcoflow() {
   } catch (e) { /* пристрій міг тимчасово не відповісти - наступний тік спробує знову */ }
 }
 
+/* ---------------- mqtt ---------------- */
+
+const onMqttTab = () => $("#tab-mqtt").classList.contains("active");
+
+// subscribeDeniedCount > 0 - брокер відхилив підписку (ACL), клієнт лишається
+// "connected", але мовчить: той самий симптом, що в docs/tech_debt.md,
+// "EcoFlow: відкликані ключі" - тому окремий колір, а не звичайний рядок dl.
+function mqttDeniedText(count) {
+  if (count === 0) return "0";
+  return `<span style="color:var(--err)">${count} - check ACL (docs/ecoflow_mqtt_proxy_setup.md)</span>`;
+}
+
+// Спільний рядок dt/dd для повної вкладки MQTT (renderMqtt) і компактного
+// блоку на System (renderMqttSystemSummary) - той самий підхід, що
+// ecoDeviceDetailRows() для EcoFlow (DRY).
+function mqttConnectionRows(data) {
+  return [
+    ["Connection", data.connected ? "connected" : "disconnected", true],
+    ["Broker", data.host + ":" + data.port],
+    ["Security", data.security === "tls" ? "TLS" : "plain"],
+    ["Client ID", data.clientId],
+    ["Topic prefix", data.topicPrefix],
+    ["Published / received", data.publishedCount + " / " + data.receivedCount],
+    ["Subscribe denied", mqttDeniedText(data.subscribeDeniedCount), true],
+  ];
+}
+
+function mqttConsoleMirrorRows(cm) {
+  if (!cm.available) return [["Console mirror", "not built into this firmware"]];
+  const rules = cm.allowRules.length + cm.denyRules.length;
+  const rulesText = rules === 0 ? "none (everything goes out)" :
+    [...cm.allowRules.map((t) => "allow " + t), ...cm.denyRules.map((t) => "deny " + t)].join(", ");
+  return [
+    ["Mirror", cm.active ? "on" : "off", true],
+    ["Topic", escapeHtml(cm.topic)],
+    ["Published / dropped (rate limit)", cm.publishedCount + " / " + cm.droppedByRateLimitCount],
+    ["Tag rules", escapeHtml(rulesText)],
+  ];
+}
+
+function renderMqtt(data) {
+  $("#mqtt-status").innerHTML = mqttConnectionRows(data)
+    .map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
+  $("#mqtt-console").innerHTML = mqttConsoleMirrorRows(data.consoleMirror)
+    .map(([k, v]) => "<dt>" + k + "</dt><dd>" + v + "</dd>").join("");
+}
+
+function renderMqttSystemSummary(data) {
+  const rows = mqttConnectionRows(data);
+  if (data.consoleMirror.available) {
+    rows.push(["Console mirror", data.consoleMirror.active ? "on" : "off", true]);
+  }
+  $("#sys-mqtt-summary").innerHTML = rows
+    .map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
+}
+
+async function refreshMqtt() {
+  try {
+    const data = await api("/api/mqtt/status");
+    renderMqtt(data);
+    // Той самий знімок живить і компактний блок на System - другого запиту
+    // під нього не заводимо (DRY), як і для EcoFlow (refreshEcoflow).
+    renderMqttSystemSummary(data);
+  } catch (e) { /* пристрій міг тимчасово не відповісти - наступний тік спробує знову */ }
+}
+
 /* ---------------- boot ---------------- */
 
 // hh:mm:ss без обмеження на добу: пристрій живе тижнями, і "3:14:07" після
@@ -3108,6 +3208,14 @@ async function pollStatus() {
       $("#sys-ecoflow-wrap").hidden = false;
       if (onEcoflowTab() || onSystemTab()) refreshEcoflow();
     }
+    // Те саме для MQTT - на платах без HAS_MQTT_CLIENT "mqtt" у списку
+    // "modules" немає. CLAUDE.md, "Видимість MQTT-трафіку на веб-порталі".
+    const navMqtt = $("#nav-mqtt");
+    if (navMqtt.hidden && (s.modules || []).includes("mqtt")) {
+      navMqtt.hidden = false;
+      $("#sys-mqtt-wrap").hidden = false;
+      if (onMqttTab() || onSystemTab()) refreshMqtt();
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -3128,6 +3236,9 @@ poller(pollStatus, 10000);
 // System (renderEcoflowSystemSummary у refreshEcoflow) - тому опитує, поки
 // видима будь-яка з двох.
 poller(refreshEcoflow, 5000, () => onEcoflowTab() || onSystemTab());
+// Той самий знімок потрібен і повній вкладці MQTT, і компактному блоку на
+// System (renderMqttSystemSummary у refreshMqtt).
+poller(refreshMqtt, 5000, () => onMqttTab() || onSystemTab());
 </script>
 </body>
 </html>

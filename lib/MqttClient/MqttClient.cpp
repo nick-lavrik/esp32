@@ -572,6 +572,7 @@ void MqttClient::setEchoIgnoreTopic(const char* topic) {
 }
 
 bool MqttClient::publish(const char* topic, const char* payload, bool retained) {
+  ++_publishedCount;
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
 #if defined(ESP32)
@@ -590,6 +591,7 @@ bool MqttClient::publish(const char* topic, const char* payload, bool retained) 
 }
 
 bool MqttClient::publish(const char* topic, const uint8_t* payload, unsigned int length, bool retained) {
+  ++_publishedCount;
   std::string fullTopic = resolveTopic(topic);
 #if __has_include(<PubSubClient.h>)
 #if defined(ESP32)
@@ -812,6 +814,7 @@ void MqttClient::resubscribeAll() {
     bool accepted = _mqttClient.PicoMQTT::BasicClient::subscribe(topic.c_str(), 0, &qosGranted);
     if (!accepted || qosGranted == 0x80) {
       _subscribeDenied.fetch_add(1, std::memory_order_relaxed);
+      _subscribeDeniedTotal.fetch_add(1, std::memory_order_relaxed);
       Logger::error("subscribe %s denied", topic.c_str());
     }
 #endif
@@ -819,6 +822,7 @@ void MqttClient::resubscribeAll() {
 }
 
 void MqttClient::dispatchMessage(const char* topic, const uint8_t* payload, unsigned int length) {
+  ++_receivedCount;
   // Матчинг топіка робимо ПІД локом (MqttTopicMatcher::match - чиста й дешева
   // функція), а копіюємо лише колбеки тих слухачів, що реально підійшли -
   // зазвичай нуль або один. Раніше тут копіювався ВЕСЬ _listeners (String +

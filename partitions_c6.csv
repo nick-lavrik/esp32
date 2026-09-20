@@ -8,8 +8,11 @@
 # бо PlatformIO (platform-espressif32) у поточній версії ігнорує
 # board_upload.offset_address і завжди пише firmware.bin саме на 0x10000.
 #
-# app-розділ 2Mb — з запасом під Arduino_GFX + мережевий стек (WiFi/MQTT/
-# HTTP-сервер), без PSRAM тому й без LovyanGFX/великих буферів.
+# app-розділ 3Mb — з запасом під Arduino_GFX + мережевий стек (WiFi/MQTT/
+# HTTP-сервер/EcoFlow TLS-проксі), без PSRAM тому й без LovyanGFX/великих
+# буферів. Було 2Mb; 2026-09-20 прошивка виросла до 2284912 байт (EcoFlow
+# MQTT TLS proxy) і перестала вміщатись — розширено за рахунок spiffs,
+# де вільно з великим запасом (BACKGROUND_IMAGES_COUNT=0 на цій платі).
 #
 # Розділ під LittleFS названо (і типізовано) як 'spiffs' — стандартна
 # назва за замовчуванням для LittleFS.begin() без додаткових параметрів.
@@ -18,14 +21,14 @@
 # дамп пам'яті після краху для подальшого аналізу через espcoredump.py.
 # Без нього застосунок працює нормально, лише пише попередження при бут.
 #
-# app      - 0x200000 - 2Mb
+# app      - 0x300000 - 3Mb
 # nvs      - 0x0F0000 - 960Kb  (з запасом під ConfigStorage)
 # coredump - 0x010000 - 64Kb
-# littlefs - 0x4F0000 - ~5.06Mb (BackgroundImages/JPEG, статика HTTP-сервера)
+# littlefs - 0x3F0000 - ~3.94Mb (BackgroundImages/JPEG, статика HTTP-сервера)
 #
 # Name,      Type,  SubType,   Offset,    Size,      Flags
 phy_init,    data,  phy,       0x009000,  0x001000,
-app,         app,   factory,   0x010000,  0x200000,
-coredump,    data,  coredump,  0x210000,  0x010000,
-nvs,         data,  nvs,       0x220000,  0x0F0000,
-spiffs,      data,  spiffs,    0x310000,  0x4F0000,
+app,         app,   factory,   0x010000,  0x300000,
+coredump,    data,  coredump,  0x310000,  0x010000,
+nvs,         data,  nvs,       0x320000,  0x0F0000,
+spiffs,      data,  spiffs,    0x410000,  0x3F0000,

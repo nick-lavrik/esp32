@@ -239,25 +239,32 @@ bool ConsoleMqtt::deliver(const JournalEntry& entry) {
   return true;
 }
 
+std::vector<std::string> ConsoleMqtt::allowRules() const {
+  std::vector<std::string> out;
+  for (size_t i = 0; i < kMaxRules; ++i) {
+    if (_allow[i][0] != '\0') out.emplace_back(_allow[i]);
+  }
+  return out;
+}
+
+std::vector<std::string> ConsoleMqtt::denyRules() const {
+  std::vector<std::string> out;
+  for (size_t i = 0; i < kMaxRules; ++i) {
+    if (_deny[i][0] != '\0') out.emplace_back(_deny[i]);
+  }
+  return out;
+}
+
 void ConsoleMqtt::dumpStatus() const {
   _logger.info("mirror = %s, topic = '%s'", _active ? "on" : "off", resolvedTopic().c_str());
   _logger.info("published = %u, dropped by rate limit = %u (limit %u lines/s, burst %u)",
                (unsigned)_published, (unsigned)_droppedRate, (unsigned)kRatePerSec, (unsigned)kBurst);
 
-  size_t rules = 0;
-  for (size_t i = 0; i < kMaxRules; ++i) {
-    if (_allow[i][0] != '\0') {
-      _logger.info("  allow %s", _allow[i]);
-      ++rules;
-    }
-  }
-  for (size_t i = 0; i < kMaxRules; ++i) {
-    if (_deny[i][0] != '\0') {
-      _logger.info("  deny  %s", _deny[i]);
-      ++rules;
-    }
-  }
-  if (rules == 0) {
+  const auto allow = allowRules();
+  const auto deny = denyRules();
+  for (const auto& tag : allow) _logger.info("  allow %s", tag.c_str());
+  for (const auto& tag : deny) _logger.info("  deny  %s", tag.c_str());
+  if (allow.empty() && deny.empty()) {
     _logger.info("  (no tag rules - everything goes out)");
   }
 }

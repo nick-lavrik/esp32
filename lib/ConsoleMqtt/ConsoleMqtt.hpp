@@ -57,6 +57,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 // Стан дзеркала одразу після першого старту (поки не збережено в NVS).
 #ifndef CONSOLE_MQTT_ACTIVE
@@ -112,6 +113,15 @@ public:
   bool wouldPass(const char* tag) const { return passesFilters(tag); }
 
   void dumpStatus() const;
+
+  // Для веб-порталу (WebMqttModule) - той самий стан, що dumpStatus() пише в
+  // лог, лише структуровано замість тексту.
+  uint32_t publishedCount() const { return _published; }
+  uint32_t droppedByRateLimitCount() const { return _droppedRate; }
+  // Топік із префіксом - той самий resolvedTopic(), що й dumpStatus() (DRY).
+  std::string topic() const { return resolvedTopic(); }
+  std::vector<std::string> allowRules() const;
+  std::vector<std::string> denyRules() const;
 
 private:
   // Топік із префіксом - лише для показу людині (публікація резолвить його

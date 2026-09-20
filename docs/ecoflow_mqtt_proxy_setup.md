@@ -311,6 +311,91 @@ journalctl -u ecoflow-keepalive.service -n 20 --no-pager
 що крок 10.1 не застосовано (чи mosquitto ще не рестартували після нього) -
 дивитись у "Типові помилки" нижче.
 
+## Реєстрація нової плати (новий PIOENV) на rpi5
+
+Стосується **кожної** нової плати в проєкті (новий `[env:...]` у
+`platformio.ini`), не лише тих, що ходять через EcoFlow-проксі: з
+20.09.2026 `secrets.ini` (`mqtt_host`/`mqtt_username`/`mqtt_password`)
+вказує на цей самий rpi5 для загального MQTT-клієнта (консоль/команди/LWT,
+`docs/architecture.md`, Changelog) **на всіх платах проєкту**, не лише на
+проксі-платах. Без акаунту на rpi5 новий env мовчки не зможе підключити
+цей клієнт (`not authorised` у логу плати) — саме так пропустили 4 плати,
+коли переносили загальний клієнт (`docs/tech_debt.md`, розділ
+"MQTT-проксі: винести TLS з ESP32 на зовнішній хост", "Уточнення: ACL живе
+не там, де очікувалось").
+
+### Крок A — обов'язково для будь-якої нової плати (загальний MQTT)
+
+На rpi5, пароль — той самий спільний пароль-гейта, що вже лежить у
+`secrets.ini` (`ecoflow_proxy_password`) — окремий генерувати не треба,
+усі плати проєкту використовують один і той самий:
+
+```sh
+scp proxy_pw.txt <server>:/tmp/proxy_pw.txt   # той самий файл, що й крок 3
+PW=$(cat /tmp/proxy_pw.txt)
+sudo mosquitto_passwd -b /etc/mosquitto/ecoflow_proxy_passwd <новий-PIOENV> "$PW"
+unset PW
+shred -u /tmp/proxy_pw.txt
+```
+
+`-b` **без** `-c` — дописує нового користувача, не перезаписує файл і не
+чіпає наявні паролі (та сама пастка, що й крок 3 вище).
+
+У `/etc/mosquitto/aclfile` (**не** `ecoflow_proxy_acl` — ACL зараз тут,
+`docs/tech_debt.md`) дописати блок:
+
+```
+user <новий-PIOENV>
+topic readwrite mykola-lavryk/#
+```
+
+Без цього рядка загальний клієнт мовчки не зможе публікувати/підписуватись
+— ACL за замовчуванням забороняє все, чого нема в списку. Окремого правила
+під LWT-топік (`devices/<env>/status`) не треба — `MqttKeyGenerator`
+(`lib/MqttClient/MqttKeyGenerator.cpp`) загортає геть усе, що йде через цей
+клієнт, під той самий префікс `mykola-lavryk`.
+
+Застосувати без розриву активних сесій (бридж і плати, що вже підключені,
+не переривається):
+
+```sh
+sudo systemctl reload mosquitto
+```
+
+### Крок B — лише якщо плата ТЕЖ ходитиме через EcoFlow-проксі (без PSRAM)
+
+Додатково до кроку A, в тому самому редагуванні `aclfile` дописати під тим
+самим `user <PIOENV>` ще один рядок:
+
+```
+topic read /app/device/property/#
+```
+
+І виконати кроки 6–9 вище (`topic /app/device/property/<SN> in` у
+`ecoflow-proxy.conf` для кожного потрібного серійника, якщо їх ще нема;
+`ECOFLOW_MQTT_PROXY_HOST/_USERNAME/_PASSWORD` у `platformio.ini` цієї
+плати). Один `sudo systemctl reload mosquitto` після кроку A покриває й
+зміну в `aclfile` з цього кроку — двічі рестартувати не треба, якщо обидва
+рядки правились одним заходом.
+
+### Крок C — перевірка
+
+```sh
+pio run -e <новий-PIOENV> -t upload --upload-port <порт>
+```
+
+Загальний MQTT-клієнт живий, якщо дзеркало консолі видно ззовні
+(`docs/architecture.md`, "Дзеркало консолі в MQTT"):
+
+```sh
+mosquitto_sub -h 192.168.1.22 -u <новий-PIOENV> -P '<пароль-гейта>' \
+  -t 'mykola-lavryk/console/mqtt-<новий-PIOENV>' -v
+```
+
+Мають з'являтись ті самі рядки, що й у serial-моніторі. Тиша тут при
+живій платі — перше, що перевіряти: крок A (акаунт/ACL) чи `mqtt_host`/
+`mqtt_username` у зібраній прошивці.
+
 ## Обслуговування
 
 - **Зупинити keepalive (крок 10), тимчасово.**
