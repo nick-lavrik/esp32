@@ -218,7 +218,7 @@
 // 'ecoflow.auto' (команда 'ecoflow-auto on|off').
 #define ECOFLOW_AUTOCONNECT 1
 // ключ 'ecoflow.sync' (команда 'ecoflow-sync on|off').
-#define ECOFLOW_SYNC_ON_BOOT 1
+#define ECOFLOW_SYNC_ON_BOOT 0
 // ECOFLOW_MQTT_PROXY_HOST/USERNAME/PASSWORD лишаються в platformio.ini:
 // усі три беруться з secrets.ini (${secrets.*}) - заголовок не бачить
 // змінних PlatformIO, а розносити один логічний набір по двох файлах

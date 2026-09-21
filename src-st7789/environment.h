@@ -119,7 +119,8 @@
 
 // EcoFlow (HAS_ECOFLOW_CLIENT, розділ 2).
 #define ECOFLOW_AUTOCONNECT 1
-#define ECOFLOW_SYNC_ON_BOOT 1
+#define ECOFLOW_SYNC_ON_BOOT 0
 // ECOFLOW_MQTT_PROXY_HOST/USERNAME/PASSWORD лишаються в platformio.ini:
 // усі три беруться з secrets.ini (${secrets.*}) - заголовок не бачить
 // змінних PlatformIO.
+#define ECOFLOW_MQTT_SHARE_CLIENT 0

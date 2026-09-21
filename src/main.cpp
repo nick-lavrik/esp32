@@ -1193,17 +1193,21 @@ void setupEcoflow() {
   static TLogger _logger{"ecoflow"};
 
   // Журнали переходів grid - завантажити "hot" стан із NVS (переживає
-  // ребут), застосувати збережений перемикач запису, і одразу закомітити
-  // Boot-запис для кожного пристрою: одна подія на фізичний старт плати,
-  // потрібна, щоб відрізнити "нічого не змінилось" від "плата мовчала".
-  // Викликати ПІСЛЯ configStorage.begin() (setup(), раніше по файлу) -
-  // інакше нема звідки читати.
+  // ребут), застосувати збережений перемикач запису. Викликати ПІСЛЯ
+  // configStorage.begin() (setup(), раніше по файлу) - інакше нема звідки
+  // читати.
+  //
+  // Boot-запис для кожного пристрою - НЕ тут: recordBootForAll() навмисно
+  // відкладено до cron-умови нижче, що вже чекає ntp.isSynced() &&
+  // WiFi.isConnected() перед першим MQTT/REST-конектом. До цього моменту
+  // time(nullptr) ще не синхронізований, і Boot із заниженим epoch ламав
+  // межу AGE сусіднього Transition у ecoflow-journal show (docs/ecoflow.md,
+  // розділ «Журнал переходів grid»).
   ecoflowDevices.beginJournals(configStorage);
   String journalStored = configStorage.getString(CFG_ECOFLOW_JOURNAL, "");
   if (journalStored.length() > 0 && journalStored.toInt() == 0) {
     ecoflowDevices.setJournalPersistenceEnabledForAll(false);
   }
-  ecoflowDevices.recordBootForAll();
   // Live-чекпоінт - раз на 5 хв для кожного пристрою: звужує "невідоме
   // вікно" після наступного ребута до цього інтервалу замість "з часу
   // останнього справжнього переходу" (могло бути тижнями). Пише лише в
@@ -1360,9 +1364,19 @@ void setupEcoflow() {
   // ризик) не означає "MQTT теж не чекає нічого".
   static uint32_t ecoflowRestBaselineLargestBlock = 0;
   static bool ecoflowRestRequested = false;
+  static bool ecoflowBootRecorded = false;
   static TaskId ecoflowAuditTaskId = 0;
   ecoflowAuditTaskId = scheduler.addCronTask(2 * 1000UL, []() {
     if (!ntp.isSynced() || !WiFi.isConnected()) { return; }
+
+    // Пристрій "живий" лише тепер - NTP синхронізовано, WiFi піднято, час
+    // придатний для запису. Раніше (setupEcoflow()) Boot писався одразу в
+    // setup(), до NTP-синку - прапорець тут гарантує рівно один виклик за
+    // фізичний старт, як і розраховано в EcoflowGridJournal::recordBoot().
+    if (!ecoflowBootRecorded) {
+      ecoflowDevices.recordBootForAll();
+      ecoflowBootRecorded = true;
+    }
 
     if (!ecoflowSyncOnBoot) {
       scheduler.removeTask(ecoflowAuditTaskId);

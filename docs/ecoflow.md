@@ -383,7 +383,13 @@ EcoFlow віддає **одне** поле `remainTime` і на заряд, і �
   перша quota після ребута, що підтверджує ТОЙ САМИЙ стан, що був до
   ребута, коректно НЕ записується як новий перехід.
 - `Boot` — раз на фізичний старт плати (`EcoflowDeviceRegistry::
-  recordBootForAll()`, `setupEcoflow()`).
+  recordBootForAll()`), викликається НЕ з `setupEcoflow()`, а з тієї самої
+  cron-умови, що чекає `ntp.isSynced() && WiFi.isConnected()` перед першим
+  MQTT/REST-конектом (`main.cpp`, `ecoflowAuditTaskId`) - до цього моменту
+  `time(nullptr)` ще не синхронізований, і Boot із заниженим epoch ламав би
+  межу AGE сусіднього `Transition` у `ecoflow-journal show` (раніше писався
+  безумовно в `setup()`; прапорець `ecoflowBootRecorded` у самій cron-умові
+  гарантує рівно один виклик за старт, як і розраховано в `recordBoot()`).
 - `LiveCheckpoint` — раз на 5 хв (`scheduler`-задача), підтверджує "ще
   живий, стан той самий", **не просуває кільце** (перезаписує сам себе,
   доки не станеться `Transition`/`Boot`) — звужує "невідоме вікно" після
