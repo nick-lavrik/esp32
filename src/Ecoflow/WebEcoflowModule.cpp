@@ -81,33 +81,64 @@ String deviceJson(const EcoflowDeviceState& state, const EcoflowGridJournal* jou
 
 }  // namespace
 
+WebEcoflowModule::WebEcoflowModule(EcoflowClient& client, EcoflowDeviceRegistry& registry)
+    : _client(client), _registry(registry) {
+#if defined(ESP32)
+  _mutex = xSemaphoreCreateMutex();
+#endif
+}
+
+WebEcoflowModule::~WebEcoflowModule() {
+#if defined(ESP32)
+  if (_mutex) vSemaphoreDelete(_mutex);
+#endif
+}
+
+void WebEcoflowModule::_refreshSnapshot() {
+  String json = "{\"connected\":" + webjson::boolean(_client.isConnected());
+  json += ",\"running\":" + webjson::boolean(_client.isRunning());
+  json += ",\"channel\":" + webjson::quote(EcoflowClient::channelName(_client.channel()));
+  json += ",\"account\":" + webjson::quote(_client.account());
+  json += ",\"brokerHost\":" + webjson::quote(_client.brokerHost() ? _client.brokerHost() : "");
+  json += ",\"brokerPort\":" + String(_client.brokerPort());
+  json += ",\"viaProxy\":" + webjson::boolean(_client.viaProxy());
+  json += ",\"messageCount\":" + String(_client.messageCount());
+  json += ",\"lastTopic\":" + webjson::quote(_client.lastTopic());
+  json += ",\"lastError\":" + webjson::quote(_client.lastError());
+  json += ",\"heapFreeBytes\":" + String((uint32_t)ESP.getFreeHeap());
+  json += ",\"heapLargestBlockBytes\":" + String((uint32_t)ESP.getMaxAllocHeap());
+  json += ",\"netStackHeadroomBytes\":" + String((uint32_t)_client.networkStackHeadroom());
+
+  json += ",\"devices\":[";
+  bool first = true;
+  for (const auto& state : _registry.devices()) {
+    if (!first) json += ',';
+    first = false;
+    json += deviceJson(state, _registry.journalAt(state.journalIndex));
+  }
+  json += "]}";
+
+  Lock lock(_mutex);
+  _statusJson = std::move(json);
+}
+
+void WebEcoflowModule::loop() {
+  const uint32_t now = millis();
+  if (_lastSnapshotMs != 0 && now - _lastSnapshotMs < WEB_ECOFLOW_SNAPSHOT_INTERVAL_MS) return;
+  _lastSnapshotMs = now;
+  _refreshSnapshot();
+}
+
 void WebEcoflowModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
   (void)portal;
 
+  // Перший знімок - одразу, щоб сторінка не побачила порожній "{}" у вікні
+  // між begin() і першою ітерацією loop() (той самий прийом, що WebWifiModule).
+  _refreshSnapshot();
+  _lastSnapshotMs = millis();
+
   server.on("/api/ecoflow/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
-    String json = "{\"connected\":" + webjson::boolean(_client.isConnected());
-    json += ",\"running\":" + webjson::boolean(_client.isRunning());
-    json += ",\"channel\":" + webjson::quote(EcoflowClient::channelName(_client.channel()));
-    json += ",\"account\":" + webjson::quote(_client.account());
-    json += ",\"brokerHost\":" + webjson::quote(_client.brokerHost() ? _client.brokerHost() : "");
-    json += ",\"brokerPort\":" + String(_client.brokerPort());
-    json += ",\"viaProxy\":" + webjson::boolean(_client.viaProxy());
-    json += ",\"messageCount\":" + String(_client.messageCount());
-    json += ",\"lastTopic\":" + webjson::quote(_client.lastTopic());
-    json += ",\"lastError\":" + webjson::quote(_client.lastError());
-    json += ",\"heapFreeBytes\":" + String((uint32_t)ESP.getFreeHeap());
-    json += ",\"heapLargestBlockBytes\":" + String((uint32_t)ESP.getMaxAllocHeap());
-    json += ",\"netStackHeadroomBytes\":" + String((uint32_t)_client.networkStackHeadroom());
-
-    json += ",\"devices\":[";
-    bool first = true;
-    for (const auto& state : _registry.devices()) {
-      if (!first) json += ',';
-      first = false;
-      json += deviceJson(state, _registry.journalAt(state.journalIndex));
-    }
-    json += "]}";
-
-    request->send(200, "application/json", json);
+    Lock lock(_mutex);
+    request->send(200, "application/json", _statusJson);
   });
 }

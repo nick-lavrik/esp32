@@ -1168,7 +1168,15 @@ static void ecoflowAppendJournalRows(EcoflowGridJournal* journal, const char* de
     row.atEpoch = events[i].atEpoch;
     row.deviceName = deviceName;
     row.toState = events[i].toState;
-    const time_t until = (i + 1 < count) ? events[i + 1].atEpoch : now;
+    // Межа "until" - atEpoch наступної події, БУДЬ-ЯКОГО виду (Boot теж
+    // рахується межею - його ми просто не друкуємо, рядком вище). Але Boot
+    // пишеться до перевірки ntp.isSynced() (EcoflowGridJournal::recordBoot(),
+    // на кожному фізичному ребуті) - якщо він стався до NTP-синку, його
+    // atEpoch занижений і може бути МЕНШИМ за row.atEpoch. Така межа не
+    // означає "стан завершився за 0с", а означає "справжньої межі не
+    // записано" - тому трактуємо так само, як відсутність наступної події.
+    time_t until = (i + 1 < count) ? events[i + 1].atEpoch : now;
+    if (until <= row.atEpoch) until = now;
     row.ageSec = (until > row.atEpoch) ? (uint32_t)(until - row.atEpoch) : 0;
     out.push_back(row);
   }
