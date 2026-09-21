@@ -45,13 +45,10 @@
 #define JOURNAL_RING 48
 #define CONFIG_HEAP_POISONING_COMPREHENSIVE 1
 
-// ARDUINO_USB_MODE=0 - режим OTG (TinyUSB). Потрібен для USB MSC
-// (src-esp32-s3-lcd147/SdMassStorage.cpp): у режимі 1 USB працює як
-// апаратний CDC, і TinyUSB, а з ним і Mass Storage, недоступний. Serial
-// при цьому лишається - через TinyUSB CDC.
-#ifndef ARDUINO_USB_MODE
-#define ARDUINO_USB_MODE 0
-#endif
+// ARDUINO_USB_MODE=0 (OTG/TinyUSB, потрібен для USB MSC) задається в
+// platformio.ini через build_flags, не тут: цей заголовок підключається
+// через -include РАНІШЕ, ніж board-манфест esp32-s3-devkitc-1 підставляє
+// свій -DARDUINO_USB_MODE=1, тому #define тут мовчки перебивається назад.
 #define ARDUINO_USB_CDC_ON_BOOT 1
 
 // ============================================================

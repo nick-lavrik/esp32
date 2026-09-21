@@ -243,6 +243,8 @@ bool sdMassStorageBegin(SdMscSectorReader, uint32_t) {
 }
 void sdMassStorageEnd() {}
 bool sdMassStorageActive() { return false; }
+bool sdMassStorageNeedsRecovery() { return false; }
+void sdMassStorageInvalidatePrefetch() {}
 void sdMassStoragePrintStatus() {
   logger.info("USB MSC: unavailable (requires ARDUINO_USB_MODE=0)");
 }

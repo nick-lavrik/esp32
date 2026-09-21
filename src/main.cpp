@@ -344,6 +344,14 @@ MqttConfig makeMqttConfig() {
   config.lwtOnlineMessage = MQTT_LWT_MSG_ONLINE;
   config.prefix = MQTT_TOPIC_PREFIX;  // build-time дефолт; runtime override - setupMqttClient()
 
+#if defined(ECOFLOW_MQTT_SHARE_CLIENT)
+  // EcoflowClient сидить на цьому самому клієнті (docs/tech_debt.md, "План:
+  // спільний MqttClient") - його quota-повідомлення бувають до ~2 КБ
+  // (EcoflowClient::makeMqttConfig(), той самий орієнтир), дефолтні 2 КБ
+  // ризикують обрізати найбільші пакети.
+  config.rootSubscribeBufferSize = 4 * 1024;
+#endif
+
   return config;
 }
 #endif
@@ -417,7 +425,15 @@ EcoflowClient::Config makeEcoflowConfig() {
   return config;
 }
 
+#if defined(ECOFLOW_MQTT_SHARE_CLIENT) && HAS_MQTT_CLIENT
+// Спільний MqttClient (docs/tech_debt.md, "План: спільний MqttClient") -
+// креди proxy й загального `mqtt` на цій платі вже сьогодні той самий
+// аліас у secrets.ini (mqtt_username/password == ecoflow_proxy_username/
+// password). `mqtt` оголошено вище - вже сконструйований на цей момент.
+EcoflowClient ecoflow(makeEcoflowConfig(), &mqtt);
+#else
 EcoflowClient ecoflow(makeEcoflowConfig());
+#endif
 EcoflowDeviceRegistry ecoflowDevices;
 #endif
 
@@ -1100,11 +1116,18 @@ static String ecoflowSerialFromKey(const String& key) {
 // EcoflowGridJournal - це подання для виводу, не дані журналу.
 static constexpr size_t kEcoflowJournalShowLimit = 30;  // на пристрій; підсумок після злиття - не більший
 
+// mark - 1-символьна позначка "наскільки остаточний цей AGE", БЕЗ заголовка
+// в таблиці (сама позиція в колонці - вже підказка): '>' - найновіший
+// перехід пристрою, стан ще триває, AGE зростатиме далі ("принаймні
+// стільки"); '<' - передостанній, останній ПОВНІСТЮ завершений інтервал
+// (його верхня межа - фіксована мітка часу наступного переходу, вже не
+// зміниться); ' ' - решта, звичайна історія.
 struct EcoflowJournalRow {
   time_t atEpoch = 0;
   const char* deviceName = nullptr;
   EcoflowGridState toState = EcoflowGridState::Unknown;
   uint32_t ageSec = 0;
+  char mark = ' ';
 };
 
 // Дописує в out хронологічний список РЕАЛЬНИХ переходів ОДНОГО пристрою
@@ -1136,6 +1159,7 @@ static void ecoflowAppendJournalRows(EcoflowGridJournal* journal, const char* de
   EcoflowGridEvent events[kEcoflowJournalShowLimit];
   const size_t count = journal->loadRecentEvents(events, kEcoflowJournalShowLimit);
   const time_t now = time(nullptr);
+  const size_t startSize = out.size();
 
   for (size_t i = 0; i < count; i++) {
     if (events[i].kind != EcoflowJournalEntryKind::Transition) { continue; }
@@ -1148,6 +1172,13 @@ static void ecoflowAppendJournalRows(EcoflowGridJournal* journal, const char* de
     row.ageSec = (until > row.atEpoch) ? (uint32_t)(until - row.atEpoch) : 0;
     out.push_back(row);
   }
+
+  // Позначки в mark - лише позиційні, за цим пристроєм, тому ставляться тут
+  // (усі push_back() вище - саме його рядки), а не пізніше, після
+  // злиття/сортування з іншими пристроями (див. коментар до mark).
+  const size_t pushed = out.size() - startSize;
+  if (pushed >= 1) { out[out.size() - 1].mark = '>'; }
+  if (pushed >= 2) { out[out.size() - 2].mark = '<'; }
 }
 
 void setupEcoflow() {
@@ -1171,7 +1202,11 @@ void setupEcoflow() {
   // NVS (EcoflowGridJournal), MQTT не чіпає.
   scheduler.addCronTask(5 * 60 * 1000UL, []() { ecoflowDevices.recordLiveCheckpointForAll(); });
 
-  #if defined(ESP32)
+  // Спільне з'єднання (ECOFLOW_MQTT_SHARE_CLIENT): connect/disconnect/fail
+  // цього самого сокета вже логує mqtt.onConnect/... (setupMqttClient()) -
+  // MqttClient тримає по ОДНОМУ слоту на кожен колбек, другий виклик тут
+  // мовчки перезаписав би той, що вже зареєстрований для загального mqtt.
+  #if defined(ESP32) && !defined(ECOFLOW_MQTT_SHARE_CLIENT)
   ecoflow.onMqttConnect([](MqttTransportClient& client) {
     _logger.info("MQTT connected       [%s:%d]", client.host.c_str(), client.port);
   });
@@ -1598,15 +1633,18 @@ void setupEcoflow() {
 
       constexpr int kDeviceNameWidth = 18;  // "DELTA Pro (xama)" (16) + запас
       constexpr int kGridWidth = 9;         // "off-grid" (8) + запас
-      _logger.info("%-19s  %-*s  %-*s  %10s", "DATE/TIME", kDeviceNameWidth, "DEVICE", kGridWidth, "GRID",
+      // Колонка перед AGE - без заголовка навмисно (main.cpp,
+      // ecoflowAppendJournalRows(), поле "mark"): сама її наявність у рядку
+      // вже підказка, підпис лише заважав би.
+      _logger.info("%-19s  %-*s  %-*s    %9s", "DATE/TIME", kDeviceNameWidth, "DEVICE", kGridWidth, "GRID",
                    "AGE");
       for (const auto& row : rows) {
         char timestamp[32] = "";
         struct timeval tv { row.atEpoch, 0 };
         ntp.ftime("%Y-%m-%d %H:%M:%S", timestamp, sizeof(timestamp), &tv);
         const String age = EcoflowDeviceRegistry::formatDurationSeconds(row.ageSec);
-        _logger.info("%-19s  %-*s  %-*s  %10s", timestamp, kDeviceNameWidth, row.deviceName, kGridWidth,
-                     ecoflowGridStateName(row.toState), age.c_str());
+        _logger.info("%-19s  %-*s  %-*s  %c %9s", timestamp, kDeviceNameWidth, row.deviceName, kGridWidth,
+                     ecoflowGridStateName(row.toState), row.mark, age.c_str());
       }
     }
   );

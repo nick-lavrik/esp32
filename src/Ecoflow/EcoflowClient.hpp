@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <MqttClient.hpp>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -69,7 +70,15 @@ public:
     using QuotaCallback = std::function<void(const String &serialNumber, JsonDocument &payload)>;
     using StatusCallback = std::function<void(const String &serialNumber, JsonDocument &payload)>;
 
-    explicit EcoflowClient(const Config &config);
+    // sharedMqtt == nullptr (типовий випадок) - EcoflowClient піднімає й
+    // володіє власним MqttClient (TLS напряму чи приватний proxy-канал, як
+    // і раніше). sharedMqtt != nullptr - клієнт УЖЕ живе десь-інде (типово:
+    // загальний `mqtt` у main.cpp) і використовується як є: EcoflowClient
+    // нічого не будує, не викликає begin()/loop() і не займається
+    // suspend()/resume() цього з'єднання (docs/tech_debt.md, "План:
+    // спільний MqttClient" - лише коли креди proxy/загального клієнта
+    // справді збігаються, це не автовизначається тут).
+    explicit EcoflowClient(const Config &config, MqttClient *sharedMqtt = nullptr);
 
     // Піднімає MQTT-підключення (асинхронно, у власному таску) і підписки.
     // ВАЖЛИВО: спершу робить блокуючий REST-запит за списком пристроїв, тому
@@ -91,12 +100,15 @@ public:
     // Повністю прибирає з'єднання з памʼяті: рве TLS-сесію і знімає мережевий
     // таск, звільняючи ~57 КБ heap (mbedTLS тримає по 16 КБ на кожен напрямок).
     // Підписки й колбеки лишаються - start() підіймає все назад.
+    // Якщо з'єднання СПІЛЬНЕ (конструктор із sharedMqtt) - обидва повертають
+    // false: немає окремого з'єднання EcoFlow, яке можна зупинити, не
+    // зачепивши все інше, що сидить на тому самому MqttClient.
     bool stop();
     bool start();
-    bool isRunning() const { return _started && !_mqtt.isSuspended(); }
+    bool isRunning() const { return _started && !_mqtt->isSuspended(); }
 
     // Запас стеку мережевого таска (діагностика для підбору taskStackSize).
-    size_t networkStackHeadroom() const { return _mqtt.networkTaskStackHeadroom(); }
+    size_t networkStackHeadroom() const { return _mqtt->networkTaskStackHeadroom(); }
 
     // Реальні хост/порт MQTT-сесії - те саме, що бачить makeMqttConfig(): proxy
     // (Config::proxyHost), якщо задано, інакше пряма TLS-сесія до
@@ -111,11 +123,16 @@ public:
     // виконує колбеки в головному потоці.
     void loop();
 
-    bool isConnected() const { return _mqtt.isConnected(); }
+    bool isConnected() const { return _mqtt->isConnected(); }
 
-    void onMqttConnect(MqttClientConnectionCallback callback) { _mqtt.onConnect(callback); }
-    void onMqttDisconnect(MqttClientConnectionCallback callback) { _mqtt.onDisconnect(callback); }
-    void onMqttConnectionFail(MqttClientConnectionCallback callback) { _mqtt.onConnectionFail(callback); }
+    // Не викликати, коли з'єднання СПІЛЬНЕ (sharedMqtt): MqttClient тримає
+    // ОДИН слот на кожен колбек (не список) - власник сокета (той, хто його
+    // й підняв) уже міг зареєструвати свій; другий виклик мовчки перезапише
+    // перший. Для спільного шляху діагностика connect/disconnect береться
+    // з боку власника сокета (main.cpp, `mqtt.onConnect(...)`), не звідси.
+    void onMqttConnect(MqttClientConnectionCallback callback) { _mqtt->onConnect(callback); }
+    void onMqttDisconnect(MqttClientConnectionCallback callback) { _mqtt->onDisconnect(callback); }
+    void onMqttConnectionFail(MqttClientConnectionCallback callback) { _mqtt->onConnectionFail(callback); }
 
     // Скільки повідомлень прийшло з брокера і який топік був останнім.
     // Потрібно, щоб відрізнити "підключились, але пристрій мовчить" від
@@ -190,7 +207,14 @@ private:
 
     std::string _rootTopicStorage;
 
-    MqttClient _mqtt;
+    // _ownedMqtt != nullptr - звичайний шлях, EcoflowClient сам збудував і
+    // володіє MqttClient (TLS напряму чи приватний proxy), _mqtt ==
+    // _ownedMqtt.get(). _ownedMqtt == nullptr - конструктор отримав
+    // sharedMqtt: _mqtt вказує на ЧУЖИЙ, довгоживучий MqttClient (типово
+    // загальний `mqtt` з main.cpp), EcoflowClient його не будує, не володіє
+    // і не зупиняє. _mqtt в обох випадках валідний одразу після конструктора.
+    std::unique_ptr<MqttClient> _ownedMqtt;
+    MqttClient *_mqtt = nullptr;
     EcoflowAuthClient _auth;
 
     std::vector<EcoflowDevice> _devices;

@@ -69,10 +69,13 @@ const MqttKeyGenerator& MqttClient::keyGenerator() const {
   return _keyGenerator != nullptr ? *_keyGenerator : _defaultKeyGenerator;
 }
 
-std::string MqttClient::resolveTopic(const char* topic) const {
-  // useKeyGenerator == false -> топік іде брокеру байт-у-байт (EcoFlow та інші
-  // брокери з жорсткою схемою топіків, де провідний '/' значущий).
-  if (_config.useKeyGenerator && _keyGenerator != nullptr) {
+std::string MqttClient::resolveTopic(const char* topic, bool useKeyGenerator) const {
+  // useKeyGenerator == false (з MqttConfig - клієнт-широкий, або з виклику -
+  // для ОДНОГО топіка на клієнті, що інакше префіксує все) -> топік іде
+  // брокеру байт-у-байт (EcoFlow та інші брокери з жорсткою схемою топіків,
+  // де провідний '/' значущий; так само - EcoflowClient на спільному
+  // MqttClient, docs/tech_debt.md, "План: спільний MqttClient").
+  if (useKeyGenerator && _config.useKeyGenerator && _keyGenerator != nullptr) {
     return _keyGenerator->key(topic);
   }
   return topic != nullptr ? std::string(topic) : std::string();
@@ -707,10 +710,10 @@ void MqttClient::drainOutgoingQueue() {
 // addListener()/removeListener(): _listeners захищений _listenersMutex.
 // Фактичний subscribe (для PicoMQTT) - через чергу, виконується мережевим
 // таском, а не напряму з головного потоку (див. коментар у networkTaskLoop()).
-MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback callback) {
+MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback callback, bool useKeyGenerator) {
   MqttListenerEntry entry;
   entry.id = _nextListenerId++;
-  entry.topic = resolveTopic(topic).c_str();
+  entry.topic = resolveTopic(topic, useKeyGenerator).c_str();
   entry.callback = callback;
   {
 #if defined(ESP32)
@@ -744,13 +747,14 @@ bool MqttClient::publishJson(const char* topic, JsonDocument& doc, bool retained
   return publish(topic, reinterpret_cast<const uint8_t*>(buffer.data()), size, retained);
 }
 
-MqttListenerId MqttClient::addJsonListener(const char* topic, std::function<void(const char*, JsonDocument&)> callback) {
+MqttListenerId MqttClient::addJsonListener(const char* topic, std::function<void(const char*, JsonDocument&)> callback,
+                                            bool useKeyGenerator) {
   return addListener(topic, [callback](const char* topic, const uint8_t* payload, unsigned int length) -> void {
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, payload, length);
         if (error) { return; }
         callback(topic, doc);
-      });
+      }, useKeyGenerator);
 }
 
 MqttListenerId MqttClient::addStringListener(const char* topic, MqttStringListenerCallback callback) {

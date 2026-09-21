@@ -127,7 +127,13 @@ public:
   bool subscribe(const char* topic);
   bool unsubscribe(const char* topic);
 
-  MqttListenerId addListener(const char* topic, MqttListenerCallback callback);
+  // useKeyGenerator=false - топік іде брокеру байт-у-байт, ігноруючи префікс
+  // клієнта (MqttConfig::useKeyGenerator тут ні до чого - для клієнта з
+  // ВЖЕ увімкненим префіксом (загальний mqtt) потрібен спосіб зареєструвати
+  // РІВНО ОДИН топік без нього, не вимикаючи префікс для решти. Приклад:
+  // EcoflowClient на спільному MqttClient - docs/tech_debt.md, "План:
+  // спільний MqttClient".
+  MqttListenerId addListener(const char* topic, MqttListenerCallback callback, bool useKeyGenerator = true);
   MqttListenerId addStringListener(const char* topic, MqttStringListenerCallback callback);
   void removeListener(MqttListenerId id);
 
@@ -176,7 +182,8 @@ public:
   }
 
   bool publishJson(const char* topic, JsonDocument& doc, bool retained = false);
-  MqttListenerId addJsonListener(const char* topic, std::function<void(const char*, JsonDocument&)> callback);
+  MqttListenerId addJsonListener(const char* topic, std::function<void(const char*, JsonDocument&)> callback,
+                                  bool useKeyGenerator = true);
 
   bool isConnected() const { return _connected; };
 
@@ -236,7 +243,7 @@ private:
   // черг і скидає лічильники. Викликається з loop().
   void reportDroppedMessages();
 
-  std::string resolveTopic(const char* topic) const;
+  std::string resolveTopic(const char* topic, bool useKeyGenerator = true) const;
 
   MqttConfig _config;
   MqttKeyGenerator _defaultKeyGenerator;

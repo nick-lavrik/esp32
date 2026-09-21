@@ -104,14 +104,17 @@ MqttConfig EcoflowClient::makeMqttConfig(const Config &config, const std::string
   return mqttConfig;
 }
 
-EcoflowClient::EcoflowClient(const Config &config)
+EcoflowClient::EcoflowClient(const Config &config, MqttClient *sharedMqtt)
     : _config(config),
       _account(config.mqttUsername != nullptr ? config.mqttUsername : ""),
       _channel(channelFromAccount(config.mqttUsername != nullptr ? String(config.mqttUsername)
                                                                  : String())),
       _clientIdStorage(buildClientId(config)),
       _rootTopicStorage(buildRootTopic(config.mqttUsername)),
-      _mqtt(makeMqttConfig(config, _rootTopicStorage, _clientIdStorage)),
+      _ownedMqtt(sharedMqtt != nullptr
+                     ? nullptr
+                     : std::make_unique<MqttClient>(makeMqttConfig(config, _rootTopicStorage, _clientIdStorage))),
+      _mqtt(sharedMqtt != nullptr ? sharedMqtt : _ownedMqtt.get()),
       _auth(config.accessKey != nullptr ? config.accessKey : "",
             config.secretKey != nullptr ? config.secretKey : "") {
 }
@@ -178,15 +181,24 @@ void EcoflowClient::begin() {
       }
     };
 
+    // useKeyGenerator=false на КОЖНІЙ підписці: топіки EcoFlow йдуть брокеру
+    // байт-у-байт з провідним '/' (той самий коментар, що біля
+    // makeMqttConfig()/useKeyGenerator нижче). На власному клієнті
+    // (_ownedMqtt) це й так уже правда через MqttConfig::useKeyGenerator=false;
+    // на СПІЛЬНОМУ (main`mqtt`, useKeyGenerator=true для його власних
+    // топіків) без цього прапорця тут кожен виклик отримав би префікс
+    // "mykola-lavryk/" і жодне повідомлення EcoFlow ніколи б не збіглось
+    // локально (перевірено на живій платі: без цього фікса messages
+    // received лишався 0 нескінченно).
     if (_channel == Channel::AppPrivate) {
       // Приватний канал: один топік на пристрій, і в ньому вже все. Окремого /status немає - онлайн
       // визначається тишею (EcoflowDeviceRegistry::expireStale), як і для пристроїв, що /status не шлють.
-      _mqtt.addJsonListener(EcoflowMqttTopics::appProperty(serial).c_str(), quotaHandler);
+      _mqtt->addJsonListener(EcoflowMqttTopics::appProperty(serial).c_str(), quotaHandler, false);
       continue;
     }
 
-    _mqtt.addJsonListener(EcoflowMqttTopics::quota(_account, serial).c_str(), quotaHandler);
-    _mqtt.addJsonListener(
+    _mqtt->addJsonListener(EcoflowMqttTopics::quota(_account, serial).c_str(), quotaHandler, false);
+    _mqtt->addJsonListener(
       EcoflowMqttTopics::status(_account, serial).c_str(),
       [this](const char *topic, JsonDocument &doc) {
         _messageCount++;
@@ -194,22 +206,30 @@ void EcoflowClient::begin() {
         if (_statusCallback) {
           _statusCallback(serialFromTopic(topic), doc);
         }
-      }
+      },
+      false
     );
   }
 
-  _mqtt.begin();
+  // Спільне з'єднання (_ownedMqtt == nullptr) уже піднято й обслуговується
+  // власником сокета (main.cpp) - другий begin()/loop() тут зламав би його
+  // (два виклики begin() на той самий MqttClient не передбачені).
+  if (_ownedMqtt) {
+    _mqtt->begin();
+  }
   _started = true;
   logger.info("%s:%u account=%s, subscriptions: %u", _config.mqttHost, (unsigned)_config.mqttPort,
               _account.c_str(), (unsigned)(EcoflowDeviceRegistry::deviceCount() * 2));
 }
 
 void EcoflowClient::loop() {
-  _mqtt.loop();
+  if (_ownedMqtt) {
+    _mqtt->loop();
+  }
 
   if (_mqttResumePending && !_restBusy) {
     _mqttResumePending = false;
-    _mqtt.resume();
+    _mqtt->resume();
   }
 }
 
@@ -394,14 +414,22 @@ bool EcoflowClient::issueAppCredentialsAsync() { return startRestTask(RestJob::k
 bool EcoflowClient::refreshCredentialsAsync() { return startRestTask(RestJob::kCredentials); }
 
 bool EcoflowClient::stop() {
+  if (!_ownedMqtt) {
+    // Спільне з'єднання: немає окремого EcoFlow-сокета, який можна
+    // зупинити, не зачепивши все інше, що на ньому сидить (загальний
+    // mqtt, ConsoleMqtt, LWT, командний канал). "ecoflow-stop" тут просто
+    // немає що робити.
+    _lastError = "MQTT connection is shared - nothing to stop here";
+    return false;
+  }
   if (!_started) {
     _lastError = "EcoFlow not started";
     return false;
   }
-  if (_mqtt.isSuspended()) {
+  if (_mqtt->isSuspended()) {
     return true;  // вже зупинений - не помилка
   }
-  if (!_mqtt.suspend()) {
+  if (!_mqtt->suspend()) {
     _lastError = "failed to suspend MQTT";
     return false;
   }
@@ -411,15 +439,19 @@ bool EcoflowClient::stop() {
 }
 
 bool EcoflowClient::start() {
+  if (!_ownedMqtt) {
+    _lastError = "MQTT connection is shared - nothing to start here";
+    return false;
+  }
   if (!_started) {
     // Ще жодного begin() не було (напр. autoconnect вимкнено) - піднімаємо з нуля.
     begin();
     return _started;
   }
-  if (!_mqtt.isSuspended()) {
+  if (!_mqtt->isSuspended()) {
     return true;  // вже працює
   }
-  _mqtt.resume();
+  _mqtt->resume();
   logger.info("resumed, %u B free", (unsigned)ESP.getFreeHeap());
   return true;
 }
@@ -433,11 +465,12 @@ bool EcoflowClient::withMqttSuspended(const char *what, const std::function<bool
   // Proxy-з'єднання (useTls=false) не тримає mbedTLS-сесію - конфлікту з
   // TLS REST-запитом нема (той самий heap-конфлікт, що suspend лікує, тут
   // просто відсутній), і призупиняти нема сенсу: economить paus/resume
-  // мережевого таска на кожен REST-виклик, і - важливо для майбутнього
-  // спільного клієнта - НЕ зачіпає інших слухачів того самого сокета.
-  const bool needSuspend = !viaProxy() && _started && !_mqtt.isSuspended();
+  // мережевого таска на кожен REST-виклик. Спільне з'єднання (!_ownedMqtt)
+  // - додаткова, окрема причина того самого висновку: suspend() зупинив би
+  // й усе інше, що сидить на тому самому MqttClient.
+  const bool needSuspend = _ownedMqtt && !viaProxy() && _started && !_mqtt->isSuspended();
   if (needSuspend) {
-    if (!_mqtt.suspend()) {
+    if (!_mqtt->suspend()) {
       // Клієнт лишився працювати - REST робити не можна: другої TLS-сесії
       // heap не витримає.
       _lastError = "failed to suspend MQTT - REST skipped";

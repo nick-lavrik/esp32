@@ -142,3 +142,12 @@
 // ConfigStorage ключ 'ecoflow.auto'/'ecoflow.sync'.
 #define ECOFLOW_AUTOCONNECT 1
 #define ECOFLOW_SYNC_ON_BOOT 1
+
+// Тестове розгортання плану "спільний MqttClient" (docs/tech_debt.md,
+// "План: спільний MqttClient для mqtt + EcoflowClient") - на цій платі
+// mqtt_username/password (загальний клієнт) і ecoflow_proxy_username/
+// password (проксі) уже сьогодні той самий аліас у secrets.ini, тому
+// EcoflowClient не піднімає власне з'єднання, а користується вже живим
+// `mqtt`. Прапорець явний і локальний для цієї плати (не автовизначення
+// збігу кредів у рантаймі) - інші проксі-плати цим ще не зачіпаються.
+#define ECOFLOW_MQTT_SHARE_CLIENT 1
