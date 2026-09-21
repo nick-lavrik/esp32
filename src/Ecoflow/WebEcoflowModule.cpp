@@ -106,7 +106,12 @@ void WebEcoflowModule::_refreshSnapshot() {
   json += ",\"lastTopic\":" + webjson::quote(_client.lastTopic());
   json += ",\"lastError\":" + webjson::quote(_client.lastError());
   json += ",\"heapFreeBytes\":" + String((uint32_t)ESP.getFreeHeap());
-  json += ",\"heapLargestBlockBytes\":" + String((uint32_t)ESP.getMaxAllocHeap());
+  // ESP.getMaxAllocHeap() рахує MALLOC_CAP_INTERNAL - зокрема IRAM-регіони,
+  // які String/JSON-буфер узагалі не може зайняти, тому число стояло на
+  // місці (32756 Б) незалежно від реальної фрагментації. MALLOC_CAP_8BIT -
+  // та сама формула, що й serial-команда 'heap' (main.cpp) - справді
+  // байт-адресована пам'ять, придатна під String.
+  json += ",\"heapLargestBlockBytes\":" + String((uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   json += ",\"netStackHeadroomBytes\":" + String((uint32_t)_client.networkStackHeadroom());
 
   json += ",\"devices\":[";

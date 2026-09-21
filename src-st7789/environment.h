@@ -123,4 +123,4 @@
 // ECOFLOW_MQTT_PROXY_HOST/USERNAME/PASSWORD лишаються в platformio.ini:
 // усі три беруться з secrets.ini (${secrets.*}) - заголовок не бачить
 // змінних PlatformIO.
-#define ECOFLOW_MQTT_SHARE_CLIENT 0
+#define ECOFLOW_MQTT_SHARE_CLIENT 1
