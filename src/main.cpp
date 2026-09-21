@@ -1174,20 +1174,6 @@ void setupEcoflow() {
   #if defined(ESP32)
   ecoflow.onMqttConnect([](MqttTransportClient& client) {
     _logger.info("MQTT connected       [%s:%d]", client.host.c_str(), client.port);
-
-    // Крок 1: Запит на миттєве оновлення (запуск потоку)
-    // const char* payload = "{\"id\": 123456789, \"version\": \"1.0\", \"cmdFunc\": 254, \"cmdId\": 1, \"params\": {\"operateType\": \"latestQuotas\"}}";
-    const char* payload = "{\"id\": 123456789, \"version\": \"1.0\", \"cmdCode\": \"latestQuotas\", \"params\": {}}";
-
-    const size_t size = strlen(payload)+1;
-    const auto ok = client.publish(
-      "/app/device/property/R331ZEB4ZEBW0026",
-      static_cast<const void*>(payload),
-      size
-    );
-    if (!ok) {
-      _logger.error("DELTA2 trigger fail!");
-    }
   });
 
   ecoflow.onMqttDisconnect([](const MqttTransportClient& client) {
