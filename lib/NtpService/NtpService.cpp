@@ -134,9 +134,52 @@ const char* NtpService::_formatTime(const char* format, char* buffer, size_t max
   snprintf(msDigits, sizeof(msDigits), "%03ld", usec / 1000);
   snprintf(usDigits, sizeof(usDigits), "%06ld", usec);
 
-  // Крок 1: розгортаємо власні плейсхолдери %Q (мс) і %q (мкс) у проміжний
-  // формат-рядок на стеку - strftime() їх не знає і в кращому разі
-  // проігнорує, а в гіршому - скопіює як є.
+  // localtime_r/gmtime_r - реентерабельні (thread-safe), на відміну від
+  // localtime()/gmtime(), які використовують внутрішній static-буфер.
+  struct tm ti;
+  if (applyTimeZone) {
+    localtime_r(&sec, &ti);
+  } else {
+    gmtime_r(&sec, &ti);
+  }
+
+  // %o - офсет від UTC у вигляді "+03:00"/"-04:30" (RFC3339, з двокрапкою) -
+  // на відміну від стандартного %z, який strftime() віддає без неї
+  // ("+0300"). При applyTimeZone=false (аптайм, завжди UTC) - завжди
+  // "+00:00".
+  //
+  // Без tm_gmtoff: цей toolchain (newlib на ESP32) не має цього поля в
+  // struct tm (BSD-розширення, тут недоступне) - перевірено збіркою.
+  // Портативний спосіб: узяти календарні поля UTC для цього ж моменту
+  // (gmtime_r) і прогнати їх через mktime() - той інтерпретує ЛЮБИЙ tm як
+  // ЛОКАЛЬНИЙ час за поточною TZ. Різниця між реальним "sec" і результатом
+  // mktime() - і є шуканий офсет. tm_isdst=-1 - хай сама визначить DST для
+  // цих конкретних полів, а не силувати "не DST" (інакше офсет був би
+  // неправильним рівно в літній період).
+  // 16, не 8: offHours/offMinutes фактично 0..23/0..59, але GCC цього не
+  // знає з самого лише типу int і без запасу дає -Wformat-truncation.
+  char offsetDigits[16];
+  {
+    long gmtoff = 0;
+    if (applyTimeZone) {
+      struct tm gmTi;
+      gmtime_r(&sec, &gmTi);
+      gmTi.tm_isdst = -1;
+      const time_t asIfLocal = mktime(&gmTi);
+      if (asIfLocal != (time_t)-1) {
+        gmtoff = static_cast<long>(difftime(sec, asIfLocal));
+      }
+    }
+    const char sign = gmtoff < 0 ? '-' : '+';
+    const long absOff = gmtoff < 0 ? -gmtoff : gmtoff;
+    const int offHours = static_cast<int>(absOff / 3600);
+    const int offMinutes = static_cast<int>((absOff % 3600) / 60);
+    snprintf(offsetDigits, sizeof(offsetDigits), "%c%02d:%02d", sign, offHours, offMinutes);
+  }
+
+  // Розгортаємо власні плейсхолдери %Q (мс), %q (мкс), %o (офсет) у
+  // проміжний формат-рядок на стеку - strftime() їх не знає і в кращому
+  // разі проігнорує, а в гіршому - скопіює як є.
   constexpr size_t kMaxExpandedFormat = 160;
   char expanded[kMaxExpandedFormat];
   size_t out = 0;
@@ -152,21 +195,16 @@ const char* NtpService::_formatTime(const char* format, char* buffer, size_t max
         expanded[out++] = *d;
       }
       ++p;
+    } else if (p[0] == '%' && p[1] == 'o') {
+      for (const char* d = offsetDigits; *d != '\0' && out < kMaxExpandedFormat - 1; ++d) {
+        expanded[out++] = *d;
+      }
+      ++p;
     } else {
       expanded[out++] = *p;
     }
   }
   expanded[out] = '\0';
-
-  // Крок 2: решту (%Y %H %M %S ...) віддаємо стандартному strftime().
-  // localtime_r/gmtime_r - реентерабельні (thread-safe), на відміну від
-  // localtime()/gmtime(), які використовують внутрішній static-буфер.
-  struct tm ti;
-  if (applyTimeZone) {
-    localtime_r(&sec, &ti);
-  } else {
-    gmtime_r(&sec, &ti);
-  }
 
   if (strftime(buffer, max, expanded, &ti) == 0) {
     buffer[0] = '\0';  // strftime() повертає 0 і при порожньому результаті, і при переповненні

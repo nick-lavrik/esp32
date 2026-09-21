@@ -2972,10 +2972,8 @@ function ecoDeviceDetailRows(d) {
     ["Presence", ecoPresence(d.presence), true],
     ["Charge", ecoCharge(d)],
     ["Grid", ecoRow(ecoGrid(d.grid, d.gridInferred),
-      d.gridForMs != null ? "for " + ecoDuration(d.gridForMs) : ""), true],
-    ["Previous grid", ecoRow(escapeHtml(d.previousGrid),
-      (d.previousGridDurationMs ? "for " + ecoDuration(d.previousGridDurationMs) + " · " : "") +
-      d.gridChangeCount + " change(s)"), true],
+      (d.gridForMs != null ? "for " + ecoDuration(d.gridForMs) + " · " : "") +
+      d.gridChangeCount + " change(s) all-time"), true],
     ["Power", ecoWatts(d.inputWatts, d.outputWatts), true],
     ["Remaining", ecoRemain(d.remainTimeMinutes)],
     ["AC input", ecoRow(acVolts, d.acInputFrequency != null ? d.acInputFrequency + " Hz" : ""), true],

@@ -8,6 +8,11 @@
 #include <string>
 #include <vector>
 
+#include "EcoflowGridJournal.hpp"
+#include "EcoflowGridState.hpp"
+
+class ConfigStorage;
+
 // Статичний перелік пристроїв акаунта + накопичений стан кожного з них.
 //
 // Чому хардкод, а не REST-список: серійні номери потрібні ще ДО першої підписки
@@ -23,17 +28,7 @@ enum class EcoflowDeviceType : uint8_t {
     SmartGenerator,
 };
 
-// Тристан: поки відповідне поле не прийшло в quota, стан саме невідомий -
-// плутати його з "немає мережі" не можна (quota надсилає ЛИШЕ те, що змінилось,
-// тому багато полів довго лишаються без значення).
-enum class EcoflowGridState : uint8_t {
-    Unknown = 0,
-    OffGrid,
-    OnGrid,
-};
-
 const char *ecoflowDeviceTypeName(EcoflowDeviceType type);
-const char *ecoflowGridStateName(EcoflowGridState state);
 
 // Незмінна частина: те, що прошите у firmware.
 struct EcoflowDeviceInfo {
@@ -65,15 +60,13 @@ struct EcoflowDeviceState {
     // temp і remainTime, а inputWatts/outputWatts у неї завжди нулі, попри
     // реальні сотні ватів. У таблиці такий стан позначається зірочкою.
     bool gridInferred = false;
-    // Коли пристрій перейшов у ПОТОЧНИЙ grid-стан - база для "скільки він у
-    // цьому стані". 0, якщо стан ще не встановлювався.
-    uint32_t gridSinceMs = 0;
-    time_t gridSinceEpoch = 0;
-    // Скільки тривав ПОПЕРЕДНІЙ grid-стан (мс) і який він був - заповнюється
-    // на кожному переході.
-    uint32_t previousGridDurationMs = 0;
-    EcoflowGridState previousGrid = EcoflowGridState::Unknown;
-    uint32_t gridChangeCount = 0;
+    // Індекс у EcoflowDeviceRegistry::_gridJournals - той самий, що в
+    // kDevices/_devices (виставляється в конструкторі реєстру). "Скільки
+    // триває поточний стан"/"скільки переходів за весь час" - тепер у
+    // журналі (EcoflowGridJournal, персистентний), а не тут: RAM-only поля
+    // gridSinceMs/previousGrid/gridChangeCount видалено - вони обнулялись би
+    // щоразу на ребуті (tech_debt.md, "не дублювати previousGrid").
+    size_t journalIndex = 0;
 
     // --- супутні показники (для діагностики й майбутніх правил) ---
     int32_t acInputMilliVolts = -1;  // -1 - невідомо
@@ -100,9 +93,15 @@ struct EcoflowDeviceState {
     bool hasSoc() const { return socPercent >= 0; }
 };
 
-// Колбек на зміну grid-стану: викликається ПІСЛЯ оновлення state, тому
-// state.previousGrid / state.previousGridDurationMs уже актуальні.
-using EcoflowGridChangeCallback = std::function<void(const EcoflowDeviceState &state)>;
+// Колбек на зміну grid-стану: викликається ПІСЛЯ оновлення state.grid.
+// previousGrid/previousDurationSec передаються параметрами (а не читаються з
+// постійних полів EcoflowDeviceState - їх більше нема, див. коментар вище) -
+// це дані ЛИШЕ цього моменту переходу, не варті окремого постійного поля.
+// previousGrid == Unknown -> перше визначення стану за час життя журналу
+// (не "перехід", previousDurationSec тоді 0 і нічого не означає).
+using EcoflowGridChangeCallback =
+    std::function<void(const EcoflowDeviceState &state, EcoflowGridState previousGrid,
+                        uint32_t previousDurationSec)>;
 using EcoflowSocChangeCallback = std::function<void(const EcoflowDeviceState &state, int8_t previousSoc)>;
 
 class EcoflowDeviceRegistry {
@@ -136,6 +135,22 @@ public:
     const std::vector<EcoflowDeviceState> &devices() const { return _devices; }
     EcoflowDeviceState *find(const String &serialNumber);
 
+    // Журнал переходів grid - один на пристрій, той самий порядок, що
+    // devices()/kDevices. Викликати ПІСЛЯ configStorage.begin() (main.cpp) -
+    // це і є завантаження "hot" стану з NVS для кожного пристрою.
+    void beginJournals(ConfigStorage &storage);
+    EcoflowGridJournal *journalAt(size_t index);
+    EcoflowGridJournal *journalFor(const String &serialNumber);
+    size_t journalCount() const { return _gridJournals.size(); }
+
+    // Boot-запис у журнал КОЖНОГО пристрою - раз на фізичний старт плати.
+    void recordBootForAll();
+    // Live-чекпоінт у журнал КОЖНОГО пристрою - періодична cron-задача.
+    void recordLiveCheckpointForAll();
+    // Глобальний перемикач запису в NVS для ВСІХ журналів разом
+    // (serial-команда 'ecoflow-journal on|off').
+    void setJournalPersistenceEnabledForAll(bool enabled);
+
     // Захоплення ВСІХ параметрів. serialNumber порожній -> для всіх пристроїв.
     // Повертає кількість пристроїв, яких торкнулись.
     size_t setCaptureAll(const String &serialNumber, bool enabled);
@@ -164,6 +179,12 @@ public:
 
     // "1d 03h 12m" / "45s" - для читабельних тривалостей у логах.
     static String formatDuration(uint32_t milliseconds);
+    // Те саме, але вхід - секунди: персистентні лічильники журналу
+    // (EcoflowGridJournal, "totalOnGridSec" тощо) рахують місяці, і
+    // formatDuration(seconds * 1000UL) переповнив би uint32_t вже за ~49
+    // діб. Для мілісекундних величин (RAM-only, millis()) лишається
+    // formatDuration() вище.
+    static String formatDurationSeconds(uint32_t totalSeconds);
 
     // Поле remainTime у людський вигляд: "7h51m" / "29m", "-" якщо невідомо.
     // Без пояснень «до заряду / до розряду»: EcoFlow віддає ОДНЕ поле на оба
@@ -172,6 +193,7 @@ public:
 
 private:
     std::vector<EcoflowDeviceState> _devices;
+    std::vector<EcoflowGridJournal> _gridJournals;
     EcoflowGridChangeCallback _gridCallback;
     EcoflowSocChangeCallback _socCallback;
 

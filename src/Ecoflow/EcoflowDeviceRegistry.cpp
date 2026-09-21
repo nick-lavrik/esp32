@@ -1,5 +1,6 @@
 #include "EcoflowDeviceRegistry.hpp"
 
+#include <ConfigStorage.hpp>
 #include <TLogger.hpp>
 
 namespace {
@@ -157,14 +158,6 @@ const char *ecoflowDeviceTypeName(EcoflowDeviceType type) {
   }
 }
 
-const char *ecoflowGridStateName(EcoflowGridState state) {
-  switch (state) {
-    case EcoflowGridState::OnGrid: return "on-grid";
-    case EcoflowGridState::OffGrid: return "off-grid";
-    default: return "unknown";
-  }
-}
-
 bool EcoflowDeviceRegistry::wildcardMatch(const char *pattern, const char *text) {
   // Ітеративний glob із поверненням до останньої '*': рекурсія тут не потрібна,
   // а стек мережевого таска й так не безмежний.
@@ -279,15 +272,61 @@ const float *EcoflowDeviceRegistry::findParam(const String &serialNumber,
 
 EcoflowDeviceRegistry::EcoflowDeviceRegistry() {
   _devices.reserve(deviceCount());
+  _gridJournals.resize(deviceCount());
   for (size_t i = 0; i < deviceCount(); i++) {
     EcoflowDeviceState state;
     state.info = &kDevices[i];
+    state.journalIndex = i;
     _devices.push_back(state);
   }
 }
 
 const EcoflowDeviceInfo *EcoflowDeviceRegistry::deviceTable() { return kDevices; }
 size_t EcoflowDeviceRegistry::deviceCount() { return sizeof(kDevices) / sizeof(kDevices[0]); }
+
+void EcoflowDeviceRegistry::beginJournals(ConfigStorage &storage) {
+  // "ecoflow.gridN" - той самий префікс "ecoflow.", що й решта ключів цього
+  // namespace (ecoflow.auto/sync/watch/acc/pass/uid, main.cpp). N - індекс у
+  // kDevices, НЕ серійний номер: серійники 16 символів, довші за ліміт
+  // ConfigStorage::MAX_KEY_LENGTH=15.
+  for (size_t i = 0; i < _gridJournals.size(); i++) {
+    // 24 - "ecoflow.grid" (12) + запас під усі 10 цифр unsigned int (GCC
+    // для -Wformat-truncation рахує %u найгіршим випадком, не залежно від
+    // фактичного діапазону i) + '\0'. Сам ключ, що йде в NVS, лишається
+    // коротким (ConfigStorage::MAX_KEY_LENGTH=15) - запас тут лише для
+    // компілятора, не для реального вмісту.
+    char key[24];
+    snprintf(key, sizeof(key), "ecoflow.grid%u", (unsigned)i);
+    _gridJournals[i].begin(storage, key);
+  }
+}
+
+EcoflowGridJournal *EcoflowDeviceRegistry::journalAt(size_t index) {
+  return index < _gridJournals.size() ? &_gridJournals[index] : nullptr;
+}
+
+EcoflowGridJournal *EcoflowDeviceRegistry::journalFor(const String &serialNumber) {
+  EcoflowDeviceState *state = find(serialNumber);
+  return state != nullptr ? journalAt(state->journalIndex) : nullptr;
+}
+
+void EcoflowDeviceRegistry::recordBootForAll() {
+  for (auto &journal : _gridJournals) {
+    journal.recordBoot();
+  }
+}
+
+void EcoflowDeviceRegistry::recordLiveCheckpointForAll() {
+  for (auto &journal : _gridJournals) {
+    journal.recordLiveCheckpoint();
+  }
+}
+
+void EcoflowDeviceRegistry::setJournalPersistenceEnabledForAll(bool enabled) {
+  for (auto &journal : _gridJournals) {
+    journal.setPersistenceEnabled(enabled);
+  }
+}
 
 EcoflowDeviceState *EcoflowDeviceRegistry::find(const String &serialNumber) {
   for (auto &state : _devices) {
@@ -298,8 +337,7 @@ EcoflowDeviceState *EcoflowDeviceRegistry::find(const String &serialNumber) {
   return nullptr;
 }
 
-String EcoflowDeviceRegistry::formatDuration(uint32_t milliseconds) {
-  const uint32_t totalSeconds = milliseconds / 1000UL;
+String EcoflowDeviceRegistry::formatDurationSeconds(uint32_t totalSeconds) {
   const uint32_t days = totalSeconds / 86400UL;
   const uint32_t hours = (totalSeconds % 86400UL) / 3600UL;
   const uint32_t minutes = (totalSeconds % 3600UL) / 60UL;
@@ -319,6 +357,10 @@ String EcoflowDeviceRegistry::formatDuration(uint32_t milliseconds) {
     snprintf(buffer, sizeof(buffer), "%lus", static_cast<unsigned long>(seconds));
   }
   return String(buffer);
+}
+
+String EcoflowDeviceRegistry::formatDuration(uint32_t milliseconds) {
+  return formatDurationSeconds(milliseconds / 1000UL);
 }
 
 String EcoflowDeviceRegistry::formatRemainTime(int32_t minutes) {
@@ -342,21 +384,24 @@ void EcoflowDeviceRegistry::setGrid(EcoflowDeviceState &state, EcoflowGridState 
     return;
   }
 
-  const uint32_t now = millis();
-  state.previousGrid = state.grid;
-  // Перше визначення стану - не "перехід", тривалості попереднього немає.
-  state.previousGridDurationMs = state.gridSinceMs != 0 ? now - state.gridSinceMs : 0;
-
+  const EcoflowGridState previous = state.grid;
   state.grid = next;
-  state.gridSinceMs = now;
-  state.gridSinceEpoch = time(nullptr);
 
-  if (state.previousGrid != EcoflowGridState::Unknown) {
-    state.gridChangeCount++;
+  // Журнал - джерело правди для тривалості/лічильників "за весь час": він
+  // персистентний і дедуплює проти ВЛАСНОГО currentGrid(), а не проти
+  // цього RAM-only state.grid (вони можуть розійтись одразу після ребута,
+  // доки не прийде перша quota - див. коментар у EcoflowGridJournal.hpp).
+  EcoflowGridJournal *journal = journalAt(state.journalIndex);
+  const time_t sinceBefore = journal != nullptr ? journal->gridSinceEpoch() : 0;
+  if (journal != nullptr) {
+    journal->recordTransition(next);
   }
+  const time_t now = time(nullptr);
+  const uint32_t previousDurationSec =
+      (sinceBefore > 0 && now > sinceBefore) ? static_cast<uint32_t>(now - sinceBefore) : 0;
 
   if (_gridCallback) {
-    _gridCallback(state);
+    _gridCallback(state, previous, previousDurationSec);
   }
 }
 

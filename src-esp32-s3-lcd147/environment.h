@@ -49,7 +49,9 @@
 // (src-esp32-s3-lcd147/SdMassStorage.cpp): у режимі 1 USB працює як
 // апаратний CDC, і TinyUSB, а з ним і Mass Storage, недоступний. Serial
 // при цьому лишається - через TinyUSB CDC.
+#ifndef ARDUINO_USB_MODE
 #define ARDUINO_USB_MODE 0
+#endif
 #define ARDUINO_USB_CDC_ON_BOOT 1
 
 // ============================================================

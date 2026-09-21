@@ -230,6 +230,10 @@ const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
 const char* CFG_ECOFLOW_SYNC_BOOT = "ecoflow.sync";
 // dump ecoflow device status each minute
 const char* CFG_ECOFLOW_WATCH = "ecoflow.watch";
+// runtime-override: чи писати журнал переходів grid у NVS (команда
+// 'ecoflow-journal on|off'); "1"/"0", порожнє -> увімкнено. Вимикає лише
+// NVS-частину EcoflowGridJournal - MQTT-дзеркало не залежить.
+const char* CFG_ECOFLOW_JOURNAL = "ecoflow.jrnl";
 // Build-time дефолт для Watchdog::begin() (Watchdog.hpp, озброюється в кінці
 // setup()) - визначено ТУТ, а не біля виклику в setup(), бо
 // setupSerialCommander() (команда 'watchdog', вище файлом) теж на нього
@@ -1088,6 +1092,24 @@ static String ecoflowSerialFromKey(const String& key) {
 void setupEcoflow() {
   static TLogger _logger{"ecoflow"};
 
+  // Журнали переходів grid - завантажити "hot" стан із NVS (переживає
+  // ребут), застосувати збережений перемикач запису, і одразу закомітити
+  // Boot-запис для кожного пристрою: одна подія на фізичний старт плати,
+  // потрібна, щоб відрізнити "нічого не змінилось" від "плата мовчала".
+  // Викликати ПІСЛЯ configStorage.begin() (setup(), раніше по файлу) -
+  // інакше нема звідки читати.
+  ecoflowDevices.beginJournals(configStorage);
+  String journalStored = configStorage.getString(CFG_ECOFLOW_JOURNAL, "");
+  if (journalStored.length() > 0 && journalStored.toInt() == 0) {
+    ecoflowDevices.setJournalPersistenceEnabledForAll(false);
+  }
+  ecoflowDevices.recordBootForAll();
+  // Live-чекпоінт - раз на 5 хв для кожного пристрою: звужує "невідоме
+  // вікно" після наступного ребута до цього інтервалу замість "з часу
+  // останнього справжнього переходу" (могло бути тижнями). Пише лише в
+  // NVS (EcoflowGridJournal), MQTT не чіпає.
+  scheduler.addCronTask(5 * 60 * 1000UL, []() { ecoflowDevices.recordLiveCheckpointForAll(); });
+
   #if defined(ESP32)
   ecoflow.onMqttConnect([](MqttTransportClient& client) {
     _logger.info("MQTT connected       [%s:%d]", client.host.c_str(), client.port);
@@ -1119,17 +1141,46 @@ void setupEcoflow() {
   #endif
 
   // Зміна наявності мережі - головна подія, яку тут відслідковують: разом із
-  // нею друкуємо, СКІЛЬКИ пристрій пробув у попередньому стані.
-  ecoflowDevices.onGridChange([](const EcoflowDeviceState& state) {
-    if (state.previousGrid == EcoflowGridState::Unknown) {
+  // нею друкуємо, СКІЛЬКИ пристрій пробув у попередньому стані, і дзеркалимо
+  // поточний стан у MQTT (retained - новий підписник одразу бачить поточний
+  // стан, не чекаючи наступного переходу). Персистентна історія переходів -
+  // в EcoflowGridJournal (NVS, EcoflowDeviceRegistry::setGrid()), не тут -
+  // цей колбек лише логує й дзеркалить, нічого не записує сам.
+  ecoflowDevices.onGridChange([](const EcoflowDeviceState& state, EcoflowGridState previousGrid,
+                                  uint32_t previousDurationSec) {
+    if (previousGrid == EcoflowGridState::Unknown) {
       // Перше визначення після старту - не перехід, тривалості ще немає.
       _logger.info("%s: %s (initial)", state.info->name, ecoflowGridStateName(state.grid));
-      return;
+    } else {
+      const EcoflowGridJournal* journal = ecoflowDevices.journalAt(state.journalIndex);
+      _logger.warn("%s: %s -> %s after %s (change #%u all-time)", state.info->name,
+                   ecoflowGridStateName(previousGrid), ecoflowGridStateName(state.grid),
+                   EcoflowDeviceRegistry::formatDurationSeconds(previousDurationSec).c_str(),
+                   (unsigned)(journal != nullptr ? journal->totalChangeCount() : 0));
     }
-    _logger.warn("%s: %s -> %s after %s (change #%u)", state.info->name,
-                 ecoflowGridStateName(state.previousGrid), ecoflowGridStateName(state.grid),
-                 EcoflowDeviceRegistry::formatDuration(state.previousGridDurationMs).c_str(),
-                 (unsigned)state.gridChangeCount);
+
+    #if HAS_MQTT_CLIENT
+    // Payload - свідомо мінімальний (не "усі параметри"): grid - тригер,
+    // charge/remain - контекст "чи вистачить батареї", timestamp - RFC3339 з
+    // офсетом (NtpService::ftime, %o). Без changeCount/previousDurationSec/
+    // gridInferred - docs/tech_debt.md розділ 8 пояснює, чому саме так.
+    char timestamp[32] = "";
+    ntp.ftime("%Y-%m-%dT%H:%M:%S%o", timestamp, sizeof(timestamp));
+
+    String payload = "{\"grid\":\"";
+    payload += ecoflowGridStateName(state.grid);
+    payload += "\",\"timestamp\":\"";
+    payload += timestamp;
+    payload += "\",\"charge\":";
+    payload += state.hasSoc() ? String((int)state.socPercent) : String("null");
+    payload += ",\"remain\":";
+    payload += state.remainTimeMinutes >= 0 ? String(state.remainTimeMinutes) : String("null");
+    payload += "}";
+
+    const String topic =
+        "devices/" PIO_PIOENV "/ecoflow/" + String(state.info->serialNumber) + "/grid";
+    mqtt.publish(topic.c_str(), payload.c_str(), /*retained=*/true);
+    #endif
   });
 
   ecoflowDevices.onSocChange([](const EcoflowDeviceState& state, int8_t previousSoc) {
@@ -1324,9 +1375,15 @@ void setupEcoflow() {
       // і на розряд, тому саме сусідство з GRID і пояснює, що воно означає.
       const String remaining = EcoflowDeviceRegistry::formatRemainTime(state.remainTimeMinutes);
 
+      // "Скільки триває поточний стан" - з журналу (EcoflowGridJournal,
+      // переживає ребут), не з RAM-only мітки - тієї більше немає
+      // (tech_debt.md, "не дублювати previousGrid").
       String gridFor = "-";
-      if (state.gridSinceMs != 0) {
-        gridFor = EcoflowDeviceRegistry::formatDuration(millis() - state.gridSinceMs);
+      const EcoflowGridJournal* gridJournal = ecoflowDevices.journalAt(state.journalIndex);
+      const time_t gridSince = gridJournal != nullptr ? gridJournal->gridSinceEpoch() : 0;
+      const time_t nowEpoch = time(nullptr);
+      if (gridSince != 0 && nowEpoch > gridSince) {
+        gridFor = EcoflowDeviceRegistry::formatDurationSeconds((uint32_t)(nowEpoch - gridSince));
       }
       //                1    2     3     4    5   6    7   8
       _logger.info("%-1u %-16s %-18s %-7s %6s %-9s %7s %9s",
@@ -1430,6 +1487,80 @@ void setupEcoflow() {
       const size_t affected = ecoflowDevices.setCaptureAll(serial, enable);
       _logger.info("capture all = %s for %u device(s)", enable ? "on" : "off",
                    (unsigned)affected);
+    }
+  );
+
+  // command: ecoflow-journal
+  //
+  // Мінімальна версія контракту (docs/tech_debt.md, розділ 8 - кандидат на
+  // розширення: clear/reset, dump <file> <sn|index|all> у LittleFS/SD,
+  // налаштування алертів - свідомо НЕ тут).
+  commandHandler.registerCommand(
+    "ecoflow-journal", "grid transitions journal: ecoflow-journal <on|off|show> [sn|index|all]",
+    [](const String args) {
+      String rest = args;
+      rest.trim();
+      const int space = rest.indexOf(' ');
+      String mode = space < 0 ? rest : rest.substring(0, space);
+      String target = space < 0 ? String("all") : rest.substring(space + 1);
+      mode.trim();
+      target.trim();
+
+      if (mode == "on" || mode == "off") {
+        const bool enable = (mode == "on");
+        ecoflowDevices.setJournalPersistenceEnabledForAll(enable);
+        configStorage.setString(CFG_ECOFLOW_JOURNAL, enable ? "1" : "0");
+        _logger.info("journal NVS writes = %s", enable ? "on" : "off");
+        return;
+      }
+
+      if (mode != "show") {
+        _logger.info("use: ecoflow-journal <on|off|show> [sn|index|all]");
+        return;
+      }
+
+      const time_t now = time(nullptr);
+      if (target.length() == 0 || target == "all") {
+        _logger.info("%-16s %-9s %8s %10s %10s %6s", "SERIAL", "GRID", "FOR", "ON-GRID",
+                     "OFF-GRID", "CHANGES");
+        for (const auto& state : ecoflowDevices.devices()) {
+          const EcoflowGridJournal* journal = ecoflowDevices.journalAt(state.journalIndex);
+          if (journal == nullptr) { continue; }
+          const time_t since = journal->gridSinceEpoch();
+          const uint32_t forSec = (since > 0 && now > since) ? (uint32_t)(now - since) : 0;
+          _logger.info("%-16s %-9s %8s %10s %10s %6u", state.info->serialNumber,
+                       ecoflowGridStateName(journal->currentGrid()),
+                       EcoflowDeviceRegistry::formatDurationSeconds(forSec).c_str(),
+                       EcoflowDeviceRegistry::formatDurationSeconds(journal->totalOnGridSec()).c_str(),
+                       EcoflowDeviceRegistry::formatDurationSeconds(journal->totalOffGridSec()).c_str(),
+                       (unsigned)journal->totalChangeCount());
+        }
+        return;
+      }
+
+      const String serial = ecoflowSerialFromKey(target);
+      if (serial.length() == 0) { return; }
+      EcoflowGridJournal* journal = ecoflowDevices.journalFor(serial);
+      if (journal == nullptr) { return; }
+
+      // Транзитний буфер - лише на час цієї команди, НЕ постійне поле
+      // жодного класу (EcoflowGridJournal.hpp, "hot"/"cold").
+      constexpr size_t kShowLimit = 30;
+      EcoflowGridEvent events[kShowLimit];
+      const size_t count = journal->loadRecentEvents(events, kShowLimit);
+      _logger.info("%s - last %u of %u total change(s), on %s / off %s (all-time)",
+                   serial.c_str(), (unsigned)count, (unsigned)journal->totalChangeCount(),
+                   EcoflowDeviceRegistry::formatDurationSeconds(journal->totalOnGridSec()).c_str(),
+                   EcoflowDeviceRegistry::formatDurationSeconds(journal->totalOffGridSec()).c_str());
+      for (size_t i = 0; i < count; i++) {
+        const char* kindName = events[i].kind == EcoflowJournalEntryKind::Boot         ? "boot"
+                               : events[i].kind == EcoflowJournalEntryKind::LiveCheckpoint ? "check"
+                                                                                          : "change";
+        char timestamp[32] = "";
+        struct timeval tv { events[i].atEpoch, 0 };
+        ntp.ftime("%Y-%m-%d %H:%M:%S", timestamp, sizeof(timestamp), &tv);
+        _logger.info("  %-6s %-9s %s", kindName, ecoflowGridStateName(events[i].toState), timestamp);
+      }
     }
   );
 
@@ -4903,7 +5034,7 @@ void drawTime() {
   display.setCursor(TFT_WIDTH - textW, 0);
   display.print(timeStr);
 #elif BOARD_4848S040 || BOARD_ST7789
-  int16_t x = 0, y = 8;
+  int16_t y = 8;
   uint16_t textW;
   // display.setTextFont(7); display.setTextSize(1); // великий "цифровий" шрифт (тільки цифри та ":")
   // display.setTextFont(6); display.setTextSize(1); // великий - красивий

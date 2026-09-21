@@ -17,8 +17,15 @@ const char* presenceOf(const EcoflowDeviceState& state) {
   return state.online ? "online" : "offline";
 }
 
-String deviceJson(const EcoflowDeviceState& state) {
+// journal - "hot"-акцесори EcoflowGridJournal (RAM, без звернення до NVS,
+// тому цей роут і далі не потребує WebJobQueue - див. коментар у
+// WebEcoflowModule.hpp). nullptr не трапляється за нормальної роботи
+// (кожен пристрій має свій журнал, EcoflowDeviceRegistry::EcoflowDeviceRegistry()),
+// але перевіряємо, а не покладаємось.
+String deviceJson(const EcoflowDeviceState& state, const EcoflowGridJournal* journal) {
   const uint32_t now = millis();
+  const time_t sinceEpoch = journal != nullptr ? journal->gridSinceEpoch() : 0;
+  const time_t nowEpoch = time(nullptr);
   String json = "{\"serialNumber\":" + webjson::quote(state.info->serialNumber);
   json += ",\"name\":" + webjson::quote(state.info->name);
   json += ",\"type\":" + webjson::quote(ecoflowDeviceTypeName(state.info->type));
@@ -33,11 +40,18 @@ String deviceJson(const EcoflowDeviceState& state) {
 
   json += ",\"grid\":" + webjson::quote(ecoflowGridStateName(state.grid));
   json += ",\"gridInferred\":" + webjson::boolean(state.gridInferred);
+  // "Скільки триває поточний стан" - з персистентного журналу
+  // (EcoflowGridJournal::gridSinceEpoch()), не з RAM-only мітки: та
+  // обнулялась би щоразу на ребуті (tech_debt.md, "не дублювати previousGrid").
   json += ",\"gridForMs\":" +
-          (state.gridSinceMs == 0 ? String("null") : String(now - state.gridSinceMs));
-  json += ",\"previousGrid\":" + webjson::quote(ecoflowGridStateName(state.previousGrid));
-  json += ",\"previousGridDurationMs\":" + String(state.previousGridDurationMs);
-  json += ",\"gridChangeCount\":" + String(state.gridChangeCount);
+          (sinceEpoch == 0 || nowEpoch < sinceEpoch ? String("null")
+                                                    : String((uint32_t)(nowEpoch - sinceEpoch) * 1000UL));
+  // "Попередній стан"/"тривалість попереднього" тепер живуть лише в самому
+  // журналі (кільце переходів) - показ одного останнього запису тут означав
+  // би ще один транзитний NVS-запит на КОЖЕН пристрій КОЖНОГО опитування
+  // цього роуту; лишено для майбутнього окремого /api/ecoflow/journal (план
+  // журналу EcoFlow, docs/tech_debt.md розділ 8), а не тут.
+  json += ",\"gridChangeCount\":" + String(journal != nullptr ? journal->totalChangeCount() : 0);
 
   json += ",\"acInputMilliVolts\":" + intOrNull(state.acInputMilliVolts);
   json += ",\"acInputFrequency\":" + intOrNull(state.acInputFrequency);
@@ -90,7 +104,7 @@ void WebEcoflowModule::registerRoutes(AsyncWebServer& server, WebPortal& portal)
     for (const auto& state : _registry.devices()) {
       if (!first) json += ',';
       first = false;
-      json += deviceJson(state);
+      json += deviceJson(state, _registry.journalAt(state.journalIndex));
     }
     json += "]}";
 
