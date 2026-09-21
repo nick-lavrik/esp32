@@ -53,6 +53,8 @@
 
 #include <Arduino.h>
 #include <SPI.h>
+#include <algorithm>
+#include <vector>
 #if defined(ESP32) && __has_include(<soc/rtc_cntl_reg.h>)
 #include <soc/rtc_cntl_reg.h>
 // Регістр примусового download-boot для команди "bootloader".
@@ -1089,6 +1091,65 @@ static String ecoflowSerialFromKey(const String& key) {
   return String();
 }
 
+// 'ecoflow-journal show' - один рядок журналу, вже готовий до друку: реальна
+// зміна grid одного пристрою плюс AGE - скільки він провів у стані, яке ЦЯ
+// подія позначає (та сама назва й той самий сенс "часу в стані", що й AGE у
+// команді 'ecoflow'/веб-порталі, лише для команди 'ecoflow' стан завжди
+// поточний, а тут - будь-який, включно з уже завершеними). Рахується тут
+// (EcoflowGridEvent зберігає лише toState/atEpoch, без duration), а не в
+// EcoflowGridJournal - це подання для виводу, не дані журналу.
+static constexpr size_t kEcoflowJournalShowLimit = 30;  // на пристрій; підсумок після злиття - не більший
+
+struct EcoflowJournalRow {
+  time_t atEpoch = 0;
+  const char* deviceName = nullptr;
+  EcoflowGridState toState = EcoflowGridState::Unknown;
+  uint32_t ageSec = 0;
+};
+
+// Дописує в out хронологічний список РЕАЛЬНИХ переходів ОДНОГО пристрою
+// (найстаріша - першою, як і loadRecentEvents()).
+//
+// Лише Transition - Boot і LiveCheckpoint у консоль НЕ друкуються: це наша
+// власна сесія, тому "пристрій ще живий" видно вже з того, що команда
+// відповіла, а "живий" (LiveCheckpoint) і "щойно стартувала" (Boot) як
+// окремий рядок лише розбавляють журнал переходів, заради якого команда й
+// існує (реальний приклад із живого заліза: 30 рядків показу, з них 26 -
+// boot після ребут-петлі, жодного реального переходу не видно без
+// гортання). Для СПОЖИВАЧІВ поза цією консоллю (веб-портал, Grafana,
+// будь-який агрегатор, що читає MQTT-дзеркало чи NVS) обидва лишаються
+// важливими - це підтвердження живості й точки відліку "з коли саме
+// відомо", які тут просто зайві. У РОЗРАХУНКУ AGE (нижче) вони лишаються
+// як межа, що підтверджує "стан ще той самий" - лише самі рядки не
+// друкуються.
+//
+// AGE рахується ВПЕРЕД, не назад: час від ЦІЄЇ події до НАСТУПНОЇ (того
+// самого пристрою, БУДЬ-ЯКОГО виду) - "цей стан протримався стільки" - а
+// не час від попередньої події до цієї. Тому зайвий "контекстний" запис
+// перед вікном показу не потрібен: межа, якої бракує - НОВІША, а не
+// старіша, і саме там найновіший запис і є межею - "стан ще триває,
+// дотепер X".
+static void ecoflowAppendJournalRows(EcoflowGridJournal* journal, const char* deviceName,
+                                      std::vector<EcoflowJournalRow>& out) {
+  if (journal == nullptr) { return; }
+
+  EcoflowGridEvent events[kEcoflowJournalShowLimit];
+  const size_t count = journal->loadRecentEvents(events, kEcoflowJournalShowLimit);
+  const time_t now = time(nullptr);
+
+  for (size_t i = 0; i < count; i++) {
+    if (events[i].kind != EcoflowJournalEntryKind::Transition) { continue; }
+
+    EcoflowJournalRow row;
+    row.atEpoch = events[i].atEpoch;
+    row.deviceName = deviceName;
+    row.toState = events[i].toState;
+    const time_t until = (i + 1 < count) ? events[i + 1].atEpoch : now;
+    row.ageSec = (until > row.atEpoch) ? (uint32_t)(until - row.atEpoch) : 0;
+    out.push_back(row);
+  }
+}
+
 void setupEcoflow() {
   static TLogger _logger{"ecoflow"};
 
@@ -1519,47 +1580,47 @@ void setupEcoflow() {
         return;
       }
 
-      const time_t now = time(nullptr);
+      // Список пристроїв, чиї журнали злити в один хронологічний потік:
+      // усі (порожній аргумент/'all') чи один, обраний за serial/індексом.
+      // Далі - ОДИН шлях друку для обох випадків (KISS - не два формати
+      // виводу під два режими show).
+      std::vector<EcoflowJournalRow> rows;
       if (target.length() == 0 || target == "all") {
-        _logger.info("%-16s %-9s %8s %10s %10s %6s", "SERIAL", "GRID", "FOR", "ON-GRID",
-                     "OFF-GRID", "CHANGES");
         for (const auto& state : ecoflowDevices.devices()) {
-          const EcoflowGridJournal* journal = ecoflowDevices.journalAt(state.journalIndex);
-          if (journal == nullptr) { continue; }
-          const time_t since = journal->gridSinceEpoch();
-          const uint32_t forSec = (since > 0 && now > since) ? (uint32_t)(now - since) : 0;
-          _logger.info("%-16s %-9s %8s %10s %10s %6u", state.info->serialNumber,
-                       ecoflowGridStateName(journal->currentGrid()),
-                       EcoflowDeviceRegistry::formatDurationSeconds(forSec).c_str(),
-                       EcoflowDeviceRegistry::formatDurationSeconds(journal->totalOnGridSec()).c_str(),
-                       EcoflowDeviceRegistry::formatDurationSeconds(journal->totalOffGridSec()).c_str(),
-                       (unsigned)journal->totalChangeCount());
+          ecoflowAppendJournalRows(ecoflowDevices.journalAt(state.journalIndex), state.info->name, rows);
         }
+      } else {
+        const String serial = ecoflowSerialFromKey(target);
+        if (serial.length() == 0) { return; }
+        EcoflowDeviceState* state = ecoflowDevices.find(serial);
+        if (state == nullptr) { return; }
+        ecoflowAppendJournalRows(ecoflowDevices.journalAt(state->journalIndex), state->info->name, rows);
+      }
+
+      if (rows.empty()) {
+        _logger.info("journal is empty");
         return;
       }
 
-      const String serial = ecoflowSerialFromKey(target);
-      if (serial.length() == 0) { return; }
-      EcoflowGridJournal* journal = ecoflowDevices.journalFor(serial);
-      if (journal == nullptr) { return; }
+      std::sort(rows.begin(), rows.end(),
+                [](const EcoflowJournalRow& a, const EcoflowJournalRow& b) { return a.atEpoch < b.atEpoch; });
+      // Кілька пристроїв разом можуть дати більше за ліміт одного - показуємо
+      // лише останні kEcoflowJournalShowLimit подій СУМАРНО, найновіші.
+      if (rows.size() > kEcoflowJournalShowLimit) {
+        rows.erase(rows.begin(), rows.begin() + (rows.size() - kEcoflowJournalShowLimit));
+      }
 
-      // Транзитний буфер - лише на час цієї команди, НЕ постійне поле
-      // жодного класу (EcoflowGridJournal.hpp, "hot"/"cold").
-      constexpr size_t kShowLimit = 30;
-      EcoflowGridEvent events[kShowLimit];
-      const size_t count = journal->loadRecentEvents(events, kShowLimit);
-      _logger.info("%s - last %u of %u total change(s), on %s / off %s (all-time)",
-                   serial.c_str(), (unsigned)count, (unsigned)journal->totalChangeCount(),
-                   EcoflowDeviceRegistry::formatDurationSeconds(journal->totalOnGridSec()).c_str(),
-                   EcoflowDeviceRegistry::formatDurationSeconds(journal->totalOffGridSec()).c_str());
-      for (size_t i = 0; i < count; i++) {
-        const char* kindName = events[i].kind == EcoflowJournalEntryKind::Boot         ? "boot"
-                               : events[i].kind == EcoflowJournalEntryKind::LiveCheckpoint ? "check"
-                                                                                          : "change";
+      constexpr int kDeviceNameWidth = 18;  // "DELTA Pro (xama)" (16) + запас
+      constexpr int kGridWidth = 9;         // "off-grid" (8) + запас
+      _logger.info("%-19s  %-*s  %-*s  %10s", "DATE/TIME", kDeviceNameWidth, "DEVICE", kGridWidth, "GRID",
+                   "AGE");
+      for (const auto& row : rows) {
         char timestamp[32] = "";
-        struct timeval tv { events[i].atEpoch, 0 };
+        struct timeval tv { row.atEpoch, 0 };
         ntp.ftime("%Y-%m-%d %H:%M:%S", timestamp, sizeof(timestamp), &tv);
-        _logger.info("  %-6s %-9s %s", kindName, ecoflowGridStateName(events[i].toState), timestamp);
+        const String age = EcoflowDeviceRegistry::formatDurationSeconds(row.ageSec);
+        _logger.info("%-19s  %-*s  %-*s  %10s", timestamp, kDeviceNameWidth, row.deviceName, kGridWidth,
+                     ecoflowGridStateName(row.toState), age.c_str());
       }
     }
   );

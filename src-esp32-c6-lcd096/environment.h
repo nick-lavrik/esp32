@@ -26,8 +26,11 @@
 // app-розділ 2 МБ: портал коштує ~57 КБ, запас лишається понад 300 КБ.
 #define HAS_WEB_PORTAL 1
 
-// EcoFlow - ПРЯМИЙ MQTT (без проксі, на відміну від esp32-c6/esp32-c3):
-// на цій платі достатньо heap. Runtime-override нижче, розділ 5.
+// EcoFlow - як і esp32-c6/esp32-c3, через MQTT-проксі на rpi5
+// (ECOFLOW_MQTT_PROXY_* в platformio.ini для цього env): реєстрація акаунта
+// й ACL для НОВОЇ плати - docs/ecoflow_mqtt_proxy_setup.md, "Реєстрація
+// нової плати" (Крок A + Крок B, обов'язково обидва). Runtime-override
+// нижче, розділ 5.
 #define HAS_ECOFLOW_CLIENT 1
 
 // ============================================================
