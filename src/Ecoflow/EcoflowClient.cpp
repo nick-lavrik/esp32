@@ -430,7 +430,12 @@ bool EcoflowClient::withMqttSuspended(const char *what, const std::function<bool
     return false;
   }
 
-  const bool needSuspend = _started && !_mqtt.isSuspended();
+  // Proxy-з'єднання (useTls=false) не тримає mbedTLS-сесію - конфлікту з
+  // TLS REST-запитом нема (той самий heap-конфлікт, що suspend лікує, тут
+  // просто відсутній), і призупиняти нема сенсу: economить paus/resume
+  // мережевого таска на кожен REST-виклик, і - важливо для майбутнього
+  // спільного клієнта - НЕ зачіпає інших слухачів того самого сокета.
+  const bool needSuspend = !viaProxy() && _started && !_mqtt.isSuspended();
   if (needSuspend) {
     if (!_mqtt.suspend()) {
       // Клієнт лишився працювати - REST робити не можна: другої TLS-сесії
