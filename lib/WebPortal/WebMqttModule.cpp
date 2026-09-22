@@ -20,7 +20,25 @@ void WebMqttModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
     json += ",\"publishedCount\":" + String(_client.publishedCount());
     json += ",\"receivedCount\":" + String(_client.receivedCount());
     json += ",\"subscribeDeniedCount\":" + String(_client.subscribeDeniedCount());
+    // Ті самі втрати, що вже логуються через reportDroppedMessages() -
+    // переповнення черги ДО відправки/прийому АБО провал алокації під копію
+    // (catch(bad_alloc), lib/MqttClient/MqttClient.cpp). Причина не
+    // розрізняється в самому лічильнику - CLAUDE.md, "Видимість MQTT-трафіку".
+    json += ",\"droppedOutgoingCount\":" + String(_client.droppedOutgoingCount());
+    json += ",\"droppedIncomingCount\":" + String(_client.droppedIncomingCount());
     json += ",\"netStackHeadroomBytes\":" + String((uint32_t)_client.networkTaskStackHeadroom());
+
+    // LWT - null, якщо для цього клієнта не налаштовано (lwtTopic() поверне
+    // nullptr/""). offline/online - опційні навіть коли topic заданий.
+    const char* lwtTopic = _client.lwtTopic();
+    if (lwtTopic != nullptr && lwtTopic[0] != '\0') {
+      json += ",\"lwt\":{\"topic\":" + webjson::quote(lwtTopic);
+      json += ",\"offlineMessage\":" + webjson::quote(_client.lwtOfflineMessage() ? _client.lwtOfflineMessage() : "");
+      json += ",\"onlineMessage\":" + webjson::quote(_client.lwtOnlineMessage() ? _client.lwtOnlineMessage() : "");
+      json += "}";
+    } else {
+      json += ",\"lwt\":null";
+    }
 
     json += ",\"consoleMirror\":";
 #if HAS_CONSOLE_MQTT

@@ -216,9 +216,25 @@ public:
   // isConnected() лишається true, а підписки мовчки порожні (EcoFlow-урок,
   // docs/tech_debt.md, "відкликані ключі").
   uint32_t subscribeDeniedCount() const { return _subscribeDeniedTotal; }
+
+  // Той самий підхід (накопичувальна версія поруч зі скидною) - скільки
+  // вихідних/вхідних повідомлень загублено за весь час роботи: переповнення
+  // черги (drop-oldest) АБО провал алокації під копію (catch(bad_alloc) у
+  // enqueueOutgoing()/publishJson()/drainOutgoingQueue()/enqueueIncoming()) -
+  // причина не розрізняється, як і в reportDroppedMessages().
+  uint32_t droppedOutgoingCount() const { return _droppedOutgoingTotal; }
+  uint32_t droppedIncomingCount() const { return _droppedIncomingTotal; }
 #else
   uint32_t subscribeDeniedCount() const { return 0; }
+  uint32_t droppedOutgoingCount() const { return 0; }
+  uint32_t droppedIncomingCount() const { return 0; }
 #endif
+
+  // LWT - та сама MqttConfig, з якою клієнт піднявся (див. host()/port() вище,
+  // той самий DRY-мотив). nullptr/"" -> LWT не налаштовано для цього клієнта.
+  const char* lwtTopic() const { return _config.lwtTopic; }
+  const char* lwtOfflineMessage() const { return _config.lwtOfflineMessage; }
+  const char* lwtOnlineMessage() const { return _config.lwtOnlineMessage; }
 
 private:
   std::atomic<bool> _connected{false};
@@ -355,6 +371,11 @@ private:
   // блокуючих викликів).
   std::atomic<uint32_t> _droppedIncoming{0};
   std::atomic<uint32_t> _droppedOutgoing{0};
+  // Ті самі події, але без скидання - джерело droppedIncomingCount()/
+  // droppedOutgoingCount() вище (той самий підхід, що _subscribeDeniedTotal
+  // поруч із _subscribeDenied).
+  std::atomic<uint32_t> _droppedIncomingTotal{0};
+  std::atomic<uint32_t> _droppedOutgoingTotal{0};
 
   // Скільки SUBSCRIBE брокер відхилив (SUBACK = 0x80). Без цього лічильника
   // відмова за ACL виглядає як повна тиша при isConnected() == true - клієнт

@@ -662,6 +662,7 @@ void MqttClient::enqueueOutgoing(MqttOutgoingCommand::Type type, const std::stri
     // суцільного блоку під копію команди - без catch() виняток ліг би
     // необробленим і клав усю плату (std::terminate -> abort).
     _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+    _droppedOutgoingTotal.fetch_add(1, std::memory_order_relaxed);
     return;
   }
 
@@ -672,6 +673,7 @@ void MqttClient::enqueueOutgoing(MqttOutgoingCommand::Type type, const std::stri
   if (_outgoingQueue.size() >= kMaxOutgoingQueue) {
     _outgoingQueue.erase(_outgoingQueue.begin());
     _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+    _droppedOutgoingTotal.fetch_add(1, std::memory_order_relaxed);
   }
   _outgoingQueue.push_back(std::move(cmd));
 }
@@ -715,6 +717,7 @@ void MqttClient::drainOutgoingQueue() {
           // перед відправкою - без catch() виняток ліг би необробленим на
           // мережевому таску і клав усю плату (std::terminate -> abort).
           _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+          _droppedOutgoingTotal.fetch_add(1, std::memory_order_relaxed);
         }
         break;
       }
@@ -763,6 +766,7 @@ bool MqttClient::publishJson(const char* topic, JsonDocument& doc, bool retained
     // це мовчки бракувало б дані на прийомі.
 #if defined(ESP32)
     _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+    _droppedOutgoingTotal.fetch_add(1, std::memory_order_relaxed);
 #endif
     return false;
   }
@@ -777,6 +781,7 @@ bool MqttClient::publishJson(const char* topic, JsonDocument& doc, bool retained
     // catch() виняток летів би необробленим і клав усю плату (std::terminate
     // -> abort), той самий клас проблеми, що в enqueueIncoming().
     _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+    _droppedOutgoingTotal.fetch_add(1, std::memory_order_relaxed);
     return false;
   }
 #else
@@ -928,6 +933,7 @@ void MqttClient::enqueueIncoming(const char* topic, const uint8_t* payload, unsi
     // нижче). Той самий лічильник/попередження, що й для drop-oldest -
     // reportDroppedMessages() не розрізняє причину.
     _droppedIncoming.fetch_add(1, std::memory_order_relaxed);
+    _droppedIncomingTotal.fetch_add(1, std::memory_order_relaxed);
     return;
   }
 
@@ -937,6 +943,7 @@ void MqttClient::enqueueIncoming(const char* topic, const uint8_t* payload, unsi
   if (_incomingQueue.size() >= kMaxIncomingQueue) {
     _incomingQueue.erase(_incomingQueue.begin());
     _droppedIncoming.fetch_add(1, std::memory_order_relaxed);
+    _droppedIncomingTotal.fetch_add(1, std::memory_order_relaxed);
   }
   _incomingQueue.push_back(std::move(msg));
 #endif

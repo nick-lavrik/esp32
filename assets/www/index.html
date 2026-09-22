@@ -3126,6 +3126,25 @@ function mqttDeniedText(count) {
   return `<span style="color:var(--err)">${count} - check ACL (docs/ecoflow_mqtt_proxy_setup.md)</span>`;
 }
 
+// droppedOutgoingCount/droppedIncomingCount > 0 - черга повідомлень
+// переповнилась (drop-oldest) АБО не вдалось виділити heap під копію
+// (MqttClient.cpp, catch(bad_alloc)) - причина не розрізняється в самому
+// лічильнику, той самий підхід, що mqttDeniedText вище.
+function mqttDroppedText(out, incoming) {
+  if (out === 0 && incoming === 0) return "0 / 0";
+  return `<span style="color:var(--err)">${out} / ${incoming}</span>`;
+}
+
+// LWT (Last Will and Testament) - брокер сам публікує offlineMessage, якщо
+// клієнт зникне без чистого disconnect (пропав живлення/мережа) - головний
+// спосіб дізнатись "пристрій замовк", не чекаючи опитування.
+function mqttLwtText(lwt) {
+  if (!lwt) return "not configured";
+  const on = lwt.onlineMessage ? `, online: "${lwt.onlineMessage}"` : "";
+  const off = lwt.offlineMessage ? `, offline: "${lwt.offlineMessage}"` : "";
+  return `${lwt.topic}${on}${off}`;
+}
+
 // Спільний рядок dt/dd для повної вкладки MQTT (renderMqtt) і компактного
 // блоку на System (renderMqttSystemSummary) - той самий підхід, що
 // ecoDeviceDetailRows() для EcoFlow (DRY).
@@ -3137,7 +3156,9 @@ function mqttConnectionRows(data) {
     ["Client ID", data.clientId],
     ["Login", data.login == null ? "(anonymous)" : data.login],
     ["Topic prefix", data.topicPrefix],
+    ["LWT", mqttLwtText(data.lwt)],
     ["Published / received", data.publishedCount + " / " + data.receivedCount],
+    ["Dropped (queue/alloc) out / in", mqttDroppedText(data.droppedOutgoingCount, data.droppedIncomingCount), true],
     ["Subscribe denied", mqttDeniedText(data.subscribeDeniedCount), true],
   ];
 }
