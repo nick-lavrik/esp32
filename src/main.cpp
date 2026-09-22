@@ -1574,13 +1574,19 @@ void setupEcoflow() {
       target.trim();
 
       if (mode.length() == 0) {
+        size_t i = 0;
         for (const auto& state : ecoflowDevices.devices()) {
-          _logger.info("  %-16s capture=%-3s params=%u%s", state.info->serialNumber,
+          _logger.info("  %u  %-16s %-18s capture=%-3s params=%u%s", (unsigned)i++,
+                       state.info->serialNumber, state.info->name,
                        state.captureAll ? "all" : "imp",
                        (unsigned)state.trackedParams.size(),
                        state.droppedParams ? "  (limit reached)" : "");
         }
         _logger.info("use: ecoflow-capture <on|off> [sn|index|all]");
+        _logger.info("  on|off - capture every received param instead of only whitelisted ones");
+        _logger.info("  target: 'all' (default) - apply to every device");
+        _logger.info("          <index>          - device position in the list above");
+        _logger.info("          <sn>             - device serial number");
         return;
       }
 
@@ -1709,7 +1715,10 @@ void setupEcoflow() {
       String key = rest;
       key.trim();
       if (key.length() == 0) {
-        _logger.info("use: ecoflow-params <sn|index>");
+        _logger.info("use: ecoflow-params <sn|index> [pattern, e.g. *_in_*]");
+        _logger.info("  target: <index> - device position in the list below");
+        _logger.info("          <sn>    - device serial number");
+        _logger.info("  pattern (optional) - glob filter on the normalized param key, '*' wildcard");
         size_t i = 0;
         for (const auto& state : ecoflowDevices.devices()) {
           _logger.info("  %u  %-16s %-18s capture=%s params=%u", (unsigned)i++,
