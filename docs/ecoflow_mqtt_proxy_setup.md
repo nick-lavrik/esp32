@@ -311,6 +311,43 @@ journalctl -u ecoflow-keepalive.service -n 20 --no-pager
 що крок 10.1 не застосовано (чи mosquitto ще не рестартували після нього) -
 дивитись у "Типові помилки" нижче.
 
+### Крок 10.5 — щоденне керування (довідник, щоб не шукати знову)
+
+Усе нижче виконується на rpi5, коли крок 10.1–10.3 вже встановлено -
+нічого тут не потребує повторного `scp`/`install`.
+
+- **Разовий виклик `latestQuotas` просто зараз** (не чекаючи розкладу
+  таймера) — та сама команда, що й перевірка в кроці 10.4:
+  ```sh
+  sudo systemctl start ecoflow-keepalive.service
+  journalctl -u ecoflow-keepalive.service -n 20 --no-pager
+  ```
+  Спрацьовує для ВСІХ рядків з `/etc/ecoflow-keepalive/targets.conf`
+  одразу (`Type=oneshot` — не запускає й не чіпає таймер).
+- **Зупинити періодичні виклики тимчасово** (сервіс і скрипт лишаються на
+  диску, наступний `enable`/`start` таймера підхоплює все як є):
+  ```sh
+  sudo systemctl stop ecoflow-keepalive.timer
+  ```
+  `systemctl status ecoflow-keepalive.timer` після цього показує
+  `inactive (dead)`.
+- **Запустити знову.**
+  ```sh
+  sudo systemctl start ecoflow-keepalive.timer
+  ```
+  Перший прогін — за `OnBootSec`/`OnUnitActiveSec` з
+  `/etc/systemd/system/ecoflow-keepalive.timer` (типово до 2 хв після
+  старту, далі кожні 600с). Точний час наступного прогону:
+  ```sh
+  systemctl list-timers ecoflow-keepalive.timer
+  ```
+- **Вимкнути насовсім** (переживає перезавантаження rpi5 — на відміну від
+  `stop` вище, знімає ще й автозапуск при боті):
+  ```sh
+  sudo systemctl disable --now ecoflow-keepalive.timer
+  ```
+  Увімкнути назад: `sudo systemctl enable --now ecoflow-keepalive.timer`.
+
 ## Реєстрація нової плати (новий PIOENV) на rpi5
 
 Стосується **кожної** нової плати в проєкті (новий `[env:...]` у
@@ -398,27 +435,8 @@ mosquitto_sub -h 192.168.1.22 -u <новий-PIOENV> -P '<пароль-гейт�
 
 ## Обслуговування
 
-- **Зупинити keepalive (крок 10), тимчасово.**
-  ```sh
-  sudo systemctl stop ecoflow-keepalive.timer
-  ```
-  Unit-файли, скрипт і `targets.conf` лишаються на диску незмінними - бридж і
-  решта проксі далі працюють як є, зникає лише періодичний `latestQuotas`.
-  `systemctl status ecoflow-keepalive.timer` після цього показує
-  `inactive (dead)`.
-- **Запустити знову.**
-  ```sh
-  sudo systemctl start ecoflow-keepalive.timer
-  ```
-  Перший прогін - за `OnBootSec`/`OnUnitActiveSec` з
-  `/etc/systemd/system/ecoflow-keepalive.timer` (зараз - до 2 хв після
-  старту timer'а, потім кожні 600с); `systemctl list-timers
-  ecoflow-keepalive.timer` показує точний `NEXT`. Форсувати негайно, не
-  чекаючи розкладу: `sudo systemctl start ecoflow-keepalive.service`.
-- **Вимкнути й забути (переживає перезавантаження rpi5).**
-  `sudo systemctl disable --now ecoflow-keepalive.timer` - на відміну від
-  `stop` вище, це ще й знімає автозапуск при боті. Увімкнути назад:
-  `sudo systemctl enable --now ecoflow-keepalive.timer`.
+- **Разовий виклик / зупинити / запустити знову / вимкнути насовсім
+  keepalive (крок 10).** Довідник команд — крок 10.5 вище.
 - **Змінити інтервал (наприклад, після заміру реального вікна "сну" -
   `docs/tech_debt.md`, "DELTA 2: план інтеграції...").** Відредагувати
   `OnUnitActiveSec` в `/etc/systemd/system/ecoflow-keepalive.timer` на
