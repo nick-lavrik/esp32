@@ -651,11 +651,20 @@ void MqttClient::enqueueOutgoing(MqttOutgoingCommand::Type type, const std::stri
                                  const uint8_t* payload, unsigned int length, bool retained) {
   MqttOutgoingCommand cmd;
   cmd.type = type;
-  cmd.topic = topic;
   cmd.retained = retained;
-  if (payload != nullptr && length > 0) {
-    cmd.payload.assign(payload, payload + length);
+  try {
+    cmd.topic = topic;
+    if (payload != nullptr && length > 0) {
+      cmd.payload.assign(payload, payload + length);
+    }
+  } catch (const std::bad_alloc&) {
+    // Той самий клас проблеми, що й у enqueueIncoming(): купа не дала
+    // суцільного блоку під копію команди - без catch() виняток ліг би
+    // необробленим і клав усю плату (std::terminate -> abort).
+    _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+    return;
   }
+
   MutexGuard guard(_outgoingQueueMutex);
   // drop-oldest, як і для _incomingQueue: якщо мережевий таск не встигає
   // (немає з'єднання, а головний потік продовжує publish-ити), черга не має
@@ -698,8 +707,15 @@ void MqttClient::drainOutgoingQueue() {
         _mqttClient.SubscribedMessageListener::unsubscribe(cmd.topic.c_str());
         break;
       case MqttOutgoingCommand::Type::kPublish: {
-        std::string strPayload(reinterpret_cast<const char*>(cmd.payload.data()), cmd.payload.size());
-        _mqttClient.publish(cmd.topic.c_str(), strPayload.c_str(), 0, cmd.retained);
+        try {
+          std::string strPayload(reinterpret_cast<const char*>(cmd.payload.data()), cmd.payload.size());
+          _mqttClient.publish(cmd.topic.c_str(), strPayload.c_str(), 0, cmd.retained);
+        } catch (const std::bad_alloc&) {
+          // Той самий клас проблеми: купа не дала блоку під копію payload
+          // перед відправкою - без catch() виняток ліг би необробленим на
+          // мережевому таску і клав усю плату (std::terminate -> abort).
+          _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+        }
         break;
       }
     }
@@ -741,8 +757,33 @@ MqttListenerId MqttClient::addListener(const char* topic, MqttListenerCallback c
 }
 
 bool MqttClient::publishJson(const char* topic, JsonDocument& doc, bool retained) {
+  if (doc.overflowed()) {
+    // Документ недобудований (heap не дав місця під якесь поле раніше, під
+    // час побудови) - серіалізувати й слати його як "валідний" JSON не можна,
+    // це мовчки бракувало б дані на прийомі.
+#if defined(ESP32)
+    _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+#endif
+    return false;
+  }
+
   size_t size = measureJson(doc);
+#if defined(ESP32)
+  std::vector<char> buffer;
+  try {
+    buffer.resize(size + 1);
+  } catch (const std::bad_alloc&) {
+    // Купа не дала суцільного блоку під серіалізований JSON - без цього
+    // catch() виняток летів би необробленим і клав усю плату (std::terminate
+    // -> abort), той самий клас проблеми, що в enqueueIncoming().
+    _droppedOutgoing.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+#else
+  // ESP8266: збирається без підтримки виключень (-fno-exceptions) - той
+  // самий захист тут неможливий, ця гілка поза межами розбору точок A-D.
   std::vector<char> buffer(size + 1);
+#endif
   serializeJson(doc, buffer.data(), buffer.size());
   return publish(topic, reinterpret_cast<const uint8_t*>(buffer.data()), size, retained);
 }
