@@ -286,6 +286,11 @@ dd { margin: 0; }
   border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px;
   padding: 10px 14px; max-width: 60vw; display: none; box-shadow: 0 6px 20px #0009; }
 .muted { color: var(--muted); }
+/* Позначка "це значення несе title-хінт" - без неї наведення курсором ніхто
+   не вгадає (курсор "help" сам собою непомітний, поки на нього не навести).
+   ПРАВИЛО (web-portal): будь-яке значення з title-хінтом супроводжується
+   цією позначкою - hintIcon() у JS. */
+.hint-mark { color: var(--muted); font-size: .75em; margin-left: .3em; position: relative; top: -0.3em; }
 /* Пробіл на краю SSID. Лапки для цього не годяться: вони читаються як частина
    імені, а на краю рядка ще й зливаються з типографікою решти сторінки. Тут
    натомість рівно те, що є, - місце шириною в пробіл із крапкою по центру.
@@ -993,6 +998,11 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
   <p class="muted">Same on/off state and rules as the <code>console-mqtt</code> serial command - this
      is a read-only view, change it from Commands or the serial console.</p>
   <dl id="mqtt-console"></dl>
+
+  <p class="muted">"Dropped" (out/in above, and rate-limit dropped for the console mirror) means a
+     message could not be sent or received - either the device ran out of memory (heap) for it, or its
+     internal queue was already full. "Subscribe denied" means the broker itself rejected a subscription
+     (ACL) - the connection still looks "connected", it just stays silent.</p>
 </section>
 
 <section id="tab-console">
@@ -3118,6 +3128,13 @@ async function refreshEcoflow() {
 
 const onMqttTab = () => $("#tab-mqtt").classList.contains("active");
 
+// Позначка "це значення несе title-хінт" - сам курсор "help" непомітний, поки
+// на нього не навести, тому кожен такий рядок супроводжує видима позначка.
+// ПРАВИЛО (web-portal, занотовано з CLAUDE.md "Видимість..."): будь-яке
+// значення в dl/dd, що отримує title-хінт, обов'язково додає hintIcon() -
+// без неї наявність хінта не видно взагалі, і сенс title теж втрачається.
+function hintIcon() { return '<span class="hint-mark">ⓘ</span>'; }
+
 // subscribeDeniedCount > 0 - брокер відхилив підписку (ACL), клієнт лишається
 // "connected", але мовчить: той самий симптом, що в docs/tech_debt.md,
 // "EcoFlow: відкликані ключі" - тому окремий колір, а не звичайний рядок dl.
@@ -3130,26 +3147,41 @@ function mqttDeniedText(count) {
 // переповнилась (drop-oldest) АБО не вдалось виділити heap під копію
 // (MqttClient.cpp, catch(bad_alloc)) - причина не розрізняється в самому
 // лічильнику, той самий підхід, що mqttDeniedText вище.
+//
+// Компактний однорядковий варіант (для картки System - там місця на два
+// окремі рядки нема) - розбивка out/in у хінті (title, чотири рядки через
+// \n, нативний тултип браузера показує їх з переносами).
 function mqttDroppedText(out, incoming) {
-  if (out === 0 && incoming === 0) return "0 / 0";
-  return `<span style="color:var(--err)">${out} / ${incoming}</span>`;
+  const total = out + incoming;
+  const hint = [
+    "Not enough memory (heap) to send or receive a message,",
+    "or the queue was full.",
+    `Dropped out: ${out} message(s)`,
+    `Dropped in: ${incoming} message(s)`,
+  ].join("\n");
+  const color = total > 0 ? ' style="color:var(--err)"' : "";
+  return `<span title="${hint}"${color}>${total}${hintIcon()}</span>`;
+}
+
+// Два окремі рядки - для повної вкладки MQTT: там є місце показати out/in
+// без хінта, а сам термін "Dropped" пояснено текстом унизу вкладки
+// (#mqtt-legend), а не в title - один опис, а не той самий текст у двох
+// місцях (хінт і абзац) з ризиком розійтись.
+function mqttDroppedRows(out, incoming) {
+  const text = (n) => n > 0 ? `<span style="color:var(--err)">${n} message(s)</span>` : "0 message(s)";
+  return [
+    ["Dropped out", text(out), true],
+    ["Dropped in", text(incoming), true],
+  ];
 }
 
 // LWT (Last Will and Testament) - брокер сам публікує offlineMessage, якщо
 // клієнт зникне без чистого disconnect (пропав живлення/мережа) - головний
 // спосіб дізнатись "пристрій замовк", не чекаючи опитування.
 //
-// Компактний однорядковий варіант - для картки System (renderMqttSystemSummary):
-// там LWT лише одна з багатьох карток, тому короткий вигляд.
-function mqttLwtText(lwt) {
-  if (!lwt) return "not configured";
-  const on = lwt.onlineMessage ? `, online: "${lwt.onlineMessage}"` : "";
-  const off = lwt.offlineMessage ? `, offline: "${lwt.offlineMessage}"` : "";
-  return `${lwt.topic}${on}${off}`;
-}
-
-// Розгорнутий варіант (три окремі рядки) - для повної вкладки MQTT, де LWT
-// вартий детального розгляду, а не однієї стягнутої строки.
+// Три окремі рядки - і для повної вкладки MQTT, і для картки System
+// (renderMqttSystemSummary): той самий формат в обох місцях, без окремого
+// згорнутого варіанта.
 function mqttLwtRows(lwt) {
   if (!lwt) return [["LWT", "not configured"]];
   return [
@@ -3161,7 +3193,17 @@ function mqttLwtRows(lwt) {
 
 // Heartbeat - періодичний "доказ життя" в той самий LWT-топік МІЖ
 // (пере)з'єднаннями (offline/online шле лише сам конект/розрив) - окремо від
-// LWT-рядків вище. Лише на повній вкладці MQTT, System лишається коротким.
+// LWT-рядків вище. Розгорнутий варіант (два рядки) - для повної вкладки MQTT;
+// компактний mqttHeartbeatText() нижче - для System (там LWT тепер теж три
+// рядки, але Heartbeat лишається згорнутим - одна картка серед багатьох).
+const kHeartbeatHint = "Periodic keep-alive message published to the LWT topic between " +
+  "connects/disconnects, so a silent device is caught even without a network drop.";
+function mqttHeartbeatText(hb) {
+  if (!hb || !hb.message) return `<span title="${kHeartbeatHint}">not configured${hintIcon()}</span>`;
+  return `<span title="${kHeartbeatHint}">"${escapeHtml(hb.message)}" every ` +
+    `${hb.intervalMs / 1000} s${hintIcon()}</span>`;
+}
+
 function mqttHeartbeatRows(hb) {
   if (!hb || !hb.message) return [["Heartbeat", "not configured"]];
   return [
@@ -3170,11 +3212,14 @@ function mqttHeartbeatRows(hb) {
   ];
 }
 
-// Спільний рядок dt/dd для повної вкладки MQTT (renderMqtt) і компактного
-// блоку на System (renderMqttSystemSummary) - той самий підхід, що
-// ecoDeviceDetailRows() для EcoFlow (DRY). LWT сюди навмисно не входить -
-// на вкладці й на System він виглядає по-різному (див. mqttLwtRows/mqttLwtText).
-function mqttConnectionRows(data) {
+// Спільний рядок dt/dd для повної вкладки MQTT (renderMqtt) і картки System
+// (renderMqttSystemSummary) - той самий підхід, що ecoDeviceDetailRows() для
+// EcoFlow (DRY). LWT сюди навмисно не входить - додається окремо через
+// mqttLwtRows() в обох місцях (той самий формат, три рядки). droppedRows -
+// параметр, а не власний виклик усередині: вкладка й System показують
+// Dropped по-різному (два рядки проти одного згорнутого), а решта порядку
+// рядків (до і після) спільна.
+function mqttConnectionRows(data, droppedRows) {
   return [
     ["Connection", data.connected ? "connected" : "disconnected", true],
     ["Broker", data.host + ":" + data.port],
@@ -3183,7 +3228,7 @@ function mqttConnectionRows(data) {
     ["Login", data.login == null ? "(anonymous)" : data.login],
     ["Topic prefix", data.topicPrefix],
     ["Published / received", data.publishedCount + " / " + data.receivedCount],
-    ["Dropped (queue/alloc) out / in", mqttDroppedText(data.droppedOutgoingCount, data.droppedIncomingCount), true],
+    ...droppedRows,
     ["Subscribe denied", mqttDeniedText(data.subscribeDeniedCount), true],
   ];
 }
@@ -3196,7 +3241,8 @@ function mqttConsoleMirrorRows(cm) {
   return [
     ["Mirror", cm.active ? "on" : "off", true],
     ["Topic", escapeHtml(cm.topic)],
-    ["Published / dropped (rate limit)", cm.publishedCount + " / " + cm.droppedByRateLimitCount],
+    ["Published", cm.publishedCount],
+    ["Dropped (rate limit)", cm.droppedByRateLimitCount],
     ["Tag rules", escapeHtml(rulesText)],
   ];
 }
@@ -3205,7 +3251,8 @@ function renderMqtt(data) {
   // Топіки й повідомлення прийшли з прошивки (build-time секрети), але
   // однаково йдуть через escapeHtml() у мапі нижче - той самий підхід, що
   // й для решти рядків: джерело довіри не звільняє від екранування.
-  const rows = mqttConnectionRows(data).concat(mqttLwtRows(data.lwt), mqttHeartbeatRows(data.heartbeat));
+  const droppedRows = mqttDroppedRows(data.droppedOutgoingCount, data.droppedIncomingCount);
+  const rows = mqttConnectionRows(data, droppedRows).concat(mqttLwtRows(data.lwt), mqttHeartbeatRows(data.heartbeat));
   $("#mqtt-status").innerHTML = rows
     .map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
   $("#mqtt-console").innerHTML = mqttConsoleMirrorRows(data.consoleMirror)
@@ -3213,8 +3260,10 @@ function renderMqtt(data) {
 }
 
 function renderMqttSystemSummary(data) {
-  const rows = mqttConnectionRows(data);
-  rows.push(["LWT", mqttLwtText(data.lwt)]);
+  const dropped = mqttDroppedText(data.droppedOutgoingCount, data.droppedIncomingCount);
+  const droppedRow = [["Messages dropped", dropped, true]];
+  const rows = mqttConnectionRows(data, droppedRow).concat(mqttLwtRows(data.lwt));
+  rows.push(["Heartbeat", mqttHeartbeatText(data.heartbeat), true]);
   if (data.consoleMirror.available) {
     rows.push(["Console mirror", data.consoleMirror.active ? "on" : "off", true]);
   }

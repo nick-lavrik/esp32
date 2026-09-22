@@ -5332,12 +5332,16 @@ void setupBlinkLED() {
     static char lastMs[9] = "00:00:00";
     char now[9];
     ntp.ftime("%H:%M:%S", now, 9);
+
     if (strncmp(lastMs, now, sizeof(now))) {
       strncpy(lastMs, now, sizeof(now));
-      digitalWrite(BLINK_LED_PIN, LOW);  // увімкнути (інверсна логіка!)
-      delay(1);
-      digitalWrite(BLINK_LED_PIN, HIGH);  // вимкнути
+      // for (int i = 0; i < (ntp.isSynced() ? 1 : 3); ++i) {
+        digitalWrite(BLINK_LED_PIN, LOW);  // увімкнути (інверсна логіка!)
+        delay(1);
+        digitalWrite(BLINK_LED_PIN, HIGH);  // вимкнути
+      // }
     }
+
   });
 
   if (!configStorage.getBool(CFG_BLINK_LED, true)) {

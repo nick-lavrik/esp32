@@ -833,38 +833,47 @@ EcoFlow-розділу вище: `MqttClient` і `ConsoleMqtt` - обидва в
 
 - **Connection** - `connected`, `host:port`, `security` (`plain`/`tls`,
   `MqttConfig::useTls`), `clientId`, `login` (`MqttClient::username()` -
-  `null`/"(anonymous)", якщо `MqttConfig::useAuth == false`, а не порожній
-  рядок - інакше виглядало б як логін-пусто, а не як вимкнена автентифікація),
-  topic-префікс (`MqttKeyGenerator::prefix()`). Той самий набір полів, що й
-  serial-команда `dump-mqtt` (`src/main.cpp`) - обидва читають одні й ті самі
-  геттери `MqttClient`, друга копія значень не заводиться.
+  `null`/"(anonymous)", якщо `MqttConfig::username` не задано
+  (`MqttClient::hasAuth()`), а не порожній рядок - інакше виглядало б як
+  логін-пусто, а не як вимкнена автентифікація), topic-префікс
+  (`MqttKeyGenerator::prefix()`). Той самий набір полів, що й serial-команда
+  `dump-mqtt` (`src/main.cpp`) - обидва читають одні й ті самі геттери
+  `MqttClient`, друга копія значень не заводиться.
 - **LWT** - `MqttConfig::lwtTopic`/`lwtOfflineMessage`/`lwtOnlineMessage`
   (геттери `MqttClient::lwtTopic()`/`lwtOfflineMessage()`/`lwtOnlineMessage()`).
-  На повній вкладці - три окремі рядки (`LWT topic`/`LWT online`/`LWT
-  offline`, `mqttLwtRows()` у JS); на картці System - один згорнутий рядок
-  (`mqttLwtText()`) під той самий один клас клієнта, там LWT лише одна з
-  багатьох карток. `null`/"not configured", якщо `lwtTopic` не задано для
-  цього клієнта.
+  Три окремі рядки (`LWT topic`/`LWT online`/`LWT offline`, `mqttLwtRows()`
+  у JS) - той самий формат і на повній вкладці MQTT, і на картці System (без
+  окремого згорнутого варіанта). `null`/"not configured", якщо `lwtTopic` не
+  задано для цього клієнта.
 - **Heartbeat** - періодичне повідомлення в той самий LWT-топік МІЖ
   (пере)з'єднаннями, окремо від офлайн/онлайн (ті шле лише сам факт
   конекту/розриву). Джерело правди - `kMqttHeartbeatMessage`/
   `MQTT_HEARTBEAT_INTERVAL_MS` у `src/main.cpp` (той самий cron-таск, що й
   публікує); `WebMqttModule` отримує обидва значення конструктором, а не
   дублює літерал/число другий раз (DRY) - інакше сторінка могла б мовчки
-  розійтись зі справжнім інтервалом. Лише на повній вкладці MQTT (`Heartbeat
-  message`/`Heartbeat interval`, окремі рядки), не на System.
+  розійтись зі справжнім інтервалом. На повній вкладці MQTT - два окремі
+  рядки (`Heartbeat message`/`Heartbeat interval`, `mqttHeartbeatRows()`); на
+  картці System - один згорнутий рядок (`mqttHeartbeatText()`) з `title`-хінтом
+  (позначка `hintIcon()`) - там LWT тепер теж три рядки, а Heartbeat лишається
+  згорнутим, одна картка серед багатьох.
 - **Published / received** - накопичувальні лічильники (`MqttClient::_publishedCount`/
   `_receivedCount`), НЕ атомарні: обидва чіпає лише головний потік
   (`publish()` викликається з коду скетчу, `dispatchMessage()` - з `loop()`),
   так само, як `EcoflowClient::_messageCount` уже читається з таска AsyncTCP
   без мьютекса.
-- **Dropped (queue/alloc) out / in** - накопичувальні лічильники
-  (`MqttClient::droppedOutgoingCount()`/`droppedIncomingCount()`), джерело -
-  переповнення `_outgoingQueue`/`_incomingQueue` (drop-oldest) АБО провал
-  алокації під копію повідомлення (`catch(bad_alloc)` у `enqueueOutgoing()`/
-  `publishJson()`/`drainOutgoingQueue()`/`enqueueIncoming()`, `MqttClient.cpp`)
-  - причина не розрізняється, той самий підхід, що `reportDroppedMessages()`.
-  Червоним кольором при ненульовому значенні, як і `Subscribe denied` нижче.
+- **Dropped out / Dropped in** - на повній вкладці два окремі рядки
+  (`mqttDroppedRows()`), на картці System - один згорнутий рядок "Messages
+  dropped" із `title`-хінтом і розбивкою out/in там-таки (`mqttDroppedText()`,
+  той самий підхід, що LWT/Heartbeat вище - System не має місця на два
+  рядки). Джерело - переповнення `_outgoingQueue`/`_incomingQueue`
+  (drop-oldest) АБО провал алокації під копію повідомлення
+  (`catch(bad_alloc)` у `enqueueOutgoing()`/`publishJson()`/
+  `drainOutgoingQueue()`/`enqueueIncoming()`, `MqttClient.cpp`) - причина не
+  розрізняється ні між напрямками, ні в самому лічильнику, той самий підхід,
+  що `reportDroppedMessages()`. Червоним кольором при ненульовому значенні,
+  як і `Subscribe denied` нижче. Що таке "dropped" - словами, одним абзацом
+  унизу вкладки (не в хінті - той самий текст не варто тримати у двох
+  місцях), разом із поясненням `Subscribe denied`.
 - **Subscribe denied** - накопичувальна версія лічильника, який раніше лише
   логував `reportDroppedMessages()` і одразу скидав (`_subscribeDenied`,
   `MqttClient.cpp`). Ненульове значення - той самий симптом, що
@@ -873,9 +882,10 @@ EcoFlow-розділу вище: `MqttClient` і `ConsoleMqtt` - обидва в
   тому, а не як звичайний рядок статусу.
 - **Console mirror** - той самий стан, що серійна команда `console-mqtt` без
   аргументів (`ConsoleMqtt::dumpStatus()`), лише структуровано: `active`,
-  резолвлений топік, `published`/`droppedByRateLimit`, allow/deny-правила.
-  Розділ лише показує - вмикати/вимикати дзеркало чи міняти правила й далі
-  можна лише з Commands або serial (`console-mqtt on|off|allow|deny|...`).
+  резолвлений топік, окремі рядки `Published`/`Dropped (rate limit)`
+  (`published`/`droppedByRateLimit`), allow/deny-правила. Розділ лише
+  показує - вмикати/вимикати дзеркало чи міняти правила й далі можна лише з
+  Commands або serial (`console-mqtt on|off|allow|deny|...`).
 
 **Вкладка з'являється сама** - той самий механізм `modules` з `/api/status`,
 що для EcoFlow/Screen: на платі без `HAS_MQTT_CLIENT` (жодної в проєкті на
