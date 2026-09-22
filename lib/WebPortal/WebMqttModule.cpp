@@ -40,6 +40,12 @@ void WebMqttModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
       json += ",\"lwt\":null";
     }
 
+    // Heartbeat - "доказ життя" в той самий LWT-топік між (пере)з'єднаннями,
+    // окремо від offline/online. Значення - ті самі константи, що й у
+    // реальному cron-таску (src/main.cpp) - див. коментар у WebMqttModule.hpp.
+    json += ",\"heartbeat\":{\"message\":" + webjson::quote(_heartbeatMessage ? _heartbeatMessage : "");
+    json += ",\"intervalMs\":" + String(_heartbeatIntervalMs) + "}";
+
     json += ",\"consoleMirror\":";
 #if HAS_CONSOLE_MQTT
     json += "{\"available\":true";

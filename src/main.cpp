@@ -373,6 +373,17 @@ WiFiClient wifiClient;
 // PubSubClient client(wifiClient);
 
 #if HAS_MQTT_CLIENT
+// Періодичний "доказ життя" в LWT-топік, окремо від самого LWT (offline/online
+// шле брокер/клієнт лише на конект/розрив) - щоб споживач бачив пристрій
+// живим і між цими подіями, а не лише в момент (пере)з'єднання. Іменована
+// константа, а не літерал у cron-виклику нижче: те саме значення показує
+// вкладка MQTT (WebMqttModule) - інакше сторінка могла б мовчки розійтись
+// зі справжнім інтервалом/повідомленням.
+#ifndef MQTT_HEARTBEAT_INTERVAL_MS
+#define MQTT_HEARTBEAT_INTERVAL_MS (5 * 60 * 1000UL)
+#endif
+static const char* const kMqttHeartbeatMessage = "heartbeat";
+
 MqttClient mqtt(makeMqttConfig());
 // runtime override поверх MqttConfig::prefix; заповнюється лише за наявності
 // CFG_MQTT_TOPIC_PREFIX в ConfigStorage, див. setupMqttClient()
@@ -511,9 +522,9 @@ WebScreenModule webScreenModule;
 // Розділ "mqtt": стан ЗАГАЛЬНОГО клієнта (mqtt/consoleMqtt, оголошені вище,
 // стор. 345-357) - НЕ EcoflowClient, у нього свій розділ нижче.
 #if HAS_CONSOLE_MQTT
-WebMqttModule webMqttModule(mqtt, consoleMqtt);
+WebMqttModule webMqttModule(mqtt, consoleMqtt, kMqttHeartbeatMessage, MQTT_HEARTBEAT_INTERVAL_MS);
 #else
-WebMqttModule webMqttModule(mqtt);
+WebMqttModule webMqttModule(mqtt, kMqttHeartbeatMessage, MQTT_HEARTBEAT_INTERVAL_MS);
 #endif
 #endif
 #if HAS_ECOFLOW_CLIENT
@@ -1934,7 +1945,7 @@ void setupMqttClient() {
 #endif
 
   // mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
-  scheduler.addCronTask(5 * 60 * 1000UL, []() { mqtt.publish(MQTT_LWT_TOPIC, "heartbeat"); });
+  scheduler.addCronTask(MQTT_HEARTBEAT_INTERVAL_MS, []() { mqtt.publish(MQTT_LWT_TOPIC, kMqttHeartbeatMessage); });
   // scheduler.addCronTask(30 * 60 * 1000UL, []() { testAsusWRT(); });
 
   /* #if !BOARD_ESP32_C6 || true

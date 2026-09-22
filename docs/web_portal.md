@@ -838,11 +838,33 @@ EcoFlow-розділу вище: `MqttClient` і `ConsoleMqtt` - обидва в
   topic-префікс (`MqttKeyGenerator::prefix()`). Той самий набір полів, що й
   serial-команда `dump-mqtt` (`src/main.cpp`) - обидва читають одні й ті самі
   геттери `MqttClient`, друга копія значень не заводиться.
+- **LWT** - `MqttConfig::lwtTopic`/`lwtOfflineMessage`/`lwtOnlineMessage`
+  (геттери `MqttClient::lwtTopic()`/`lwtOfflineMessage()`/`lwtOnlineMessage()`).
+  На повній вкладці - три окремі рядки (`LWT topic`/`LWT online`/`LWT
+  offline`, `mqttLwtRows()` у JS); на картці System - один згорнутий рядок
+  (`mqttLwtText()`) під той самий один клас клієнта, там LWT лише одна з
+  багатьох карток. `null`/"not configured", якщо `lwtTopic` не задано для
+  цього клієнта.
+- **Heartbeat** - періодичне повідомлення в той самий LWT-топік МІЖ
+  (пере)з'єднаннями, окремо від офлайн/онлайн (ті шле лише сам факт
+  конекту/розриву). Джерело правди - `kMqttHeartbeatMessage`/
+  `MQTT_HEARTBEAT_INTERVAL_MS` у `src/main.cpp` (той самий cron-таск, що й
+  публікує); `WebMqttModule` отримує обидва значення конструктором, а не
+  дублює літерал/число другий раз (DRY) - інакше сторінка могла б мовчки
+  розійтись зі справжнім інтервалом. Лише на повній вкладці MQTT (`Heartbeat
+  message`/`Heartbeat interval`, окремі рядки), не на System.
 - **Published / received** - накопичувальні лічильники (`MqttClient::_publishedCount`/
   `_receivedCount`), НЕ атомарні: обидва чіпає лише головний потік
   (`publish()` викликається з коду скетчу, `dispatchMessage()` - з `loop()`),
   так само, як `EcoflowClient::_messageCount` уже читається з таска AsyncTCP
   без мьютекса.
+- **Dropped (queue/alloc) out / in** - накопичувальні лічильники
+  (`MqttClient::droppedOutgoingCount()`/`droppedIncomingCount()`), джерело -
+  переповнення `_outgoingQueue`/`_incomingQueue` (drop-oldest) АБО провал
+  алокації під копію повідомлення (`catch(bad_alloc)` у `enqueueOutgoing()`/
+  `publishJson()`/`drainOutgoingQueue()`/`enqueueIncoming()`, `MqttClient.cpp`)
+  - причина не розрізняється, той самий підхід, що `reportDroppedMessages()`.
+  Червоним кольором при ненульовому значенні, як і `Subscribe denied` нижче.
 - **Subscribe denied** - накопичувальна версія лічильника, який раніше лише
   логував `reportDroppedMessages()` і одразу скидав (`_subscribeDenied`,
   `MqttClient.cpp`). Ненульове значення - той самий симптом, що

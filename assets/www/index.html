@@ -3138,6 +3138,9 @@ function mqttDroppedText(out, incoming) {
 // LWT (Last Will and Testament) - брокер сам публікує offlineMessage, якщо
 // клієнт зникне без чистого disconnect (пропав живлення/мережа) - головний
 // спосіб дізнатись "пристрій замовк", не чекаючи опитування.
+//
+// Компактний однорядковий варіант - для картки System (renderMqttSystemSummary):
+// там LWT лише одна з багатьох карток, тому короткий вигляд.
 function mqttLwtText(lwt) {
   if (!lwt) return "not configured";
   const on = lwt.onlineMessage ? `, online: "${lwt.onlineMessage}"` : "";
@@ -3145,9 +3148,32 @@ function mqttLwtText(lwt) {
   return `${lwt.topic}${on}${off}`;
 }
 
+// Розгорнутий варіант (три окремі рядки) - для повної вкладки MQTT, де LWT
+// вартий детального розгляду, а не однієї стягнутої строки.
+function mqttLwtRows(lwt) {
+  if (!lwt) return [["LWT", "not configured"]];
+  return [
+    ["LWT topic", lwt.topic],
+    ["LWT online", lwt.onlineMessage || "(none)"],
+    ["LWT offline", lwt.offlineMessage || "(none)"],
+  ];
+}
+
+// Heartbeat - періодичний "доказ життя" в той самий LWT-топік МІЖ
+// (пере)з'єднаннями (offline/online шле лише сам конект/розрив) - окремо від
+// LWT-рядків вище. Лише на повній вкладці MQTT, System лишається коротким.
+function mqttHeartbeatRows(hb) {
+  if (!hb || !hb.message) return [["Heartbeat", "not configured"]];
+  return [
+    ["Heartbeat message", hb.message],
+    ["Heartbeat interval", (hb.intervalMs / 1000) + " s"],
+  ];
+}
+
 // Спільний рядок dt/dd для повної вкладки MQTT (renderMqtt) і компактного
 // блоку на System (renderMqttSystemSummary) - той самий підхід, що
-// ecoDeviceDetailRows() для EcoFlow (DRY).
+// ecoDeviceDetailRows() для EcoFlow (DRY). LWT сюди навмисно не входить -
+// на вкладці й на System він виглядає по-різному (див. mqttLwtRows/mqttLwtText).
 function mqttConnectionRows(data) {
   return [
     ["Connection", data.connected ? "connected" : "disconnected", true],
@@ -3156,7 +3182,6 @@ function mqttConnectionRows(data) {
     ["Client ID", data.clientId],
     ["Login", data.login == null ? "(anonymous)" : data.login],
     ["Topic prefix", data.topicPrefix],
-    ["LWT", mqttLwtText(data.lwt)],
     ["Published / received", data.publishedCount + " / " + data.receivedCount],
     ["Dropped (queue/alloc) out / in", mqttDroppedText(data.droppedOutgoingCount, data.droppedIncomingCount), true],
     ["Subscribe denied", mqttDeniedText(data.subscribeDeniedCount), true],
@@ -3177,7 +3202,11 @@ function mqttConsoleMirrorRows(cm) {
 }
 
 function renderMqtt(data) {
-  $("#mqtt-status").innerHTML = mqttConnectionRows(data)
+  // Топіки й повідомлення прийшли з прошивки (build-time секрети), але
+  // однаково йдуть через escapeHtml() у мапі нижче - той самий підхід, що
+  // й для решти рядків: джерело довіри не звільняє від екранування.
+  const rows = mqttConnectionRows(data).concat(mqttLwtRows(data.lwt), mqttHeartbeatRows(data.heartbeat));
+  $("#mqtt-status").innerHTML = rows
     .map(([k, v, raw]) => "<dt>" + k + "</dt><dd>" + (raw ? v : escapeHtml(String(v))) + "</dd>").join("");
   $("#mqtt-console").innerHTML = mqttConsoleMirrorRows(data.consoleMirror)
     .map(([k, v]) => "<dt>" + k + "</dt><dd>" + v + "</dd>").join("");
@@ -3185,6 +3214,7 @@ function renderMqtt(data) {
 
 function renderMqttSystemSummary(data) {
   const rows = mqttConnectionRows(data);
+  rows.push(["LWT", mqttLwtText(data.lwt)]);
   if (data.consoleMirror.available) {
     rows.push(["Console mirror", data.consoleMirror.active ? "on" : "off", true]);
   }
