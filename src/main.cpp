@@ -522,9 +522,9 @@ WebScreenModule webScreenModule;
 // Розділ "mqtt": стан ЗАГАЛЬНОГО клієнта (mqtt/consoleMqtt, оголошені вище,
 // стор. 345-357) - НЕ EcoflowClient, у нього свій розділ нижче.
 #if HAS_CONSOLE_MQTT
-WebMqttModule webMqttModule(mqtt, consoleMqtt, kMqttHeartbeatMessage, MQTT_HEARTBEAT_INTERVAL_MS);
+WebMqttModule webMqttModule(mqtt, commandQueue, consoleMqtt, kMqttHeartbeatMessage, MQTT_HEARTBEAT_INTERVAL_MS);
 #else
-WebMqttModule webMqttModule(mqtt, kMqttHeartbeatMessage, MQTT_HEARTBEAT_INTERVAL_MS);
+WebMqttModule webMqttModule(mqtt, commandQueue, kMqttHeartbeatMessage, MQTT_HEARTBEAT_INTERVAL_MS);
 #endif
 #endif
 #if HAS_ECOFLOW_CLIENT

@@ -27,6 +27,10 @@ void WebMqttModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
     json += ",\"droppedOutgoingCount\":" + String(_client.droppedOutgoingCount());
     json += ",\"droppedIncomingCount\":" + String(_client.droppedIncomingCount());
     json += ",\"netStackHeadroomBytes\":" + String((uint32_t)_client.networkTaskStackHeadroom());
+    // CommandQueue::rejected() - черга команд (serial/web/MQTT/cron) уже
+    // повна; кожне джерело саме каже про це вголос у моменті (CommandQueue.hpp),
+    // але агрегат ніде не був видимий - той самий розрив, що dropped* вище.
+    json += ",\"commandsRejectedCount\":" + String(_commandQueue.rejected());
 
     // LWT - null, якщо для цього клієнта не налаштовано (lwtTopic() поверне
     // nullptr/""). offline/online - опційні навіть коли topic заданий.

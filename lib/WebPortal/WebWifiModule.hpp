@@ -45,6 +45,15 @@ public:
   void registerRoutes(AsyncWebServer& server, WebPortal& portal) override;
   void loop() override;
 
+  // Готовий знімок /api/wifi/status (копія String під тим самим мьютексом,
+  // що пише loop()) - перевикористовний поза цим розділом (JSON MQTT-команда
+  // 'wifi-status' фази 1, docs/mqtt-web-handoff.md), а не друга збірка того
+  // самого JSON деінде (CLAUDE.md, DRY).
+  String statusJsonSnapshot() {
+    Lock lock(_mutex);
+    return _statusJson;
+  }
+
 private:
   // Збирає JSON стану і списку профілів. Викликається лише з loop().
   void _refreshSnapshot();

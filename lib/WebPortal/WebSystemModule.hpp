@@ -44,6 +44,16 @@ public:
   const char* name() const override { return "system"; }
   void registerRoutes(AsyncWebServer& server, WebPortal& portal) override;
 
+  // Фрагменти JSON-звіту - публічні static, без стану екземпляра, тому
+  // перевикористовні поза цим розділом (JSON MQTT-команда 'system-info'
+  // фази 1, docs/mqtt-web-handoff.md, розділ "DRY перед новим кодом") - не
+  // копіювати ту саму логіку вдруге (CLAUDE.md, DRY).
+  static String chipInfoJson();
+  static String heapStatsJson();
+  static String flashStatsJson();
+  static String nvsStatsJson();
+  static String partitionsJson();
+
 private:
   // WebJobQueue (loop()): partition table і NVS-статистика - flash I/O, тому
   // весь звіт іде одним job'ом, а не окремою задачею на кожен блок.

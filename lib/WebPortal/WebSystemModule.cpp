@@ -10,13 +10,11 @@
 #include <nvs.h>
 #endif
 
-namespace {
-
 // Той самий набір показників, що серійна команда 'heap' (src/main.cpp):
 // фрагментація важливіша за сам обсяг вільного heap - алокація падає, коли
 // немає ОДНОГО суцільного блоку потрібного розміру, а не коли вільного мало
 // сумарно.
-String heapStatsJson() {
+String WebSystemModule::heapStatsJson() {
 #if defined(ESP32)
   const size_t total = heap_caps_get_total_size(MALLOC_CAP_8BIT);
   const size_t freeNow = heap_caps_get_free_size(MALLOC_CAP_8BIT);
@@ -55,7 +53,7 @@ String heapStatsJson() {
 // Паспорт самого чипа (модель, ревізія, ядра, частота, PSRAM) - статичні дані,
 // які ніде на порталі ще не показано; та сама інформація вже друкує серійна
 // команда 'sysinfo' (dumpSystemInfo(), src/main.cpp), тут лише її JSON-зріз.
-String chipInfoJson() {
+String WebSystemModule::chipInfoJson() {
 #if defined(ESP32)
   String json = "{\"model\":";
   json += webjson::quote(ESP.getChipModel());
@@ -81,7 +79,7 @@ String chipInfoJson() {
 #endif
 }
 
-String flashStatsJson() {
+String WebSystemModule::flashStatsJson() {
   String json = "{\"sizeBytes\":";
   json += (uint32_t)ESP.getFlashChipSize();
   json += ",\"speedHz\":";
@@ -93,7 +91,7 @@ String flashStatsJson() {
 // ESP8266 не має NVS у принципі - ConfigStorage там лишається шимом над
 // LittleFS (lib/ConfigStorage/ConfigStorage.hpp), тому "недоступно", а не
 // нулі, що виглядали б як порожнє сховище.
-String nvsStatsJson() {
+String WebSystemModule::nvsStatsJson() {
 #if defined(ESP32)
   nvs_stats_t stats{};
   if (nvs_get_stats(nullptr, &stats) != ESP_OK) return "{\"available\":false}";
@@ -113,7 +111,7 @@ String nvsStatsJson() {
 #endif
 }
 
-String partitionsJson() {
+String WebSystemModule::partitionsJson() {
   String json = "[";
   const auto partitions = EspPartitionInspector::collectAll(/*computeSha256=*/false);
   for (size_t i = 0; i < partitions.size(); ++i) {
@@ -136,8 +134,6 @@ String partitionsJson() {
   json += "]";
   return json;
 }
-
-}  // namespace
 
 void WebSystemModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
   server.on("/api/system/info", HTTP_GET, [this, &portal](AsyncWebServerRequest* request) {

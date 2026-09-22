@@ -15,6 +15,7 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
+#include <CommandQueue.hpp>
 #include <ConsoleMqtt.hpp>
 #include <MqttClient.hpp>
 
@@ -23,13 +24,15 @@
 class WebMqttModule : public IWebModule {
 public:
 #if HAS_CONSOLE_MQTT
-  WebMqttModule(MqttClient& client, ConsoleMqtt& consoleMqtt, const char* heartbeatMessage,
-                uint32_t heartbeatIntervalMs)
-      : _client(client), _consoleMqtt(&consoleMqtt), _heartbeatMessage(heartbeatMessage),
-        _heartbeatIntervalMs(heartbeatIntervalMs) {}
+  WebMqttModule(MqttClient& client, CommandQueue& commandQueue, ConsoleMqtt& consoleMqtt,
+                const char* heartbeatMessage, uint32_t heartbeatIntervalMs)
+      : _client(client), _commandQueue(commandQueue), _consoleMqtt(&consoleMqtt),
+        _heartbeatMessage(heartbeatMessage), _heartbeatIntervalMs(heartbeatIntervalMs) {}
 #else
-  WebMqttModule(MqttClient& client, const char* heartbeatMessage, uint32_t heartbeatIntervalMs)
-      : _client(client), _heartbeatMessage(heartbeatMessage), _heartbeatIntervalMs(heartbeatIntervalMs) {}
+  WebMqttModule(MqttClient& client, CommandQueue& commandQueue, const char* heartbeatMessage,
+                uint32_t heartbeatIntervalMs)
+      : _client(client), _commandQueue(commandQueue), _heartbeatMessage(heartbeatMessage),
+        _heartbeatIntervalMs(heartbeatIntervalMs) {}
 #endif
 
   const char* name() const override { return "mqtt"; }
@@ -37,6 +40,12 @@ public:
 
 private:
   MqttClient& _client;
+  // CommandQueue - спільна для serial/web/MQTT/cron (lib/CommandQueue), не
+  // власність цього розділу. rejected() показуємо тут разом з рештою
+  // "може мовчки відмовити" лічильників (CLAUDE.md, "Видимість MQTT-
+  // трафіку") - той самий хаб видимості, що вже є для droppedOutgoing/
+  // droppedIncoming/subscribeDenied, а не окрема вкладка під одну цифру.
+  CommandQueue& _commandQueue;
 #if HAS_CONSOLE_MQTT
   ConsoleMqtt* _consoleMqtt = nullptr;
 #endif
