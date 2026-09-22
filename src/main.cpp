@@ -1551,7 +1551,7 @@ void setupEcoflow() {
 
   // command: ecoflow-login
   commandHandler.registerCommand(
-    "ecoflow-login", "issue private-API MQTT credentials (email+password -> account/password)",
+    "ecoflow-login", "log in to EcoFlow private app API (email+password) -> MQTT credentials + userId",
     [](const String args) {
       if (!ecoflow.issueAppCredentialsAsync()) {
         _logger.error("not started: %s", ecoflow.lastError().c_str());
@@ -1622,7 +1622,23 @@ void setupEcoflow() {
       }
 
       if (mode != "show") {
+        // Розгорнутий help (не одна лаконічна "use:"-стрічка, як в інших
+        // ecoflow-команд): аргументи тут не самопояснювальні (on/off керує
+        // лише NVS-частиною, а mark/AGE у show - не очевидні без опису),
+        // тому один рядок "use:" лишав би людину гортати docs/ecoflow.md.
         _logger.info("use: ecoflow-journal <on|off|show> [sn|index|all]");
+        _logger.info("  on|off        - enable/disable journal writes to NVS (MQTT mirror keeps working either way)");
+        _logger.info("  show [target] - print merged Transition history, oldest -> newest, up to %u rows/device",
+                     (unsigned)kEcoflowJournalShowLimit);
+        _logger.info("    target: 'all' (default) - merge every device into one chronological stream");
+        _logger.info("            <index>          - device position, see 'ecoflow-params' with no argument");
+        _logger.info("            <sn>             - device serial number");
+        _logger.info("  columns: DATE/TIME  DEVICE  GRID  mark  AGE");
+        _logger.info("    mark: '>' newest row for that device, state still ongoing (AGE keeps growing)");
+        _logger.info("          '<' last fully closed interval for that device (AGE is final)");
+        _logger.info("          ' ' older history");
+        _logger.info("    AGE:  time spent in that GRID state, forward to the device's next transition (or now)");
+        _logger.info("  Boot/LiveCheckpoint events are not shown here - NVS/MQTT-mirror/web portal only");
         return;
       }
 
@@ -1858,7 +1874,7 @@ void setupEcoflow() {
 
   // command: ecoflow-cert
   commandHandler.registerCommand(
-    "ecoflow-cert", "re-issue EcoFlow MQTT credentials over REST (async, result in log)",
+    "ecoflow-cert", "re-issue MQTT credentials via EcoFlow Open Platform API (accessKey/secretKey)",
     [](const String args) {
       if (!ecoflow.refreshCredentialsAsync()) {
         _logger.error("not started: %s", ecoflow.lastError().c_str());
