@@ -14,8 +14,16 @@ struct MqttConfig {
   // PEM CA-сертифікат (null-terminated). Якщо useTls == true і caCert == nullptr -> setInsecure().
   const char* caCert = nullptr;
 
-  // Автентифікація (plain user/password, працює як з TLS, так і без)
-  bool useAuth = false;
+  // Автентифікація (plain user/password, працює як з TLS, так і без).
+  // Немає окремого useAuth: раніше він дублював цю ж інформацію (сам
+  // прапорець і "username != nullptr" мали завжди збігатись вручну) - в
+  // makeMqttConfig() (src/main.cpp) вони розійшлись: username/password
+  // завжди реальні, а useAuth лишався false. Наслідок - PicoMQTT-гілка
+  // (конструктор передає username/password в PicoMQTT::Client::Client()
+  // безумовно) фактично завжди автентифікувалась, а useAuth==false лише
+  // ламав username()/UI ("Login (anonymous)" при живому логіні), тоді як
+  // PubSubClient-гілка (ESP8266, connect() гілкується на useAuth в місці
+  // виклику) справді конектилась анонімно. nullptr/"" -> анонімний конект.
   const char* username = nullptr;
   const char* password = nullptr;
 

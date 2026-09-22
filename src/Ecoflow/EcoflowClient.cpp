@@ -62,7 +62,6 @@ MqttConfig EcoflowClient::makeMqttConfig(const Config &config, const std::string
     mqttConfig.host = config.proxyHost;
     mqttConfig.port = config.proxyPort;
     mqttConfig.useTls = false;
-    mqttConfig.useAuth = config.proxyUsername != nullptr;
     mqttConfig.username = config.proxyUsername;
     mqttConfig.password = config.proxyPassword;
     // Без mbedTLS-хендшейку 8 КБ (дефолт MqttConfig) вистачає з запасом -
@@ -71,7 +70,6 @@ MqttConfig EcoflowClient::makeMqttConfig(const Config &config, const std::string
   } else {
     mqttConfig.host = config.mqttHost;
     mqttConfig.port = config.mqttPort;
-    mqttConfig.useAuth = true;
     mqttConfig.username = config.mqttUsername;
     mqttConfig.password = config.mqttPassword;
 

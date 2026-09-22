@@ -213,14 +213,14 @@ bool MqttClient::connect() {
 
   bool ok;
   if (hasLwt) {
-    ok = _config.useAuth ? _mqttClient.connect(_config.clientId, _config.username, _config.password,
-                                               lwtTopic.c_str(), _config.lwtQos, _config.lwtRetain,
-                                               _config.lwtOfflineMessage)
-                         : _mqttClient.connect(_config.clientId, lwtTopic.c_str(), _config.lwtQos,
-                                               _config.lwtRetain, _config.lwtOfflineMessage);
+    ok = hasAuth() ? _mqttClient.connect(_config.clientId, _config.username, _config.password,
+                                         lwtTopic.c_str(), _config.lwtQos, _config.lwtRetain,
+                                         _config.lwtOfflineMessage)
+                   : _mqttClient.connect(_config.clientId, lwtTopic.c_str(), _config.lwtQos,
+                                         _config.lwtRetain, _config.lwtOfflineMessage);
   } else {
-    ok = _config.useAuth ? _mqttClient.connect(_config.clientId, _config.username, _config.password)
-                         : _mqttClient.connect(_config.clientId);
+    ok = hasAuth() ? _mqttClient.connect(_config.clientId, _config.username, _config.password)
+                   : _mqttClient.connect(_config.clientId);
   }
 
   if (ok) {
@@ -259,10 +259,11 @@ void MqttClient::begin() {
   _mqttClient.port = _config.port;
   _mqttClient.client_id = _config.clientId;
 
-  if (_config.useAuth) {
-    _mqttClient.username = _config.username;
-    _mqttClient.password = _config.password;
-  }
+  // username/password вже передані в конструкторі (templated-конструктор
+  // PicoMQTT::Client() приймає їх напряму) - тут переприсвоювати нема сенсу.
+  // hasAuth()==false означає username==nullptr/"" - PicoMQTT сам трактує
+  // порожній username як анонімний конект (client.cpp: username.isEmpty()
+  // ? nullptr : username.c_str()), окремого прапорця тут не потрібно.
 
   if (_config.lwtTopic != nullptr && _config.lwtTopic[0] != '\0') {
     // _lwtTopicStorage - член класу, живе весь час роботи клієнта.

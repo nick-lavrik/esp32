@@ -195,9 +195,8 @@ public:
   uint16_t port() const { return _config.port; }
   bool usesTls() const { return _config.useTls; }
   const char* clientId() const { return _config.clientId; }
-  // nullptr, якщо useAuth == false (анонімний конект) - той самий прапорець,
-  // що вирішує, чи взагалі передавати креденшли в connect().
-  const char* username() const { return _config.useAuth ? _config.username : nullptr; }
+  // nullptr, якщо конект анонімний (див. hasAuth() нижче).
+  const char* username() const { return hasAuth() ? _config.username : nullptr; }
 
   // Скільки повідомлень реально опубліковано/доставлено дзвінком слухача
   // з моменту старту клієнта - той самий сенс, що messageCount() у
@@ -248,6 +247,11 @@ private:
   MqttClientConnectionCallback _connected_callback = nullptr;
   MqttClientConnectionCallback _disconnected_callback = nullptr;
   MqttClientConnectionCallback _connection_failure_callback = nullptr;
+
+  // Єдине джерело правди "чи автентифікуватись" - похідне від username, а не
+  // окремий прапорець (MqttConfig::useAuth), який раніше міг розійтися з
+  // реальним значенням username/password (див. коментар біля MqttConfig::username).
+  bool hasAuth() const { return _config.username != nullptr && _config.username[0] != '\0'; }
 
   bool connect();
   void resubscribeAll();

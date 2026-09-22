@@ -13,8 +13,8 @@ void WebMqttModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
     json += ",\"security\":" + webjson::quote(_client.usesTls() ? "tls" : "plain");
     json += ",\"clientId\":" + webjson::quote(_client.clientId() ? _client.clientId() : "");
     // null - анонімний конект (username() сама вертає nullptr, коли
-    // MqttConfig::useAuth == false), а не порожній рядок: інакше на сторінці
-    // виглядало б як логін-пусто, а не як "auth вимкнено".
+    // MqttConfig::username не задано - MqttClient::hasAuth()), а не порожній
+    // рядок: інакше на сторінці виглядало б як логін-пусто, а не як "auth вимкнено".
     json += ",\"login\":" + (_client.username() ? webjson::quote(_client.username()) : String("null"));
     json += ",\"topicPrefix\":" + webjson::quote(_client.keyGenerator().prefix());
     json += ",\"publishedCount\":" + String(_client.publishedCount());
