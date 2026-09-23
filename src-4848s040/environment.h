@@ -29,6 +29,12 @@
 // розійдеться з наявністю бібліотеки в lib_deps нижче (тут - PicoMQTT).
 #define HAS_MQTT_CLIENT 1
 
+// Дзеркало консолі в MQTT (lib/ConsoleMqtt) - явний прапорець, як
+// HAS_MQTT_CLIENT вище. Прив'язаний до ESP32+PicoMQTT (лише там publish()
+// не блокує помпу) - lib/ConsoleMqtt/ConsoleMqtt.hpp провалить збірку
+// #error, якщо HAS_CONSOLE_MQTT=1 на платформі без цієї пари.
+#define HAS_CONSOLE_MQTT 1
+
 // Chrome Dino на екрані: команда "dino on|off" (src/Dino/, lib/DinoGame).
 // Тут екран 480x480, тому DinoSprites.h сам бере DINO_SPRITE_SCALE=3 -
 // інакше діно заввишки 47 px виглядав би мурахою.

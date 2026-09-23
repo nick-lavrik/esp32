@@ -29,6 +29,9 @@
 // PicoMQTT присутній у lib_deps цього env.
 #define HAS_MQTT_CLIENT 1
 
+// Дзеркало консолі в MQTT (lib/ConsoleMqtt) - опис принципу в env:esp32-4848s040.
+#define HAS_CONSOLE_MQTT 1
+
 // Chrome Dino на екрані: команда "dino on|off" (src/Dino/, lib/DinoGame).
 // Тач тут відсутній - стрибок лише кнопкою FLIP_BUTTON_PIN (розділ 4).
 #define HAS_DINO_GAME 1

@@ -9,9 +9,9 @@
 // видимою тут - хоча б через host()/receivedCount()/publishedCount() нижче,
 // а не існувати мовчки поза порталом.
 //
-// ConsoleMqtt - опційний (HAS_CONSOLE_MQTT, платформне вето в
-// lib/ConsoleMqtt/ConsoleMqtt.hpp): на платах без нього конструктор бере лише
-// клієнт, а JSON віддає "consoleMirror":{"available":false}.
+// ConsoleMqtt - опційний (HAS_CONSOLE_MQTT, явний прапорець з environment.h +
+// build-fail у lib/ConsoleMqtt/ConsoleMqtt.hpp): на платах без нього
+// конструктор бере лише клієнт, а JSON віддає "consoleMirror":{"available":false}.
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>

@@ -24,6 +24,12 @@
 // PubSubClient (єдиний env на ньому, не PicoMQTT), присутній у lib_deps.
 #define HAS_MQTT_CLIENT 1
 
+// Дзеркало консолі в MQTT (lib/ConsoleMqtt) вимкнено - механізм прив'язаний
+// до ESP32+PicoMQTT (опис принципу в env:esp32-4848s040), на PubSubClient
+// publish() синхронний і без окремого мережевого таска logging-помпи не
+// підходить.
+#define HAS_CONSOLE_MQTT 0
+
 // Chrome Dino на екрані: команда "dino on|off" (src/Dino/, lib/DinoGame).
 // Екран монохромний 128x64 - DinoSprites.h бере малий набір асетів
 // (DINO_ASSET_TIER=1, діно 22x24), а kBg/kFg у DinoRenderer.cpp свідомо

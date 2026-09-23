@@ -26,28 +26,22 @@
 
 #include <MqttClient.hpp>
 
-// HAS_CONSOLE_MQTT визначає сам заголовок через __has_include() - на відміну
-// від HAS_MQTT_CLIENT (lib/MqttClient/MqttClient.hpp) і HAS_GMAIL_SENDER
-// (lib/GmailSender/GmailSender.hpp), які вже переведені на явний прапорець з
-// environment.h. У platformio.ini HAS_CONSOLE_MQTT немає; щоб вирізати
-// механізм у конкретному env, туди додається -D HAS_CONSOLE_MQTT=0.
-//
-// Прив'язка до PicoMQTT не косметична. Там publish() лише КЛАДЕ команду в
-// _outgoingQueue, тобто виклик із таска помпи дешевий і не блокує. На esp8266
-// (єдиний env на PubSubClient) publish() пише в сокет СИНХРОННО: кожен рядок
-// логу став би мережевим I/O в помпі, а помпи як окремого таска там і немає -
-// вона крутиться в loop().
-#if !defined(HAS_CONSOLE_MQTT)
-#  if defined(ESP32) && HAS_MQTT_CLIENT && __has_include(<PicoMQTT.h>)
-#    define HAS_CONSOLE_MQTT 1
-#  else
-#    define HAS_CONSOLE_MQTT 0
-#  endif
+// HAS_CONSOLE_MQTT - явний прапорець з src-<env>/environment.h (розділ 2), не
+// виведений з __has_include(): той самий принцип, що й HAS_MQTT_CLIENT/
+// HAS_PING/HAS_GMAIL_SENDER (CLAUDE.md, src/ping.h) - компілятор і
+// IDE-індексатор мають бачити ОДНЕ й те саме значення.
+#ifndef HAS_CONSOLE_MQTT
+#error "HAS_CONSOLE_MQTT не визначено - додай #define HAS_CONSOLE_MQTT 0/1 у environment.h цього env"
 #endif
-// Платформа має право вето навіть над явним -D HAS_CONSOLE_MQTT=1.
-#if HAS_CONSOLE_MQTT && (!defined(ESP32) || !HAS_MQTT_CLIENT || !__has_include(<PicoMQTT.h>))
-#  undef HAS_CONSOLE_MQTT
-#  define HAS_CONSOLE_MQTT 0
+
+// Прив'язка до ESP32+PicoMQTT не косметична, тому перевіряється так само
+// build-fail'ом, а не мовчки перевизначається (як робило старе "платформне
+// вето"). Там publish() лише КЛАДЕ команду в _outgoingQueue, тобто виклик із
+// таска помпи дешевий і не блокує. На esp8266 (єдиний env на PubSubClient)
+// publish() пише в сокет СИНХРОННО: кожен рядок логу став би мережевим I/O в
+// помпі, а помпи як окремого таска там і немає - вона крутиться в loop().
+#if HAS_CONSOLE_MQTT && !(defined(ESP32) && HAS_MQTT_CLIENT && __has_include(<PicoMQTT.h>))
+#error "HAS_CONSOLE_MQTT=1, але платформа не ESP32+PicoMQTT - вимкни прапорець у environment.h цього env"
 #endif
 
 #if HAS_CONSOLE_MQTT

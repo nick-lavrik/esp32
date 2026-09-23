@@ -31,6 +31,9 @@
 // PicoMQTT присутній у lib_deps цього env.
 #define HAS_MQTT_CLIENT 1
 
+// Дзеркало консолі в MQTT (lib/ConsoleMqtt) - опис принципу в env:esp32-4848s040.
+#define HAS_CONSOLE_MQTT 1
+
 #define HAS_DINO_GAME 1
 
 // Веб-портал (lib/WebPortal): розділи Wi-Fi і Console, доступна і в

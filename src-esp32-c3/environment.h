@@ -32,6 +32,9 @@
 // PubSubClient - тут лише один рядок mlesniew/PicoMQTT).
 #define HAS_MQTT_CLIENT 1
 
+// Дзеркало консолі в MQTT (lib/ConsoleMqtt) - опис принципу в env:esp32-4848s040.
+#define HAS_CONSOLE_MQTT 1
+
 // Без дисплея гра неможлива в принципі.
 #define HAS_DINO_GAME 0
 
