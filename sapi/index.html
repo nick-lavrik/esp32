@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 SAPI</title>
+<!--
+  Браузерний SAPI-клієнт (docs/mqtt-web-handoff.md, фаза 1/2) - підключається
+  НАПРЯМУ до MQTT-брокера (WebSockets), без жодного HTTP-запиту до плати.
+  Не частина прошивки: pio run цю теку не бачить (поза src/lib/include),
+  хоститься окремо (rpi5, GitHub Pages, локальний файл - будь-що статичне).
+
+  Пре-альфа: маніфест discovery (фаза 2) ще не існує, тому список команд
+  нижче (COMMANDS) - жорстко зашитий, той самий allowlist, що в
+  src/main.cpp (kJsonApiSystemInfo/kJsonApiWifiStatus/kJsonApiEcoflowStatus).
+  Рендер - сирий JSON (<pre>), не побудований під конкретні поля: коли
+  з'явиться discovery-маніфест, він і замінить цей жорсткий список UI-під-
+  дашбордом, що будується з даних, а не з коду тут.
+-->
+<style>
+:root {
+  --bg: #14171c; --panel: #1c2027; --line: #2b313b; --text: #e6e9ef;
+  --muted: #8b94a3; --accent: #4da3ff; --ok: #4cc38a; --warn: #e0a33e; --err: #e5534b;
+  --font-size-base: 14px;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: var(--font-size-base)/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+header .spacer { flex: 1; }
+#conn-state { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+#conn-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--err); flex: none; }
+#conn-dot.on { background: var(--ok); }
+#conn-dot.connecting { background: var(--warn); }
+main { padding: 16px; max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.panel h2 { font-size: 15px; margin: 0 0 10px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1; min-width: 140px; }
+input { background: #0f1216; border: 1px solid var(--line); color: var(--text); border-radius: 5px;
+  padding: 7px 9px; font: inherit; font-size: 13px; }
+button { background: #262c36; border: 1px solid var(--line); color: var(--text); border-radius: 6px;
+  padding: 7px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #0b0f14; font-weight: 600; }
+button.danger { color: var(--err); }
+.cmd-panel h2 { display: flex; align-items: center; gap: 10px; }
+.cmd-panel .cmd-status { font-size: 12px; color: var(--muted); font-weight: 400; }
+.cmd-panel .cmd-status.ok { color: var(--ok); }
+.cmd-panel .cmd-status.err { color: var(--err); }
+.cmd-panel .spacer { flex: 1; }
+pre.out { margin: 0; background: #0f1216; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; font-size: 12.5px; line-height: 1.45; overflow-x: auto; max-height: 360px; overflow-y: auto; }
+#log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap;
+  background: #0f1216; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  max-height: 220px; overflow-y: auto; }
+.muted { color: var(--muted); }
+.checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.checkbox-row input { width: auto; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ESP32 SAPI</h1>
+  <span class="spacer"></span>
+  <span id="device-state" class="muted"></span>
+  <span id="conn-state"><span id="conn-dot"></span><span id="conn-label">disconnected</span></span>
+</header>
+
+<main>
+
+  <section class="panel" id="conn-panel">
+    <h2>Connection</h2>
+    <div class="row">
+      <label>Broker host<input id="f-host" placeholder="192.168.1.22" autocomplete="off"></label>
+      <label>Port<input id="f-port" placeholder="9001" autocomplete="off"></label>
+      <label>Topic prefix<input id="f-prefix" placeholder="mykola-lavryk" autocomplete="off"></label>
+    </div>
+    <div class="row">
+      <label>Username<input id="f-user" placeholder="sapi-esp32-c3" autocomplete="off"></label>
+      <label>Password<input id="f-pass" type="password" autocomplete="off"></label>
+      <label>Device client-id<input id="f-client" placeholder="mqtt-esp32-c3" autocomplete="off"></label>
+    </div>
+    <div class="row" style="margin-top: 4px">
+      <button id="btn-connect" class="primary">Connect</button>
+      <button id="btn-disconnect" disabled>Disconnect</button>
+      <span class="spacer"></span>
+      <button id="btn-forget" class="danger">Forget saved connection</button>
+    </div>
+  </section>
+
+  <section class="panel cmd-panel" data-cmd="system-info">
+    <h2>system-info <span class="cmd-status muted">-</span><span class="spacer"></span>
+      <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
+      <button class="btn-refresh" disabled>Refresh</button>
+    </h2>
+    <pre class="out">-</pre>
+  </section>
+
+  <section class="panel cmd-panel" data-cmd="wifi-status">
+    <h2>wifi-status <span class="cmd-status muted">-</span><span class="spacer"></span>
+      <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
+      <button class="btn-refresh" disabled>Refresh</button>
+    </h2>
+    <pre class="out">-</pre>
+  </section>
+
+  <section class="panel cmd-panel" data-cmd="ecoflow-status">
+    <h2>ecoflow-status <span class="cmd-status muted">-</span><span class="spacer"></span>
+      <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
+      <button class="btn-refresh" disabled>Refresh</button>
+    </h2>
+    <pre class="out">-</pre>
+  </section>
+
+  <section class="panel">
+    <h2>Log <span class="muted" style="font-weight:400; font-size:12px">(останні 500 рядків)</span></h2>
+    <div class="row" style="margin-bottom:8px">
+      <button id="btn-clear-log">Clear</button>
+    </div>
+    <div id="log"></div>
+  </section>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  // Пре-альфа allowlist - той самий, що в src/main.cpp (kJsonApi*). Коли
+  // з'явиться discovery-маніфест (фаза 2), цей список замінить сам себе на
+  // дані з брокера, а не буде жорстко зашитим тут.
+  const COMMANDS = ['system-info', 'wifi-status', 'ecoflow-status'];
+  const AUTO_BASE_MS = 5000;
+  const AUTO_BACKOFF_MAX = 8; // множник база: 5с -> 40с максимум при busy
+  const LOG_MAX_LINES = 500;
+
+  const STORAGE_KEY = 'sapi.connection.v1';
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  // localStorage - лише зручність цього браузера (форма підключення "як
+  // минулого разу"), не критичний стан: обгортаємо в try/catch, бо приватні
+  // вікна/заблоковане сховище кидають виняток, а не повертають null.
+  function loadConn() {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    } catch (e) {
+      return {};
+    }
+  }
+  function saveConn(conn) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(conn));
+    } catch (e) { /* ігнор - форма й так лишається заповненою в DOM */ }
+  }
+  function forgetConn() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) { /* нічого критичного */ }
+  }
+
+  function readForm() {
+    return {
+      host: $('#f-host').value.trim(),
+      port: $('#f-port').value.trim() || '9001',
+      prefix: $('#f-prefix').value.trim() || 'mykola-lavryk',
+      username: $('#f-user').value.trim(),
+      password: $('#f-pass').value,
+      clientId: $('#f-client').value.trim(),
+    };
+  }
+  function fillForm(conn) {
+    $('#f-host').value = conn.host || '';
+    $('#f-port').value = conn.port || '9001';
+    $('#f-prefix').value = conn.prefix || 'mykola-lavryk';
+    $('#f-user').value = conn.username || '';
+    $('#f-pass').value = conn.password || '';
+    $('#f-client').value = conn.clientId || '';
+  }
+
+  fillForm(loadConn());
+
+  function log(line) {
+    const el = $('#log');
+    const t = new Date().toLocaleTimeString();
+    el.textContent += `[${t}] ${line}\n`;
+    const lines = el.textContent.split('\n');
+    if (lines.length > LOG_MAX_LINES) {
+      el.textContent = lines.slice(lines.length - LOG_MAX_LINES).join('\n');
+    }
+    el.scrollTop = el.scrollHeight;
+  }
+
+  // --- стан панелей команд ---
+  const panels = {};
+  for (const cmd of COMMANDS) {
+    const el = $(`.cmd-panel[data-cmd="${cmd}"]`);
+    panels[cmd] = {
+      el,
+      out: $('.out', el),
+      status: $('.cmd-status', el),
+      refreshBtn: $('.btn-refresh', el),
+      autoToggle: $('.auto-toggle', el),
+      pendingId: null,
+      backoffFactor: 1,
+      timer: null,
+    };
+  }
+
+  function setPanelStatus(cmd, text, cls) {
+    const p = panels[cmd];
+    p.status.textContent = text;
+    p.status.className = 'cmd-status' + (cls ? ' ' + cls : '');
+  }
+
+  function renderReply(cmd, msg) {
+    const p = panels[cmd];
+    if (msg.ok) {
+      p.out.textContent = JSON.stringify(msg.data, null, 2);
+      setPanelStatus(cmd, `ok (id ${msg.id})`, 'ok');
+      p.backoffFactor = 1;
+    } else {
+      setPanelStatus(cmd, `error: ${msg.error || 'unknown'}`, 'err');
+      p.backoffFactor = Math.min(p.backoffFactor * 2, AUTO_BACKOFF_MAX);
+    }
+  }
+
+  // --- топіки ---
+  let conn = null; // {host, port, prefix, username, password, clientId} - активне з'єднання
+  function reqTopic(cmd) { return `${conn.prefix}/devices/${conn.clientId}/api/${cmd}`; }
+  function replyTopic(cmd) { return `${conn.prefix}/devices/${conn.clientId}/api/${cmd}/reply`; }
+  function statusTopic() { return `${conn.prefix}/devices/${conn.clientId}/status`; }
+
+  function requestCmd(cmd) {
+    if (!client || !client.connected) return;
+    const p = panels[cmd];
+    const id = Math.floor(Math.random() * 1e9);
+    p.pendingId = id;
+    setPanelStatus(cmd, 'loading...', '');
+    const payload = JSON.stringify({ id });
+    client.publish(reqTopic(cmd), payload);
+    log(`> ${reqTopic(cmd)} ${payload}`);
+  }
+
+  function scheduleAuto(cmd) {
+    const p = panels[cmd];
+    clearTimeout(p.timer);
+    if (!p.autoToggle.checked) return;
+    const wait = AUTO_BASE_MS * p.backoffFactor;
+    p.timer = setTimeout(() => {
+      requestCmd(cmd);
+      scheduleAuto(cmd);
+    }, wait);
+  }
+
+  for (const cmd of COMMANDS) {
+    panels[cmd].refreshBtn.addEventListener('click', () => requestCmd(cmd));
+    panels[cmd].autoToggle.addEventListener('change', () => {
+      if (panels[cmd].autoToggle.checked) {
+        requestCmd(cmd);
+      }
+      scheduleAuto(cmd);
+    });
+  }
+
+  // --- з'єднання ---
+  let client = null;
+
+  function setConnState(state) {
+    // state: 'off' | 'connecting' | 'on'
+    const dot = $('#conn-dot');
+    const label = $('#conn-label');
+    dot.className = state === 'off' ? '' : state;
+    label.textContent = { off: 'disconnected', connecting: 'connecting...', on: 'connected' }[state];
+    $('#btn-connect').disabled = state !== 'off';
+    $('#btn-disconnect').disabled = state === 'off';
+    for (const cmd of COMMANDS) panels[cmd].refreshBtn.disabled = state !== 'on';
+  }
+
+  function disconnect() {
+    for (const cmd of COMMANDS) {
+      clearTimeout(panels[cmd].timer);
+      panels[cmd].autoToggle.checked = false;
+    }
+    if (client) {
+      client.end(true);
+      client = null;
+    }
+    setConnState('off');
+    $('#device-state').textContent = '';
+  }
+
+  function connect() {
+    conn = readForm();
+    if (!conn.host || !conn.clientId) {
+      alert('Host і device client-id обов’язкові');
+      return;
+    }
+    saveConn(conn);
+
+    const url = `ws://${conn.host}:${conn.port}`;
+    log(`connecting to ${url} as '${conn.username}', device '${conn.clientId}'`);
+    setConnState('connecting');
+
+    client = mqtt.connect(url, {
+      username: conn.username,
+      password: conn.password,
+      clientId: 'sapi-web-' + Math.random().toString(16).slice(2, 10),
+      reconnectPeriod: 4000,
+      connectTimeout: 8000,
+    });
+
+    client.on('connect', () => {
+      setConnState('on');
+      log('connected');
+      client.subscribe(`${conn.prefix}/devices/${conn.clientId}/api/+/reply`);
+      client.subscribe(statusTopic());
+      for (const cmd of COMMANDS) requestCmd(cmd);
+    });
+
+    client.on('reconnect', () => setConnState('connecting'));
+    client.on('close', () => setConnState('off'));
+    client.on('error', (err) => log(`error: ${err.message || err}`));
+
+    client.on('message', (topic, payloadBuf) => {
+      const text = payloadBuf.toString();
+      log(`< ${topic} ${text}`);
+
+      if (topic === statusTopic()) {
+        $('#device-state').textContent = `device: ${text}`;
+        return;
+      }
+      for (const cmd of COMMANDS) {
+        if (topic !== replyTopic(cmd)) continue;
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch (e) {
+          setPanelStatus(cmd, 'invalid JSON from device', 'err');
+          return;
+        }
+        const p = panels[cmd];
+        // Ехо id - ігноруємо застарілу відповідь (напр. після ручного
+        // Refresh поки чекали авто-тік), а не показуємо, що прийде першим.
+        if (p.pendingId !== null && msg.id !== p.pendingId) return;
+        p.pendingId = null;
+        renderReply(cmd, msg);
+        return;
+      }
+    });
+  }
+
+  $('#btn-connect').addEventListener('click', connect);
+  $('#btn-disconnect').addEventListener('click', disconnect);
+  $('#btn-forget').addEventListener('click', () => {
+    forgetConn();
+    fillForm({});
+    log('saved connection forgotten');
+  });
+  $('#btn-clear-log').addEventListener('click', () => { $('#log').textContent = ''; });
+
+  setConnState('off');
+})();
+</script>
+</body>
+</html>
