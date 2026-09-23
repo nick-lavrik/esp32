@@ -20,6 +20,10 @@
 #define BOARD_HAS_TOUCHSCREEN 0
 #define BOARD_HAS_SD 0
 
+// MQTT-клієнт (lib/MqttClient) - опис принципу в env:esp32-4848s040. Тут -
+// PubSubClient (єдиний env на ньому, не PicoMQTT), присутній у lib_deps.
+#define HAS_MQTT_CLIENT 1
+
 // Chrome Dino на екрані: команда "dino on|off" (src/Dino/, lib/DinoGame).
 // Екран монохромний 128x64 - DinoSprites.h бере малий набір асетів
 // (DINO_ASSET_TIER=1, діно 22x24), а kBg/kFg у DinoRenderer.cpp свідомо

@@ -26,9 +26,11 @@
 
 #include <MqttClient.hpp>
 
-// HAS_CONSOLE_MQTT визначає сам заголовок - як HAS_MQTT_CLIENT у MqttClient.hpp
-// і HAS_GMAIL_SENDER у GmailSender.hpp. У platformio.ini його немає; щоб
-// вирізати механізм у конкретному env, туди додається -D HAS_CONSOLE_MQTT=0.
+// HAS_CONSOLE_MQTT визначає сам заголовок через __has_include() - на відміну
+// від HAS_MQTT_CLIENT (lib/MqttClient/MqttClient.hpp) і HAS_GMAIL_SENDER
+// (lib/GmailSender/GmailSender.hpp), які вже переведені на явний прапорець з
+// environment.h. У platformio.ini HAS_CONSOLE_MQTT немає; щоб вирізати
+// механізм у конкретному env, туди додається -D HAS_CONSOLE_MQTT=0.
 //
 // Прив'язка до PicoMQTT не косметична. Там publish() лише КЛАДЕ команду в
 // _outgoingQueue, тобто виклик із таска помпи дешевий і не блокує. На esp8266

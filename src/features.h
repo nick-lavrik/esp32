@@ -7,19 +7,22 @@
 // повертає, без окремого Python-генератора.
 //
 // Свідомо НЕ включає прапорці, що й досі самі себе визначають через
-// __has_include() у власних бібліотечних заголовках (HAS_MQTT_CLIENT -
-// lib/MqttClient/MqttClient.hpp, HAS_CONSOLE_MQTT - lib/ConsoleMqtt/
-// ConsoleMqtt.hpp, HAS_SCREEN_MIRROR - src/Display.h): для них "картина не
-// губиться" - кожен визначається в ОДНОМУ місці, не в 8 environment.h, тож
-// проблема, яку вирішує цей каталог, до них не застосовна. Показати їх тут
-// теж було б хитким: макрос має бути визначений ДО цього заголовка, інакше
-// мовчки "0" (undefined -> 0 - навмисно безпечно для #if нижче, але
-// оманливо, якщо реальний стан платформи саме "не визначено ще").
-// **HAS_PING і HAS_GMAIL_SENDER - вже переведені на явний прапорець**
-// (`src-<env>/environment.h`, розділ 2 + build-fail у `src/ping.h`/
-// `lib/GmailSender/GmailSender.hpp`, якщо значення розійдеться з наявністю
-// бібліотеки) - рішення переносити решту (HAS_MQTT_CLIENT, HAS_CONSOLE_MQTT,
-// HAS_SCREEN_MIRROR) на той самий патерн - окреме, ще не прийняте.
+// __has_include() у власних бібліотечних заголовках (HAS_CONSOLE_MQTT -
+// lib/ConsoleMqtt/ConsoleMqtt.hpp, HAS_SCREEN_MIRROR - src/Display.h): для
+// них "картина не губиться" - кожен визначається в ОДНОМУ місці, не в
+// 8 environment.h, тож проблема, яку вирішує цей каталог, до них не
+// застосовна. Показати їх тут теж було б хитким: макрос має бути визначений
+// ДО цього заголовка, інакше мовчки "0" (undefined -> 0 - навмисно безпечно
+// для #if нижче, але оманливо, якщо реальний стан платформи саме "не
+// визначено ще").
+// **HAS_PING, HAS_GMAIL_SENDER і HAS_MQTT_CLIENT - вже переведені на явний
+// прапорець** (`src-<env>/environment.h`, розділ 2 + build-fail у
+// `src/ping.h`/`lib/GmailSender/GmailSender.hpp`/`lib/MqttClient/MqttClient.hpp`,
+// якщо значення розійдеться з наявністю бібліотеки) - рішення переносити
+// решту (HAS_CONSOLE_MQTT, HAS_SCREEN_MIRROR) на той самий патерн - окреме,
+// ще не прийняте. HAS_CONSOLE_MQTT логічно йде ПІСЛЯ HAS_MQTT_CLIENT, якщо
+// до цього дійде - його self-detection (lib/ConsoleMqtt/ConsoleMqtt.hpp)
+// сам читає HAS_MQTT_CLIENT.
 //
 // -include src-<env>/environment.h (platformio.ini) - глобальний build_flag,
 // діє на ВЕСЬ TU з першого рядка, тому порядок #include цього файлу в
@@ -58,6 +61,9 @@
 #ifndef HAS_GMAIL_SENDER
 #define HAS_GMAIL_SENDER 0
 #endif
+#ifndef HAS_MQTT_CLIENT
+#define HAS_MQTT_CLIENT 0
+#endif
 
 // BOARD_HAS_LIGHT_SENSOR - похідний прапорець, не прямий запис у
 // environment.h (BOARD_HAS_, не HAS_, - апаратна ознака плати, той самий
@@ -88,7 +94,8 @@
   X(HAS_ECOFLOW_CLIENT)  \
   X(HAS_WEB_PORTAL)      \
   X(HAS_PING)            \
-  X(HAS_GMAIL_SENDER)
+  X(HAS_GMAIL_SENDER)    \
+  X(HAS_MQTT_CLIENT)
 
 namespace features {
 

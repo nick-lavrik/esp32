@@ -27,6 +27,11 @@
 #define BOARD_HAS_TOUCHSCREEN 0
 #define BOARD_HAS_SD 0
 
+// MQTT-клієнт (lib/MqttClient) - опис принципу в env:esp32-4848s040.
+// PicoMQTT присутній у lib_deps цього env (єдина плата без коментованого
+// PubSubClient - тут лише один рядок mlesniew/PicoMQTT).
+#define HAS_MQTT_CLIENT 1
+
 // Без дисплея гра неможлива в принципі.
 #define HAS_DINO_GAME 0
 

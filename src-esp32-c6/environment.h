@@ -27,6 +27,10 @@
 #define BOARD_HAS_IMU 1
 #define BOARD_HAS_SD 1
 
+// MQTT-клієнт (lib/MqttClient) - опис принципу в env:esp32-4848s040.
+// PicoMQTT присутній у lib_deps цього env.
+#define HAS_MQTT_CLIENT 1
+
 #define HAS_DINO_GAME 1
 
 // Веб-портал (lib/WebPortal): розділи Wi-Fi і Console, доступна і в

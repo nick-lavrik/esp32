@@ -1,7 +1,22 @@
 #pragma once
 
-#if __has_include(<PubSubClient.h>) || __has_include(<PicoMQTT.h>)
-#define HAS_MQTT_CLIENT 1
+// HAS_MQTT_CLIENT - явний прапорець з src-<env>/environment.h (розділ 2), не
+// виведений з __has_include(): той самий принцип, що й HAS_WEB_PORTAL/
+// HAS_PING/HAS_GMAIL_SENDER (CLAUDE.md, src/ping.h) - компілятор і
+// IDE-індексатор мають бачити ОДНЕ й те саме значення.
+#ifndef HAS_MQTT_CLIENT
+#error "HAS_MQTT_CLIENT не визначено - додай #define HAS_MQTT_CLIENT 0/1 у environment.h цього env"
+#endif
+
+// Наявність бібліотеки все одно перевіряється - якщо хтось виставить
+// HAS_MQTT_CLIENT=1 без PubSubClient/PicoMQTT у lib_deps (чи навпаки забуде
+// прибрати прапорець при вимкненні обох), збірка провалюється явно (#error),
+// а не мовчки згасить увесь MQTT-шар у рантаймі.
+#if HAS_MQTT_CLIENT && !(__has_include(<PubSubClient.h>) || __has_include(<PicoMQTT.h>))
+#error "HAS_MQTT_CLIENT=1, але ні PubSubClient.h, ні PicoMQTT.h не доступні - додай залежність у lib_deps цього env"
+#endif
+
+#if HAS_MQTT_CLIENT
 #include <ArduinoJson.h>
 
 #if __has_include(<PubSubClient.h>)
@@ -427,6 +442,4 @@ private:
 #endif
 };
 
-#else
-#define HAS_MQTT_CLIENT 0
-#endif
+#endif  // HAS_MQTT_CLIENT

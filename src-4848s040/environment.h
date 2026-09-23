@@ -21,6 +21,14 @@
 #define BOARD_HAS_TOUCHSCREEN 1
 #define BOARD_HAS_SD 1
 
+// MQTT-клієнт (lib/MqttClient) - транспорт для загального `mqtt` (SAPI JSON
+// API, discovery, console-дзеркало) і, окремо, EcoflowClient. Явний
+// прапорець, не __has_include(<PubSubClient.h>)/__has_include(<PicoMQTT.h>)
+// в самому MqttClient.hpp - той самий принцип, що й HAS_PING/HAS_GMAIL_SENDER
+// вище: lib/MqttClient/MqttClient.hpp провалить збірку #error, якщо значення
+// розійдеться з наявністю бібліотеки в lib_deps нижче (тут - PicoMQTT).
+#define HAS_MQTT_CLIENT 1
+
 // Chrome Dino на екрані: команда "dino on|off" (src/Dino/, lib/DinoGame).
 // Тут екран 480x480, тому DinoSprites.h сам бере DINO_SPRITE_SCALE=3 -
 // інакше діно заввишки 47 px виглядав би мурахою.
