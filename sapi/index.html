@@ -13,9 +13,12 @@
   Пре-альфа: маніфест discovery (фаза 2) ще не існує, тому список команд
   нижче (COMMANDS) - жорстко зашитий, той самий allowlist, що в
   src/main.cpp (kJsonApiSystemInfo/kJsonApiWifiStatus/kJsonApiEcoflowStatus).
-  Рендер - сирий JSON (<pre>), не побудований під конкретні поля: коли
-  з'явиться discovery-маніфест, він і замінить цей жорсткий список UI-під-
-  дашбордом, що будується з даних, а не з коду тут.
+  Рендер під конкретні поля кожної команди (renderSystemInfo/renderWifiStatus/
+  renderEcoflowStatus) - жорстко прив'язаний до COMMANDS вище, той самий дух
+  пре-альфи: коли з'явиться discovery-маніфест, він і замінить цей список
+  разом із рендерами на щось, що будується з даних, а не з коду тут. Сирий
+  JSON лишається поруч (<details class="raw">) - для діагностики полів, яких
+  рендер ще не показує.
 -->
 <style>
 :root {
@@ -53,8 +56,25 @@ button.danger { color: var(--err); }
 .cmd-panel .cmd-status.ok { color: var(--ok); }
 .cmd-panel .cmd-status.err { color: var(--err); }
 .cmd-panel .spacer { flex: 1; }
-pre.out { margin: 0; background: #0f1216; border: 1px solid var(--line); border-radius: 6px;
-  padding: 10px 12px; font-size: 12.5px; line-height: 1.45; overflow-x: auto; max-height: 360px; overflow-y: auto; }
+.out { background: #0f1216; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; font-size: 13px; line-height: 1.5; max-height: 420px; overflow-y: auto; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.section-group { margin-top: 12px; }
+.section-group h3 { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .03em; }
+table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+table.data th, table.data td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+table.data th { color: var(--muted); font-weight: 500; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; }
+.badge.ok { background: rgba(76,195,138,.18); color: var(--ok); }
+.badge.err { background: rgba(229,83,75,.18); color: var(--err); }
+.badge.warn { background: rgba(224,163,62,.18); color: var(--warn); }
+.badge.muted { background: rgba(139,148,163,.18); color: var(--muted); }
+details.raw { margin-top: 10px; }
+details.raw summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-x: auto; }
 #log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap;
   background: #0f1216; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
   max-height: 220px; overflow-y: auto; }
@@ -99,7 +119,7 @@ pre.out { margin: 0; background: #0f1216; border: 1px solid var(--line); border-
       <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
       <button class="btn-refresh" disabled>Refresh</button>
     </h2>
-    <pre class="out">-</pre>
+    <div class="out">-</div>
   </section>
 
   <section class="panel cmd-panel" data-cmd="wifi-status">
@@ -107,7 +127,7 @@ pre.out { margin: 0; background: #0f1216; border: 1px solid var(--line); border-
       <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
       <button class="btn-refresh" disabled>Refresh</button>
     </h2>
-    <pre class="out">-</pre>
+    <div class="out">-</div>
   </section>
 
   <section class="panel cmd-panel" data-cmd="ecoflow-status">
@@ -115,7 +135,7 @@ pre.out { margin: 0; background: #0f1216; border: 1px solid var(--line); border-
       <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
       <button class="btn-refresh" disabled>Refresh</button>
     </h2>
-    <pre class="out">-</pre>
+    <div class="out">-</div>
   </section>
 
   <section class="panel">
@@ -221,10 +241,154 @@ pre.out { margin: 0; background: #0f1216; border: 1px solid var(--line); border-
     p.status.className = 'cmd-status' + (cls ? ' ' + cls : '');
   }
 
+  // --- рендер полів під конкретну команду (renderSystemInfo/renderWifiStatus/
+  // renderEcoflowStatus) - точні поля з src/main.cpp (kJsonApi*) та
+  // WebWifiModule/WebEcoflowModule; сирий JSON лишається поруч у <details>,
+  // бо рендер не показує все (напр. partitions/params на портальному боці).
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+  function badge(text, cls) { return `<span class="badge ${cls}">${esc(text)}</span>`; }
+  function boolBadge(b, okText = 'yes', noText = 'no') { return badge(b ? okText : noText, b ? 'ok' : 'err'); }
+  function kv(pairs) {
+    return '<dl class="kv">' + pairs.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('') + '</dl>';
+  }
+  function dash(v) { return v === null || v === undefined ? '-' : v; }
+  function fmtBytes(n) {
+    if (n === null || n === undefined) return '-';
+    if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB';
+    if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+    return n + ' B';
+  }
+  function fmtMs(ms) {
+    if (ms === null || ms === undefined) return '-';
+    if (ms < 1000) return ms + ' ms';
+    const s = ms / 1000;
+    if (s < 60) return s.toFixed(1) + ' s';
+    const m = s / 60;
+    if (m < 60) return m.toFixed(1) + ' min';
+    return (m / 60).toFixed(1) + ' h';
+  }
+  function fmtEpoch(sec) { return sec ? new Date(sec * 1000).toLocaleString() : '-'; }
+
+  function renderSystemInfo(data) {
+    const c = data.chip || {}, h = data.heap || {}, f = data.flash || {}, n = data.nvs || {};
+    let html = '<div class="section-group"><h3>Chip</h3>' + kv([
+      ['model', esc(dash(c.model))],
+      ['revision', dash(c.revision)],
+      ['cores', dash(c.cores)],
+      ['cpu freq', (c.cpuFreqMHz ?? '-') + ' MHz'],
+      ['PSRAM', c.psramFound ? fmtBytes(c.psramBytes) : boolBadge(false)],
+    ]) + '</div>';
+    html += '<div class="section-group"><h3>Heap</h3>' + kv([
+      ['total', fmtBytes(h.totalBytes)],
+      ['free', fmtBytes(h.freeBytes)],
+      ['largest free block', fmtBytes(h.largestFreeBlockBytes)],
+      ['min free ever', fmtBytes(h.minFreeEverBytes)],
+      ['fragmentation', (h.fragmentationPercent ?? '-') + ' %'],
+    ]) + '</div>';
+    html += '<div class="section-group"><h3>Flash</h3>' + kv([
+      ['size', fmtBytes(f.sizeBytes)],
+      ['speed', f.speedHz ? (f.speedHz / 1e6).toFixed(0) + ' MHz' : '-'],
+    ]) + '</div>';
+    html += '<div class="section-group"><h3>NVS</h3>' + (n.available ? kv([
+      ['used entries', dash(n.usedEntries)],
+      ['free entries', dash(n.freeEntries)],
+      ['total entries', dash(n.totalEntries)],
+      ['namespaces', dash(n.namespaceCount)],
+    ]) : boolBadge(false, 'available', 'unavailable')) + '</div>';
+    if (Array.isArray(data.partitions) && data.partitions.length) {
+      html += '<div class="section-group"><h3>Partitions</h3><table class="data"><thead><tr>'
+        + '<th>label</th><th>type</th><th>subtype</th><th>offset</th><th>size</th><th>enc</th></tr></thead><tbody>'
+        + data.partitions.map((p) => `<tr><td>${esc(p.label)}</td><td>${esc(p.type)}</td><td>${esc(p.subtype)}</td>`
+          + `<td>0x${(p.offset >>> 0).toString(16)}</td><td>${fmtBytes(p.size)}</td><td>${p.encrypted ? '✓' : ''}</td></tr>`).join('')
+        + '</tbody></table></div>';
+    }
+    return html;
+  }
+
+  function renderWifiStatus(data) {
+    const stateCls = data.connected ? 'ok'
+      : ['connecting', 'reconnecting', 'scanning', 'wps'].includes(data.state) ? 'warn' : 'err';
+    let html = kv([
+      ['state', badge(dash(data.state), stateCls)],
+      ['ssid', esc(dash(data.ssid))],
+      ['ip', esc(dash(data.ip))],
+      ['gateway', esc(dash(data.gateway))],
+      ['rssi', data.rssi != null ? data.rssi + ' dBm' : '-'],
+      ['quality', data.quality != null ? data.quality + ' %' : '-'],
+      ['phy mode', esc(dash(data.phyMode))],
+      ['mac', esc(dash(data.mac))],
+      ['auto-reconnect', boolBadge(data.autoReconnect)],
+    ]);
+    if (data.ap) {
+      html += '<div class="section-group"><h3>Access point</h3>' + kv([
+        ['active', boolBadge(data.ap.active)],
+        ['ssid', esc(dash(data.ap.ssid))],
+        ['ip', esc(dash(data.ap.ip))],
+        ['clients', dash(data.ap.clients)],
+        ['security', esc(dash(data.ap.security))],
+      ]) + '</div>';
+    }
+    return html;
+  }
+
+  function renderEcoflowStatus(data) {
+    let html = kv([
+      ['connected', boolBadge(data.connected)],
+      ['running', boolBadge(data.running)],
+      ['channel', esc(dash(data.channel))],
+      ['account', esc(dash(data.account))],
+      ['broker', esc(dash(data.brokerHost)) + ':' + esc(dash(data.brokerPort)) + (data.viaProxy ? ' (proxy)' : '')],
+      ['messages', dash(data.messageCount)],
+      ['last topic', esc(dash(data.lastTopic))],
+      ['last error', data.lastError ? badge(data.lastError, 'err') : badge('none', 'muted')],
+      ['heap free', fmtBytes(data.heapFreeBytes)],
+    ]);
+    const devices = Array.isArray(data.devices) ? data.devices : [];
+    if (!devices.length) {
+      html += '<p class="muted" style="margin:10px 0 0">no devices</p>';
+      return html;
+    }
+    html += '<div class="section-group"><h3>Devices</h3>';
+    for (const d of devices) {
+      const presenceCls = d.presence === 'online' ? 'ok' : d.presence === 'offline' ? 'err' : 'muted';
+      const gridCls = d.grid === 'on-grid' ? 'ok' : d.grid === 'off-grid' ? 'warn' : 'muted';
+      html += `<div style="margin-bottom:10px"><strong>${esc(d.name || d.serialNumber)}</strong> `
+        + `<span class="muted">(${esc(dash(d.type))})</span><br>` + kv([
+          ['presence', badge(dash(d.presence), presenceCls)],
+          ['grid', badge(dash(d.grid), gridCls) + (d.gridInferred ? ' <span class="muted">inferred</span>' : '')],
+          ['soc', d.socPrecise != null ? d.socPrecise + ' %' : d.socPercent != null ? d.socPercent + ' %' : '-'],
+          ['input / output', `${dash(d.inputWatts)} W / ${dash(d.outputWatts)} W`],
+          ['remain time', d.remainTimeMinutes != null ? d.remainTimeMinutes + ' min' : '-'],
+          ['last message', fmtEpoch(d.lastMessageEpoch) + (d.ageMs != null ? ` <span class="muted">(${fmtMs(d.ageMs)} ago)</span>` : '')],
+          ['grid for', fmtMs(d.gridForMs)],
+        ]) + '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  const RENDERERS = {
+    'system-info': renderSystemInfo,
+    'wifi-status': renderWifiStatus,
+    'ecoflow-status': renderEcoflowStatus,
+  };
+
   function renderReply(cmd, msg) {
     const p = panels[cmd];
     if (msg.ok) {
-      p.out.textContent = JSON.stringify(msg.data, null, 2);
+      let html;
+      try {
+        html = RENDERERS[cmd](msg.data);
+      } catch (e) {
+        html = `<p class="muted">render error: ${esc(e.message)}</p>`;
+      }
+      html += `<details class="raw"><summary>raw JSON</summary><pre>${esc(JSON.stringify(msg.data, null, 2))}</pre></details>`;
+      p.out.innerHTML = html;
       setPanelStatus(cmd, `ok (id ${msg.id})`, 'ok');
       p.backoffFactor = 1;
     } else {
