@@ -22,6 +22,9 @@
 #include <Arduino.h>
 #include <NetworkSupervisor.hpp>
 
+#include <string>
+#include <vector>
+
 #if defined(ESP32)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -36,6 +39,34 @@
 #define WEB_WIFI_SNAPSHOT_INTERVAL_MS 1000
 #endif
 
+// Провайдер: сирий структурний знімок стану WiFi (не готовий JSON) -
+// docs/mqtt-web-handoff.md, "Провайдер ≠ форматер". Той самий набір полів,
+// що раніше йшов прямо в _statusJson - лише не форматований, щоб JSON MQTT-
+// команда 'wifi-status' (фаза 1, коли з'явиться) могла зібрати СВІЙ конверт
+// із тих самих даних, не розпаршуючи готовий portal-JSON назад.
+struct WebWifiStatus {
+  NetworkSupervisorState state = NetworkSupervisorState::IDLE;
+  bool connected = false;
+  // ssid/ip/apSsid - std::string, той самий тип, що й у джерела
+  // (NetworkSupervisor::currentSsid()/localIp(), NetworkSupervisorConfig::
+  // apSsid) - без цього WifiConnection::ssid (теж std::string) не
+  // порівняти з полем цієї структури напряму (String і std::string не
+  // мають спільного operator==).
+  std::string ssid;
+  std::string ip;
+  String gateway;
+  int rssi = 0;
+  int quality = 0;
+  String phyMode;
+  String mac;
+  bool autoReconnect = false;
+  bool apActive = false;
+  std::string apSsid;
+  String apIp;
+  int apClients = 0;
+  bool apOpen = true;  // true -> "open", false -> "WPA2" (formatter вирішує рядок)
+};
+
 class WebWifiModule : public IWebModule {
 public:
   explicit WebWifiModule(NetworkSupervisor& supervisor);
@@ -45,14 +76,25 @@ public:
   void registerRoutes(AsyncWebServer& server, WebPortal& portal) override;
   void loop() override;
 
-  // Готовий знімок /api/wifi/status (копія String під тим самим мьютексом,
-  // що пише loop()) - перевикористовний поза цим розділом (JSON MQTT-команда
-  // 'wifi-status' фази 1, docs/mqtt-web-handoff.md), а не друга збірка того
-  // самого JSON деінде (CLAUDE.md, DRY).
-  String statusJsonSnapshot() {
+  // Провайдер: копії знімків під тим самим мьютексом, що пише loop() -
+  // основа для будь-якого форматера (portal нижче; MQTT - коли з'явиться
+  // команда 'wifi-status').
+  WebWifiStatus statusSnapshot() {
     Lock lock(_mutex);
-    return _statusJson;
+    return _status;
   }
+  std::vector<WifiConnection> connectionsSnapshot() {
+    Lock lock(_mutex);
+    return _connections;
+  }
+
+  // Форматери порталу - той самий JSON, що й /api/wifi/status і
+  // /api/wifi/connections раніше (перевірено на живому пристрої при
+  // рефакторингу). Static: не залежать від стану екземпляра, як і
+  // WebSystemModule::*Json().
+  static String portalStatusJson(const WebWifiStatus& status);
+  static String portalConnectionsJson(const std::vector<WifiConnection>& connections,
+                                       const WebWifiStatus& status);
 
 private:
   // Збирає JSON стану і списку профілів. Викликається лише з loop().
@@ -87,8 +129,8 @@ private:
   NetworkSupervisor& _supervisor;
 
   // Знімок: пишеться з loop(), читається з таска сервера - звідси мьютекс.
-  String _statusJson = "{}";
-  String _connectionsJson = "[]";
+  WebWifiStatus _status;
+  std::vector<WifiConnection> _connections;
   uint32_t _lastSnapshotMs = 0;
 
 #if defined(ESP32)

@@ -677,13 +677,13 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 #endif
 
 #if HAS_MQTT_CLIENT && HAS_WEB_PORTAL
-// Пре-альфа MQTT SAPI-каналу (docs/mqtt-web-handoff.md, фаза 1): один
-// пілотний запис реєстру JSON-команд. Мінімальний статичний набір - без
-// LittleFS/SD (ті прив'язані до інстанс-колбеків WebSystemModule, а не до
-// незалежних static-методів; розширення - окремим кроком, коли з'явиться
-// другий провайдер такого роду).
+// MQTT SAPI-канал, фаза 1 (docs/mqtt-web-handoff.md): реєстр JSON-команд.
+// Жодна з трьох поки не приймає аргументів - мінімальний статичний набір.
 static bool jsonApiNoArgs(JsonVariantConst /*args*/, uint8_t* /*rawOut*/, size_t /*rawCapacity*/) { return true; }
 
+// Пре-альфа: без LittleFS/SD (ті прив'язані до інстанс-колбеків
+// WebSystemModule, а не до незалежних static-методів; розширення - окремим
+// кроком, коли з'явиться другий провайдер такого роду).
 static String jsonApiSystemInfoExecute(const uint8_t* /*raw*/) {
   String out = "{\"chip\":";
   out += WebSystemModule::chipInfoJson();
@@ -700,6 +700,61 @@ static String jsonApiSystemInfoExecute(const uint8_t* /*raw*/) {
 }
 
 static const JsonApiEntry kJsonApiSystemInfo = {"system-info", jsonApiNoArgs, jsonApiSystemInfoExecute};
+
+// Дзеркало /api/wifi/status - той самий провайдерський знімок, що й портал
+// (webWifiModule оголошено вище, стор. ~491), той самий форматер: жодного
+// поля, вартого прибирати заради MQTT-бюджету (розділ «Провайдер ≠
+// форматер», docs/mqtt-web-handoff.md - другий (MQTT-специфічний) форматер
+// писати нема сенсу без різниці у вмісті).
+static String jsonApiWifiStatusExecute(const uint8_t* /*raw*/) {
+  return WebWifiModule::portalStatusJson(webWifiModule.statusSnapshot());
+}
+
+static const JsonApiEntry kJsonApiWifiStatus = {"wifi-status", jsonApiNoArgs, jsonApiWifiStatusExecute};
+
+#if HAS_ECOFLOW_CLIENT
+// Дзеркало /api/ecoflow/status - тут форматер уже інший
+// (WebEcoflowModule::mqttStatusJson(), без сирого "params" на кожен
+// пристрій, розділ «Провайдер ≠ форматер»).
+static String jsonApiEcoflowStatusExecute(const uint8_t* /*raw*/) {
+  return WebEcoflowModule::mqttStatusJson(webEcoflowModule.statusSnapshot(), webEcoflowModule.devicesSnapshot());
+}
+
+static const JsonApiEntry kJsonApiEcoflowStatus = {"ecoflow-status", jsonApiNoArgs, jsonApiEcoflowStatusExecute};
+#endif
+
+// Спільна диспетчеризація запиту на будь-яку команду з реєстру вище - три
+// майже ідентичні addJsonListener()-колбеки (system-info/wifi-status/
+// ecoflow-status) були б тим самим дублюванням, якого уникає CLAUDE.md
+// (DRY): третій користувач того самого коду - уже не "один", а привід
+// узагальнити (KISS, той самий принцип, що й "другий користувач").
+static void handleJsonApiRequest(const JsonApiEntry& entry, const String& replyTopic, JsonDocument& doc) {
+  const uint32_t id = doc["id"] | 0;
+  uint8_t args[CommandQueue::kLineSize];
+  if (!entry.resolve(doc["args"], args, sizeof(args))) {
+    mqtt.publish(replyTopic.c_str(), (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"bad args\"}").c_str());
+    return;
+  }
+  auto reply = std::make_shared<MqttReplyTarget>(mqtt, std::string(replyTopic.c_str()));
+  if (!commandQueue.submitJson(&entry, id, args, sizeof(args), reply)) {
+    // Явна відмова, а не тиша - той самий контракт, що й для command/.
+    mqtt.publish(replyTopic.c_str(), (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"busy\"}").c_str());
+  }
+}
+
+// Топік - devices/<client-id>/api/<cmd> (не <client-id> в одному топіку з
+// cmd у payload): той самий листовий сегмент, що й у devices/<client-id>/
+// status, /ecoflow/.../grid, /light-sensor - зовнішній моніторинг розрізняє
+// призначення без парсингу payload (docs/mqtt-web-handoff.md, «Погоджені
+// рішення фази 1»).
+static void registerJsonApiEntry(const JsonApiEntry& entry) {
+  const String reqTopic = String("devices/") + MQTT_CLIENT_ID + "/api/" + entry.name;
+  const String replyTopic = reqTopic + "/reply";
+  mqtt.addJsonListener(reqTopic.c_str(), [&entry, replyTopic](const char* topic, JsonDocument& doc) {
+    (void)topic;
+    handleJsonApiRequest(entry, replyTopic, doc);
+  });
+}
 #endif
 
 #if LIGHT_SENSOR_PIN > 0
@@ -2000,24 +2055,12 @@ void setupMqttClient() {
   // MQTT SAPI-канал, фаза 1 (docs/mqtt-web-handoff.md): devices/<client-id>/
   // api/<cmd> - той самий листовий сегмент, що й у devices/<client-id>/status,
   // /ecoflow/.../grid, /light-sensor - зовнішній моніторинг розрізняє
-  // призначення без парсингу payload. Пре-альфа: один пілотний cmd.
-  mqtt.addJsonListener("devices/" MQTT_CLIENT_ID "/api/system-info",
-                       [](const char* topic, JsonDocument& doc) {
-    (void)topic;
-    const uint32_t id = doc["id"] | 0;
-    uint8_t args[CommandQueue::kLineSize];
-    if (!kJsonApiSystemInfo.resolve(doc["args"], args, sizeof(args))) {
-      mqtt.publish("devices/" MQTT_CLIENT_ID "/api/system-info/reply",
-                   (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"bad args\"}").c_str());
-      return;
-    }
-    auto reply = std::make_shared<MqttReplyTarget>(mqtt, "devices/" MQTT_CLIENT_ID "/api/system-info/reply");
-    if (!commandQueue.submitJson(&kJsonApiSystemInfo, id, args, sizeof(args), reply)) {
-      // Явна відмова, а не тиша - той самий контракт, що й для command/.
-      mqtt.publish("devices/" MQTT_CLIENT_ID "/api/system-info/reply",
-                   (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"busy\"}").c_str());
-    }
-  });
+  // призначення без парсингу payload.
+  registerJsonApiEntry(kJsonApiSystemInfo);
+  registerJsonApiEntry(kJsonApiWifiStatus);
+#if HAS_ECOFLOW_CLIENT
+  registerJsonApiEntry(kJsonApiEcoflowStatus);
+#endif
 #endif
 
   // LWT_TOPIC "mykola-lavryk:devices/mqtt-${PIOENV}/status"

@@ -1053,6 +1053,17 @@ Watchdog.hpp`) + WiFi-скан (2-3с) в одній ітерації реаль
 - Існуючий людський `command/<id>` канал і serial-команди — без регресій
   (не займаний новим кодом).
 
+**Інструмент для ручного тесту — `./mqtt-api`** (корінь репозиторію, той
+самий дух, що й `./esp` для serial, лише по MQTT). Креденшли й брокер бере
+з `secrets.ini`, без ручного набору credentials щоразу:
+```
+./mqtt-api esp32-c3 api system-info    # JSON SAPI-запит, чекає одну відповідь
+./mqtt-api esp32-c3 cmd heap           # текстовий command/-канал
+./mqtt-api esp32-c3 watch              # сире devices/<client-id>/# (Ctrl-C)
+./mqtt-api --list                      # список env з platformio.ini
+```
+Перевірено на `esp32-c3` при написанні всіх трьох підкоманд.
+
 ## Фаза 2 — discovery-схема для генерації UI (SAPI)
 
 **Мета.** Дати браузерному SAPI машинно-читаний маніфест «що ця плата вміє
@@ -1251,13 +1262,59 @@ HTML-файла — саме та економія RAM/Flash, заради як�
    мовчить (немає загального диспетчера з `findJsonApiEntry()`, лише
    жорстко зареєстрований listener на `system-info`) - задокументований
    пробіл пре-альфи, підтверджено на залізі, не баг.
-6. **Перед розширенням до `wifi-status`/`ecoflow-status`** — розділити
+6. ~~Перед розширенням до `wifi-status`/`ecoflow-status` — розділити
    `WebWifiModule`/`WebEcoflowModule` на provider (структурний знімок під
-   мьютексом, як і сьогодні, але не готовий `String`) і два форматери
-   (portal-JSON, MQTT-JSON) — розділ «Провайдер ≠ форматер» вище. Лише
-   після цього — самі команди `wifi-status`/`ecoflow-status`/`status`,
-   з урахуванням точки E (SAPI-поллінг + `busy` → backoff, не миттєвий
-   ретрай).
+   мьютексом) і форматер~~ — **зроблено й перевірено на живому пристрої**
+   (`esp32-c3`, `/api/wifi/status`, `/api/wifi/connections`,
+   `/api/ecoflow/status` — той самий JSON, що й до рефакторингу, зібрано на
+   всіх 8 середовищ). `WebWifiModule`: новий `struct WebWifiStatus`
+   (`lib/WebPortal/WebWifiModule.hpp`) - `ssid`/`ip`/`apSsid` навмисно
+   `std::string` (той самий тип, що й джерело -
+   `NetworkSupervisor::currentSsid()`/`localIp()`/`NetworkSupervisorConfig::
+   apSsid` - інакше `WifiConnection::ssid`, теж `std::string`, не
+   порівняти з полем структури напряму, `String`/`std::string` без
+   спільного `operator==`); `statusSnapshot()`/`connectionsSnapshot()` -
+   копії під мьютексом; `portalStatusJson()`/`portalConnectionsJson()` -
+   static-форматери, той самий JSON, що раніше йшов у закешовані
+   `_statusJson`/`_connectionsJson` (прибрані - тепер немає окремого кешу
+   ГОТОВОГО JSON, лише кеш СТРУКТУРИ, форматер рахує рядок на кожен
+   HTTP GET, дешево для цього обсягу даних). `WebEcoflowModule`: новий
+   `struct WebEcoflowStatus` + `struct WebEcoflowDeviceSnapshot` (копія
+   `EcoflowDeviceState` - уже структура, не String - плюс
+   `gridSinceEpoch`/`gridChangeCount` з `EcoflowGridJournal`, зняті В ТОЙ
+   САМИЙ момент, що й решта знімка, а не через збережений вказівник на
+   journal, який лишається небезпечним для читання поза `loop()`);
+   `snapshotMs`/`snapshotEpoch` у `WebEcoflowStatus` - "нуль відліку" для
+   `ageMs`/`gridForMs`, спільний на всі пристрої в одній відповіді (раніше
+   кожен пристрій отримував трохи інший `millis()`/`time(nullptr)`, бо
+   `deviceJson()` викликався в циклі; тепер один знімок часу на весь
+   `_refreshSnapshot()`).
+
+**`wifi-status`/`ecoflow-status` — реалізовано й перевірено на живому
+пристрої (`esp32-c3`, той самий день).** `devices/<client-id>/api/wifi-status`
+— `execute()` викликає `WebWifiModule::portalStatusJson(webWifiModule.
+statusSnapshot())` НАПРЯМУ, без окремого MQTT-форматера: жодне поле
+`WebWifiStatus` не має розмірного ризику (усе фіксованого розміру), тому
+другий, майже ідентичний форматер був би саме тим дублюванням, якого уникає
+DRY (`CLAUDE.md`) без жодної вигоди. `devices/<client-id>/api/ecoflow-status`
+— тут форматер таки другий, `WebEcoflowModule::mqttStatusJson()`: єдина
+різниця з `portalStatusJson()` — прапорець `includeParams` на
+`deviceJson()`, що ховає сирий `"params"` (до 353 поля на пристрій із
+`captureAll`, розділ «Розмір payload» вище) — решта полів пристрою й усі
+top-level поля клієнта спільні через один `buildStatusJson()`-хвіст (не два
+незалежні тіла). Перевірено: `/api/wifi/status` і `/api/ecoflow/status`
+(портал) — без змін, з `params`; `api/wifi-status`/`api/ecoflow-status`
+(MQTT) — валідний JSON, `ecoflow-status` справді без `params`.
+
+**Диспетчеризація — узагальнена після третьої команди.** Три
+майже ідентичні `addJsonListener()`-колбеки (парсинг `id`, `resolve()`,
+`submitJson()`, публікація `busy`/`bad args`) звело до одного
+`handleJsonApiRequest()` + `registerJsonApiEntry()` (`src/main.cpp`) —
+трьох користувачів того самого коду вистачило, щоб узагальнити (KISS,
+`CLAUDE.md`, «другий користувач — привід узагальнити», тут уже третій).
+Кожна команда реєструється одним викликом `registerJsonApiEntry(kJsonApi...)`
+у `setupMqttClient()`.
+
 7. Лише після цього — дизайн discovery-маніфесту фази 2 і рішення щодо
    мутацій/push.
 8. Паралельно (не блокує 1-7, але блокує прибирання порталу): узгодити з

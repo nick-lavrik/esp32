@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# Ручний тест MQTT-каналів плати (docs/mqtt-web-handoff.md) - той самий дух,
+# що й ./esp, лише по MQTT, а не по serial.
+#
+# Дані брокера й креденшли беруться з secrets.ini (єдине джерело правди, той
+# самий підхід, що й у ./esp з platformio.ini). Два правила інтерполяції
+# PlatformIO зашиті прямо тут, бо загального резолвера ${secrets.*}/${PIOENV}
+# в bash нема (secrets.ini:28,77) - якщо ці рядки в secrets.ini зміняться,
+# поправити тут же:
+#   mqtt_client_id         = "mqtt-${PIOENV}"  -> client-id = "mqtt-<env>"
+#   ecoflow_proxy_username  = "${PIOENV}"       -> login     = "<env>"
+#
+# Використання:
+#   ./mqtt-api esp32-c3 api system-info    # JSON SAPI-запит (фаза 1), чекає одну відповідь
+#   ./mqtt-api esp32-c3 cmd heap           # текстовий command/-канал (serial-подібний)
+#   ./mqtt-api esp32-c3 watch              # сире читання devices/<client-id>/# (Ctrl-C)
+#   ./mqtt-api esp32-c3 watch status       # те саме, лише .../status
+#   ./mqtt-api --list                      # показати env з platformio.ini
+#
+# Змінні оточення: MQTT_API_TIMEOUT (10, секунд очікування відповіді на 'api'/'cmd')
+
+set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SECRETS="$ROOT/secrets.ini"
+INI="$ROOT/platformio.ini"
+CACHE="$ROOT/.cache/mqtt-api"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+if [ "${1-}" = "--list" ]; then
+    grep -o '^\[env:[^]]*\]' "$INI" | sed 's/^\[env://; s/\]$//'
+    exit 0
+fi
+
+[ -f "$SECRETS" ] || die "secrets.ini not found at $SECRETS"
+command -v mosquitto_pub >/dev/null 2>&1 || die "mosquitto_pub not found (apt install mosquitto-clients)"
+command -v mosquitto_sub >/dev/null 2>&1 || die "mosquitto_sub not found (apt install mosquitto-clients)"
+
+# secret <key> - значення "key = ..." у [secrets], без інтерполяції PlatformIO
+# (${PIOENV}/${secrets.*} лишаються буквально - на це є два правила вище).
+secret() {
+    awk -v k="^$1[[:space:]]*=" '
+        $0 ~ k {
+            val = $0
+            sub(/^[^=]*=[ \t]*/, "", val)
+            sub(/[ \t]*;.*$/, "", val)
+            gsub(/^"|"$/, "", val)
+            print val
+            exit
+        }
+    ' "$SECRETS"
+}
+
+ENV="${1-}"
+SUB="${2-}"
+[ -n "$ENV" ] && [ -n "$SUB" ] || die "use: ./mqtt-api <env> {api|cmd|watch} ... (or ./mqtt-api --list)"
+shift 2
+
+BROKER="$(secret mqtt_host)"
+PORT="$(secret mqtt_port)"
+PREFIX="$(secret mqtt_topic_prefix)"
+PASS="$(secret ecoflow_proxy_password)"
+USER="$ENV"            # ecoflow_proxy_username = "${PIOENV}" (secrets.ini:77)
+CLIENT_ID="mqtt-$ENV"  # mqtt_client_id = "mqtt-${PIOENV}" (secrets.ini:28)
+
+[ -n "$BROKER" ] && [ -n "$PREFIX" ] && [ -n "$PASS" ] ||
+    die "could not read mqtt_host/mqtt_topic_prefix/ecoflow_proxy_password from secrets.ini"
+
+TIMEOUT="${MQTT_API_TIMEOUT:-10}"
+
+mqpub() { mosquitto_pub -h "$BROKER" -p "$PORT" -u "$USER" -P "$PASS" "$@"; }
+mqsub() { mosquitto_sub -h "$BROKER" -p "$PORT" -u "$USER" -P "$PASS" "$@"; }
+
+case "$SUB" in
+    api)
+        NAME="${1-}"
+        [ -n "$NAME" ] || die "use: ./mqtt-api <env> api <cmd-name>"
+        # Пре-альфа фази 1 (docs/mqtt-web-handoff.md): payload без аргументів
+        # - жодна зареєстрована команда їх поки не приймає. Коли з'явиться
+        # команда з args, тут місце додати їх у payload.
+        ID=$((RANDOM))
+        REQ_TOPIC="$PREFIX/devices/$CLIENT_ID/api/$NAME"
+        REPLY_TOPIC="$PREFIX/devices/$CLIENT_ID/api/$NAME/reply"
+        PAYLOAD="{\"id\":$ID}"
+
+        mkdir -p "$CACHE"
+        OUT="$CACHE/reply-$$.json"
+        mqsub -t "$REPLY_TOPIC" -C 1 -W "$TIMEOUT" > "$OUT" 2>&1 &
+        SUBPID=$!
+        sleep 0.3
+        mqpub -t "$REQ_TOPIC" -m "$PAYLOAD"
+        wait "$SUBPID"
+
+        if [ ! -s "$OUT" ] || grep -q "^Timed out" "$OUT"; then
+            rm -f "$OUT"
+            die "no reply within ${TIMEOUT}s on $REPLY_TOPIC (id=$ID)"
+        fi
+        if command -v jq >/dev/null 2>&1; then jq . "$OUT"; else cat "$OUT"; fi
+        rm -f "$OUT"
+        ;;
+
+    cmd)
+        [ $# -ge 1 ] || die "use: ./mqtt-api <env> cmd <text...>"
+        LINE="$*"
+        REQ_TOPIC="$PREFIX/command/$CLIENT_ID"
+        REPLY_TOPIC="$PREFIX/command/$CLIENT_ID/reply"
+
+        # -W - нормальний спосіб дізнатись "більше порцій не буде": текстовий
+        # canal не позначає останню порцію нічим на дроті (CommandResponse
+        # шле isFinal лише в бік ResponseTarget, не в сам MQTT-payload), тому
+        # немає іншого способу закінчити читання, крім тиші. mosquitto_sub
+        # завжди виходить ненульовим кодом після -W - це очікуваний кінець
+        # роботи, не помилка, тому код виходу тут не пробрасываем.
+        mqsub -t "$REPLY_TOPIC" -W "$TIMEOUT" 2>/dev/null &
+        SUBPID=$!
+        sleep 0.3
+        mqpub -t "$REQ_TOPIC" -m "$LINE"
+        wait "$SUBPID" || true
+        ;;
+
+    watch)
+        # Без другого аргументу - усе під devices/<client-id>/ (status,
+        # ecoflow/.../grid, light-sensor, api/.../reply) одним викликом.
+        SUFFIX="${1-#}"
+        mqsub -t "$PREFIX/devices/$CLIENT_ID/$SUFFIX" -v
+        ;;
+
+    *)
+        die "unknown subcommand '$SUB' - use api|cmd|watch"
+        ;;
+esac

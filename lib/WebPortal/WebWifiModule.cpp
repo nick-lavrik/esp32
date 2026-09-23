@@ -186,94 +186,120 @@ void WebWifiModule::_refreshSnapshot() {
   const NetworkSupervisorState state = _supervisor.state();
   const bool apMode =
       state == NetworkSupervisorState::AP_MODE || state == NetworkSupervisorState::STARTING_AP;
+  const bool connected = _supervisor.isConnected();
 
-  String status = "{\"state\":";
-  status += webjson::quote(stateName(state));
-  status += ",\"connected\":";
-  status += webjson::boolean(_supervisor.isConnected());
-  status += ",\"ssid\":";
-  status += webjson::quote(_supervisor.currentSsid());
-  status += ",\"ip\":";
-  status += webjson::quote(_supervisor.localIp());
+  WebWifiStatus status;
+  status.state = state;
+  status.connected = connected;
+  status.ssid = _supervisor.currentSsid();
+  status.ip = _supervisor.localIp();
   // IP роутера - лише для STA: WiFi.gatewayIP() у режимі AP не означає
-  // нічого (шлюзом є сам пристрій), сторінка ховає поле, коли !connected.
-  status += ",\"gateway\":";
-  status += webjson::quote(_supervisor.isConnected() ? WiFi.gatewayIP().toString() : String());
-  status += ",\"rssi\":";
-  status += _supervisor.isConnected() ? (int)WiFi.RSSI() : 0;
+  // нічого (шлюзом є сам пристрій), форматер ховає поле, коли !connected.
+  status.gateway = connected ? WiFi.gatewayIP().toString() : String();
+  status.rssi = connected ? (int)WiFi.RSSI() : 0;
   // Відсоток рахує пристрій, а не сторінка: та сама шкала, що в 'status sys'
   // і на екрані плати (wifiSignalQuality() в NetworkSupervisor).
-  status += ",\"quality\":";
-  status += _supervisor.isConnected() ? wifiSignalQuality(WiFi.RSSI()) : 0;
-  status += ",\"phyMode\":";
-  status += webjson::quote(connectionPhyMode(_supervisor.isConnected()));
-  status += ",\"mac\":";
-  status += webjson::quote(WiFi.macAddress());
-  status += ",\"autoReconnect\":";
-  status += webjson::boolean(_supervisor.autoReconnect());
-  status += ",\"ap\":{\"active\":";
-  status += webjson::boolean(apMode);
-  status += ",\"ssid\":";
-  status += webjson::quote(cfg.apSsid);
-  status += ",\"ip\":";
-  status += webjson::quote(apMode ? WiFi.softAPIP().toString() : String(cfg.apIp.c_str()));
-  status += ",\"clients\":";
-  status += apMode ? (int)WiFi.softAPgetStationNum() : 0;
+  status.quality = connected ? wifiSignalQuality(WiFi.RSSI()) : 0;
+  status.phyMode = connectionPhyMode(connected);
+  status.mac = WiFi.macAddress();
+  status.autoReconnect = _supervisor.autoReconnect();
+  status.apActive = apMode;
+  status.apSsid = cfg.apSsid;
+  status.apIp = apMode ? WiFi.softAPIP().toString() : String(cfg.apIp.c_str());
+  status.apClients = apMode ? (int)WiFi.softAPgetStationNum() : 0;
   // Порожній пароль AP-профілю = відкрита мережа (та сама угода, що для
   // збережених STA-профілів: hasPassword, а не сам пароль).
-  status += ",\"security\":";
-  status += webjson::quote(cfg.apPassword.empty() ? "open" : "WPA2");
-  status += "}}";
+  status.apOpen = cfg.apPassword.empty();
 
-  String connections = "[";
-  bool first = true;
-  for (const auto& c : _supervisor.connections()) {
-    if (!first) connections += ',';
-    first = false;
-
-    connections += "{\"id\":";
-    connections += c.connectionId;
-    connections += ",\"ssid\":";
-    connections += webjson::quote(c.ssid);
-    // Пароль назовні не віддаємо - лише факт його наявності: сторінку
-    // порталу може відкрити будь-хто, хто вже в мережі пристрою.
-    connections += ",\"hasPassword\":";
-    connections += webjson::boolean(!c.password.empty());
-    connections += ",\"priority\":";
-    connections += c.priority;
-    connections += ",\"enabled\":";
-    connections += webjson::boolean(c.isEnabled);
-    connections += ",\"maxRetries\":";
-    connections += c.maxRetries;
-    connections += ",\"lastConnected\":";
-    connections += c.lastConnected;
-    connections += ",\"rssi\":";
-    connections += c.rssi;
-    connections += ",\"quality\":";
-    connections += c.rssi != 0 ? wifiSignalQuality(c.rssi) : 0;
-    // До якого профілю підключені ЗАРАЗ. Вирішує пристрій: він єдиний знає
-    // і поточний SSID, і стан зʼєднання, а сторінці довелося б звіряти два
-    // окремі запити й вгадувати, який із них свіжіший.
-    connections += ",\"active\":";
-    connections += webjson::boolean(_supervisor.isConnected() &&
-                                    _supervisor.currentSsid() == c.ssid);
-    connections += ",\"staticIp\":";
-    connections += webjson::boolean(c.staticIp);
-    connections += ",\"ip\":";
-    connections += webjson::quote(c.ip);
-    connections += ",\"gateway\":";
-    connections += webjson::quote(c.gateway);
-    connections += ",\"subnet\":";
-    connections += webjson::quote(c.subnet);
-    connections += ",\"dns\":";
-    connections += webjson::quote(c.dns);
-    connections += "}";
-  }
-  connections += "]";
+  std::vector<WifiConnection> connections = _supervisor.connections();
 
   Lock lock(_mutex);
-  _statusJson = std::move(status);
-  _connectionsJson = std::move(connections);
+  _status = std::move(status);
+  _connections = std::move(connections);
+}
+
+String WebWifiModule::portalStatusJson(const WebWifiStatus& s) {
+  String status = "{\"state\":";
+  status += webjson::quote(stateName(s.state));
+  status += ",\"connected\":";
+  status += webjson::boolean(s.connected);
+  status += ",\"ssid\":";
+  status += webjson::quote(s.ssid);
+  status += ",\"ip\":";
+  status += webjson::quote(s.ip);
+  status += ",\"gateway\":";
+  status += webjson::quote(s.gateway);
+  status += ",\"rssi\":";
+  status += s.rssi;
+  status += ",\"quality\":";
+  status += s.quality;
+  status += ",\"phyMode\":";
+  status += webjson::quote(s.phyMode);
+  status += ",\"mac\":";
+  status += webjson::quote(s.mac);
+  status += ",\"autoReconnect\":";
+  status += webjson::boolean(s.autoReconnect);
+  status += ",\"ap\":{\"active\":";
+  status += webjson::boolean(s.apActive);
+  status += ",\"ssid\":";
+  status += webjson::quote(s.apSsid);
+  status += ",\"ip\":";
+  status += webjson::quote(s.apIp);
+  status += ",\"clients\":";
+  status += s.apClients;
+  status += ",\"security\":";
+  status += webjson::quote(s.apOpen ? "open" : "WPA2");
+  status += "}}";
+  return status;
+}
+
+String WebWifiModule::portalConnectionsJson(const std::vector<WifiConnection>& connections,
+                                             const WebWifiStatus& status) {
+  String json = "[";
+  bool first = true;
+  for (const auto& c : connections) {
+    if (!first) json += ',';
+    first = false;
+
+    json += "{\"id\":";
+    json += c.connectionId;
+    json += ",\"ssid\":";
+    json += webjson::quote(c.ssid);
+    // Пароль назовні не віддаємо - лише факт його наявності: сторінку
+    // порталу може відкрити будь-хто, хто вже в мережі пристрою.
+    json += ",\"hasPassword\":";
+    json += webjson::boolean(!c.password.empty());
+    json += ",\"priority\":";
+    json += c.priority;
+    json += ",\"enabled\":";
+    json += webjson::boolean(c.isEnabled);
+    json += ",\"maxRetries\":";
+    json += c.maxRetries;
+    json += ",\"lastConnected\":";
+    json += c.lastConnected;
+    json += ",\"rssi\":";
+    json += c.rssi;
+    json += ",\"quality\":";
+    json += c.rssi != 0 ? wifiSignalQuality(c.rssi) : 0;
+    // До якого профілю підключені ЗАРАЗ - за знімком стану, знятим В ТОЙ
+    // САМИЙ момент (той самий _refreshSnapshot()), не за живим повторним
+    // читанням _supervisor.
+    json += ",\"active\":";
+    json += webjson::boolean(status.connected && status.ssid == c.ssid);
+    json += ",\"staticIp\":";
+    json += webjson::boolean(c.staticIp);
+    json += ",\"ip\":";
+    json += webjson::quote(c.ip);
+    json += ",\"gateway\":";
+    json += webjson::quote(c.gateway);
+    json += ",\"subnet\":";
+    json += webjson::quote(c.subnet);
+    json += ",\"dns\":";
+    json += webjson::quote(c.dns);
+    json += "}";
+  }
+  json += "]";
+  return json;
 }
 
 String WebWifiModule::_scanJob() {
@@ -343,13 +369,11 @@ void WebWifiModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
 
   // ---- читання ----
   server.on("/api/wifi/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
-    Lock lock(_mutex);
-    request->send(200, "application/json", _statusJson);
+    request->send(200, "application/json", portalStatusJson(statusSnapshot()));
   });
 
   server.on("/api/wifi/connections", HTTP_GET, [this](AsyncWebServerRequest* request) {
-    Lock lock(_mutex);
-    request->send(200, "application/json", _connectionsJson);
+    request->send(200, "application/json", portalConnectionsJson(connectionsSnapshot(), statusSnapshot()));
   });
 
   // ---- скан ефіру ----
