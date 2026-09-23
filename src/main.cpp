@@ -835,7 +835,7 @@ static void publishDiscovery() {
 }
 #endif
 
-#if HAS_LIGHT_SENSOR
+#if BOARD_HAS_LIGHT_SENSOR
 AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 #endif
 
@@ -2150,7 +2150,7 @@ void setupMqttClient() {
 
   dispatcher.addListener(EVT_REBOOT, [](IEvent& e) { mqtt.disconnect("reboot"); });
 
-#if HAS_LIGHT_SENSOR
+#if BOARD_HAS_LIGHT_SENSOR
   // publish mqtt
   lightSensor.addListener([]() {
       _logger.debug("devices/" MQTT_CLIENT_ID "/light-sensor => %d", lightSensor.value());
@@ -4408,7 +4408,7 @@ void setupSerialCommander() {
     if (args.length() == 0) {
       Logger::info("use: brightness 0-100|auto");
     } else if (args.equalsIgnoreCase("auto")) {
-#if HAS_LIGHT_SENSOR
+#if BOARD_HAS_LIGHT_SENSOR
       display_brightness(lightSensor.value(), true);
       Logger::info(" isAutoBrighness = %s", isAutoBrightness ? "true" : "false");
 #else
@@ -5038,7 +5038,7 @@ void setupWebPortal() {
 void setupTaskCommander() {}
 
 void setupLightSensor() {
-#if HAS_LIGHT_SENSOR
+#if BOARD_HAS_LIGHT_SENSOR
   lightSensor.begin();
   scheduler.addCronTask(0, []() { lightSensor.update(); });
 
@@ -5196,7 +5196,7 @@ void drawSystemInfo() {
   display.setCursor(left, top + row++ * (space + display.fontHeight()));
   display.print(buf);
 
-  #if HAS_LIGHT_SENSOR
+  #if BOARD_HAS_LIGHT_SENSOR
     // display.setTextSize(1);
     // display.setTextColor(TFT_DARKGREY);
     // display.setCursor(10, display.height() - 1 * (5 + display.fontHeight()));

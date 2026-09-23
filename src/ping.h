@@ -1,12 +1,28 @@
 #pragma once
 
-#if defined(BOARD_ESP8266)
-#define HAS_PING_LIB __has_include(<ESP8266Ping.h>)
-#else
-#define HAS_PING_LIB __has_include(<ESPping.h>)
+// HAS_PING - явний прапорець з src-<env>/environment.h (розділ 2), не
+// виведений з __has_include(): той самий принцип, що й HAS_WEB_PORTAL/
+// HAS_ECOFLOW_CLIENT там (CLAUDE.md) - компілятор і IDE-індексатор мають
+// бачити ОДНЕ й те саме значення.
+#ifndef HAS_PING
+#error "HAS_PING не визначено - додай #define HAS_PING 0/1 у environment.h цього env"
 #endif
 
-#if !HAS_PING_LIB
+// Але сама наявність бібліотеки все одно перевіряється - якщо хтось
+// виставить HAS_PING=1 без відповідного lib_dep (чи навпаки забуде
+// прибрати HAS_PING=1 при вимкненні lib_dep), збірка провалюється явно
+// (#error) замість мовчазного "ping ніколи не працює" в рантаймі.
+#if defined(BOARD_ESP8266)
+#if HAS_PING && !__has_include(<ESP8266Ping.h>)
+#error "HAS_PING=1, але ESP8266Ping.h недоступний - додай залежність у lib_deps цього env (не вбудований у поточний core, перевірено 2026-09-23)"
+#endif
+#else
+#if HAS_PING && !__has_include(<ESPping.h>)
+#error "HAS_PING=1, але dvarrel/ESPping відсутній у lib_deps цього env"
+#endif
+#endif
+
+#if !HAS_PING
 
 void doPing() { ; }
 char* dumpPingStatsStr() { return nullptr; }
@@ -15,7 +31,9 @@ char* dumpPingStatsStr() { return nullptr; }
 
 #if defined(BOARD_ESP8266)
 #include <ESP8266WiFi.h>
-#include <ESP8266Ping.h>  // вбудований в ESP8266 Arduino core, окремий lib_dep не потрібен
+#include <ESP8266Ping.h>  // НЕ вбудований у поточний core (перевірено 2026-09-23,
+                          // "find / -iname ESP8266Ping.h" - нуль збігів) - потрібен
+                          // окремий lib_dep, якщо колись HAS_PING=1 тут стане реальним
 #else
 #include <WiFi.h>
 #include <ESPping.h>

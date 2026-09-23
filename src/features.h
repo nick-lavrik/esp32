@@ -6,16 +6,22 @@
 // загубило спільну картину "які фічі взагалі є в проєкті" - цей файл її
 // повертає, без окремого Python-генератора.
 //
-// Свідомо НЕ включає прапорці, що самі себе визначають через __has_include
-// у власних бібліотечних заголовках (HAS_MQTT_CLIENT - lib/MqttClient/
-// MqttClient.hpp, HAS_CONSOLE_MQTT - lib/ConsoleMqtt/ConsoleMqtt.hpp,
-// HAS_GMAIL_SENDER - lib/GmailSender/GmailSender.hpp, HAS_SCREEN_MIRROR -
-// src/Display.h, HAS_PING_LIB - src/ping.h): для них "картина не губиться" -
-// кожен визначається в ОДНОМУ місці, не в 8 environment.h, тож проблема,
-// яку вирішує цей каталог, до них не застосовна. Показати їх тут теж було б
+// Свідомо НЕ включає прапорці, що й досі самі себе визначають через
+// __has_include() у власних бібліотечних заголовках (HAS_MQTT_CLIENT -
+// lib/MqttClient/MqttClient.hpp, HAS_CONSOLE_MQTT - lib/ConsoleMqtt/
+// ConsoleMqtt.hpp, HAS_GMAIL_SENDER - lib/GmailSender/GmailSender.hpp,
+// HAS_SCREEN_MIRROR - src/Display.h): для них "картина не губиться" - кожен
+// визначається в ОДНОМУ місці, не в 8 environment.h, тож проблема, яку
+// вирішує цей каталог, до них не застосовна. Показати їх тут теж було б
 // хитким: макрос має бути визначений ДО цього заголовка, інакше мовчки "0"
 // (undefined -> 0 - навмисно безпечно для #if нижче, але оманливо, якщо
-// реальний стан платформи саме "не визначено ще").
+// реальний стан платформи саме "не визначено ще"). **HAS_PING - виняток,
+// уже переведений на явний прапорець** (`src-<env>/environment.h`, розділ
+// 2 + build-fail у `src/ping.h`, якщо значення розійдеться з наявністю
+// бібліотеки) - перший з, можливо, кількох: рішення переносити решту
+// (HAS_MQTT_CLIENT тощо) на той самий явний патерн - окреме, ще не
+// прийняте (докладніше - docs/mqtt-web-handoff.md чи відповідний
+// tech_debt-запис, коли з'явиться).
 //
 // -include src-<env>/environment.h (platformio.ini) - глобальний build_flag,
 // діє на ВЕСЬ TU з першого рядка, тому порядок #include цього файлу в
@@ -48,21 +54,26 @@
 #ifndef HAS_WEB_PORTAL
 #define HAS_WEB_PORTAL 0
 #endif
+#ifndef HAS_PING
+#define HAS_PING 0
+#endif
 
-// HAS_LIGHT_SENSOR - похідний прапорець, не прямий BOARD_HAS_*/HAS_* з
-// environment.h. Джерело - LIGHT_SENSOR_PIN (пін, розділ 4 environment.h,
-// напр. src-st7789/environment.h:101), перевірений усюди в src/main.cpp
-// (5 місць) як "#if LIGHT_SENSOR_PIN > 0", той самий трюк undefined -> 0,
-// що й вище. Виведено сюди один раз, щоб main.cpp гейтив і код, і
-// discovery-видимість ОДНИМ прапорцем, а не дублював умову "> 0" у шостому
-// місці (features.h) поверх наявних п'яти.
+// BOARD_HAS_LIGHT_SENSOR - похідний прапорець, не прямий запис у
+// environment.h (BOARD_HAS_, не HAS_, - апаратна ознака плати, той самий
+// клас, що BOARD_HAS_IMU/BOARD_HAS_SD, а не софт-фіча). Джерело -
+// LIGHT_SENSOR_PIN (пін, розділ 4 environment.h, напр.
+// src-st7789/environment.h:101), перевірений усюди в src/main.cpp
+// (5 місць) як "#if BOARD_HAS_LIGHT_SENSOR" (було "#if LIGHT_SENSOR_PIN > 0" -
+// той самий трюк undefined -> 0, що й вище). Виведено сюди один раз, щоб
+// main.cpp гейтив і код, і discovery-видимість ОДНИМ прапорцем, а не
+// дублював умову "> 0" у шостому місці (features.h) поверх наявних п'яти.
 #ifndef LIGHT_SENSOR_PIN
 #define LIGHT_SENSOR_PIN 0
 #endif
 #if LIGHT_SENSOR_PIN > 0
-#define HAS_LIGHT_SENSOR 1
+#define BOARD_HAS_LIGHT_SENSOR 1
 #else
-#define HAS_LIGHT_SENSOR 0
+#define BOARD_HAS_LIGHT_SENSOR 0
 #endif
 
 #define FEATURE_LIST(X) \
@@ -71,10 +82,11 @@
   X(BOARD_HAS_SD)        \
   X(BOARD_HAS_IMU)       \
   X(BOARD_HAS_PSRAM)     \
+  X(BOARD_HAS_LIGHT_SENSOR) \
   X(HAS_DINO_GAME)       \
   X(HAS_ECOFLOW_CLIENT)  \
   X(HAS_WEB_PORTAL)      \
-  X(HAS_LIGHT_SENSOR)
+  X(HAS_PING)
 
 namespace features {
 

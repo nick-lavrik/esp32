@@ -10,6 +10,7 @@
 sd-rescue/
 compile_commands.json
 secrets.ini
+sapi/revision.js
 
 # Персональні налаштування Claude Code (hooks, попапи) - не для команди
 .claude/settings.local.json
