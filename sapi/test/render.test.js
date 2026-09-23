@@ -39,8 +39,9 @@ test('system-info: щасливий шлях (esp32-c3, з партиціями)
   assert.match(html, /ESP32-C3/);
   assert.match(html, /84\.4 KB/); // free heap: 86400 / 1024
   assert.match(html, /4\.00 MB/); // flash size: 4194304 / 1024 / 1024
-  assert.match(html, /<table class="data">/);
-  assert.match(html, /0x9000/); // 36864 у hex - offset першої партиції
+  assert.match(html, /<table class="zebra">/);
+  assert.match(html, /0x009000/); // 36864 у hex, з ведучими нулями до довжини найбільшого офсету/розміру в таблиці
+  assert.match(html, /class="muted">\*\*\*/); // поля, яких ще немає в system-info (Firmware env, LittleFS, ...)
 });
 
 test('system-info: PSRAM є, NVS недоступний, без партицій', () => {
@@ -53,8 +54,9 @@ test('system-info: PSRAM є, NVS недоступний, без партицій
   });
   assertNoLeakedPlaceholders(html);
   assert.match(html, /8\.00 MB/); // PSRAM bytes
-  assert.match(html, /unavailable/);
-  assert.doesNotMatch(html, /<table class="data">/); // порожній масив - таблиці нема
+  assert.match(html, /not available/); // NVS.available=false
+  assert.doesNotMatch(html, /<table class="zebra">/); // порожній масив - таблиці нема, лише "No partition table."
+  assert.match(html, /No partition table\./);
 });
 
 // --- wifi-status ---

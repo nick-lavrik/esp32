@@ -22,12 +22,25 @@
 
   render.js винесений окремим файлом (не в цей інлайн-скрипт) свідомо - той
   самий код без змін прогонить test/render.test.js у Node, без браузера/DOM.
+
+  Розмітка/стиль (header/nav/section/button.act) - буквально той самий
+  словник, що й у assets/www/index.html (портал): за проханням користувача
+  (сесія 2026-09-23) - форма підключення була "великою" формою по центру
+  сторінки, що ховалась після конекту й лишала непослідовний вигляд між
+  "до" і "після". Тепер підключення - компактний попап під заголовком
+  (клік по індикатору стану), а System/Wi-Fi/EcoFlow/Log - вкладки nav,
+  видимі одразу, незалежно від стану з'єднання - той самий каркас, що й
+  портал, замість двох по-різному виглядаючих "сторінок".
 -->
 <style>
 :root {
   --bg: #14171c; --panel: #1c2027; --line: #2b313b; --text: #e6e9ef;
   --muted: #8b94a3; --accent: #4da3ff; --ok: #4cc38a; --warn: #e0a33e; --err: #e5534b;
   --font-size-base: 14px;
+  --font-scale: 1.125;
+  --font-size-small: calc(var(--font-size-base) / var(--font-scale));
+  --font-size-medium: calc(var(--font-size-base) * var(--font-scale));
+  --font-size-large: calc(var(--font-size-medium) * var(--font-scale));
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -35,54 +48,147 @@ body { margin: 0; background: var(--bg); color: var(--text);
   font: var(--font-size-base)/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
-header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+header h1 { font-size: var(--font-size-medium); margin: 0; font-weight: 600; }
 header .spacer { flex: 1; }
-#conn-state { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+#device-state { color: var(--muted); font-size: var(--font-size-small); }
+
+/* Індикатор стану - сам кнопка (не декоративний текст): клік відкриває
+   попап підключення, коли ми off/connecting, і одразу розриває з'єднання,
+   коли on - той самий верхній правий кут, що й раніше показував лише
+   напис, тепер ще й керує з'єднанням, без окремої постійної кнопки. */
+.conn-wrap { position: relative; }
+#conn-toggle { display: flex; align-items: center; gap: 6px; background: none;
+  border: 1px solid transparent; border-radius: 6px; padding: 5px 10px;
+  font: inherit; font-size: var(--font-size-small); color: var(--muted); cursor: pointer; }
+#conn-toggle:hover { border-color: var(--line); color: var(--text); }
 #conn-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--err); flex: none; }
 #conn-dot.on { background: var(--ok); }
 #conn-dot.connecting { background: var(--warn); }
-main { padding: 16px; max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
-.panel h2 { font-size: 15px; margin: 0 0 10px; }
+
+/* Попап підключення - той самий патерн, що ▾-меню порталу (.menu-wrap/.menu
+   в assets/www/index.html): абсолютний блок під кнопкою, а не постійний
+   розділ сторінки. Ширший за звичайне меню (форма, не список дій). */
+.conn-popover { position: absolute; right: 0; top: calc(100% + 6px); z-index: 15;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px; min-width: 300px; display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 6px 20px #0009; }
+.conn-popover h2 { margin: 0; font-size: var(--font-size-medium); }
+
+nav { display: flex; gap: 4px; padding: 8px 16px 0; overflow-x: auto; }
+nav button { background: none; border: 1px solid transparent; border-bottom: none;
+  color: var(--muted); padding: 7px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit;
+  flex: none; white-space: nowrap; }
+nav button.active { background: var(--panel); border-color: var(--line); color: var(--text); }
+@media (max-width: 560px) {
+  nav { position: sticky; top: 0; z-index: 5; background: var(--bg); }
+  nav button { padding: 8px 10px; }
+}
+
+/* Без max-width - той самий портал (assets/www/index.html: `main { padding:
+   0 16px 24px; }`, нічого більше). Раніше тут стояв max-width:960px - лишав
+   картки System удвічі вужчими, ніж дозволяє екран, і саме це, разом із
+   .out нижче, робило вигляд "зовсім іншим", ніж на порталі (сесія
+   2026-09-24). */
+main { padding: 0 16px 24px; }
+section { display: none; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 0 8px 8px 8px; padding: 16px; }
+section.active { display: block; }
+section > h2:first-child, .card > h2:first-child { margin-top: 0; }
+h2 { font-size: var(--font-size-large); text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text); margin: 24px 0 10px; font-weight: 600; }
+h2 span { text-transform: none; letter-spacing: 0; }
+h2.hrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4px 10px;
+  text-transform: none; letter-spacing: 0; }
+
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1; min-width: 140px; }
-input { background: #0f1216; border: 1px solid var(--line); color: var(--text); border-radius: 5px;
-  padding: 7px 9px; font: inherit; font-size: 13px; }
-button { background: #262c36; border: 1px solid var(--line); color: var(--text); border-radius: 6px;
-  padding: 7px 14px; font: inherit; font-size: 13px; cursor: pointer; }
-button:hover { border-color: var(--accent); }
-button:disabled { opacity: .5; cursor: default; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #0b0f14; font-weight: 600; }
-button.danger { color: var(--err); }
-.cmd-panel h2 { display: flex; align-items: center; gap: 10px; }
-.cmd-panel .cmd-status { font-size: 12px; color: var(--muted); font-weight: 400; }
-.cmd-panel .cmd-status.ok { color: var(--ok); }
-.cmd-panel .cmd-status.err { color: var(--err); }
-.cmd-panel .spacer { flex: 1; }
-.out { background: #0f1216; border: 1px solid var(--line); border-radius: 6px;
-  padding: 10px 12px; font-size: 13px; line-height: 1.5; max-height: 420px; overflow-y: auto; }
+/* Стековий підпис-над-полем - лише для форми підключення (6 різнорідних
+   полів, короткий підпис над кожним читається швидше за самі плейсхолдери).
+   Поза попапом (checkbox-row, майбутні форми) label лишається звичайним
+   inline-рядком - раніше загальне правило "усі label - колонка" ламало
+   .checkbox-row (AUTO переносився під чекбокс). */
+.conn-popover label { display: flex; flex-direction: column; gap: 4px; font-size: var(--font-size-small);
+  color: var(--muted); flex: 1; min-width: 140px; }
+/* .checkbox-row (Auto-connect) усередині попапу - той самий чекбокс-поруч-
+   з-текстом рядок, що й на System/Wi-Fi/EcoFlow (AUTO), не стековий підпис-
+   над-полем: правило вище (.conn-popover label) інакше зламало б і цей
+   чекбокс так само, як раніше ламало AUTO поза попапом. */
+.conn-popover label.checkbox-row { flex-direction: row; align-items: center; min-width: 0; }
+input, select { background: var(--bg); border: 1px solid var(--line); color: var(--text);
+  border-radius: 6px; padding: 7px 10px; font: inherit; }
+input:focus { outline: 1px solid var(--accent); }
+
+button.act { background: var(--accent); border: none; color: #06121f; padding: 7px 14px;
+  border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; }
+button.act.ghost { background: none; border: 1px solid var(--line); color: var(--text); font-weight: 400; }
+button.act:disabled { opacity: .5; cursor: default; }
+button.act.ghost.danger { color: var(--err); }
+button.act.ghost.danger:hover { border-color: var(--err); }
+
+.cmd-status { font-size: var(--font-size-small); color: var(--muted); font-weight: 400; }
+.cmd-status.ok { color: var(--ok); }
+.cmd-status.err { color: var(--err); }
+/* font-size тут НЕ small - портал жодного разу не зменшує кегль dl/картки,
+   лише консольні/monospace блоки (#log нижче). Раніше .out форсував small
+   на весь вміст, включно з картками System - звідси й "трохи менший за
+   портал текст" (сесія 2026-09-24). */
+.out { background: #0e1116; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; line-height: 1.5; max-height: 420px; overflow-y: auto; }
+/* Картковий вивід (System, renderSystemInfo) не отримує темну рамку/власний
+   скрол консолі - портал не кладе картки в жодну додаткову коробку, вони
+   лежать просто на тлі секції (assets/www/index.html, #sys-cards). Раніше
+   .out малював ще одну рамку НАВКОЛО карток і різав їх висоту скролом -
+   саме "коробка в коробці" й відрізняла SAPI від порталу найбільше. Інші
+   команди (wifi-status/ecoflow-status) поки лишаються звичайним kv/badge-
+   виводом у консольній рамці - :has() відрізняє один випадок від іншого
+   без додаткового класу в розмітці чи в JS. */
+.out:has(.cards) { background: none; border: none; padding: 0; max-height: none; overflow: visible; }
+/* dl/dt/dd - той самий глобальний вигляд, що в assets/www/index.html
+   (портал), не власний клас .kv: System-вкладка (render.js,
+   renderSystemInfo) тепер емітить голий <dl>, як і портал. wifi-status/
+   ecoflow-status поки лишаються на .kv/badge - наступний крок, не цей. */
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; margin: 0; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
 .section-group { margin-top: 12px; }
-.section-group h3 { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); font-weight: 600;
+.section-group h3 { margin: 0 0 6px; font-size: var(--font-size-small); color: var(--muted); font-weight: 600;
   text-transform: uppercase; letter-spacing: .03em; }
-table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
-table.data th, table.data td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
-table.data th { color: var(--muted); font-weight: 500; }
+/* Картки System - той самий словник, що #sys-cards/.card у порталі:
+   flex-wrap рядок карток, кожна росте до 300px, а не жорсткі 2 колонки -
+   кількість карток (Device/Memory/LittleFS/SD/NVS/Modules) не ділиться
+   рівно навпіл на жодній ширині. */
+.cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+.card { border: 1px solid var(--line); border-radius: 6px; padding: 12px; flex: 1 1 300px; min-width: 260px; }
+.card dl { grid-template-columns: max-content 1fr; }
+table.zebra { width: 100%; border-collapse: collapse; margin-top: 6px; }
+table.zebra th, table.zebra td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+/* th БІЛЬШОГО кегля за td, не меншого - той самий портал (assets/www/
+   index.html): "заголовок стовпчика дрібнішим за власний вміст" - це саме
+   те, що там свідомо виправили (CLAUDE.md-стиль коментаря на місці). */
+table.zebra th { color: var(--muted); font-weight: 600; font-size: var(--font-size-medium);
+  text-transform: uppercase; letter-spacing: .04em; }
+table.zebra thead th { background: #ffffff05; }
+table.zebra tbody tr:nth-child(even) { background: #ffffff05; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
+th.num { text-align: right; }
+td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+@media (max-width: 560px) { .opt { display: none; } dl { grid-template-columns: 1fr; } }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; }
 .badge.ok { background: rgba(76,195,138,.18); color: var(--ok); }
 .badge.err { background: rgba(229,83,75,.18); color: var(--err); }
 .badge.warn { background: rgba(224,163,62,.18); color: var(--warn); }
 .badge.muted { background: rgba(139,148,163,.18); color: var(--muted); }
 details.raw { margin-top: 10px; }
-details.raw summary { cursor: pointer; font-size: 12px; color: var(--muted); }
-details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-x: auto; }
+details.raw summary { cursor: pointer; font-size: var(--font-size-small); color: var(--muted); }
+details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-height: 1.45; overflow-x: auto; }
 #log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap;
-  background: #0f1216; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
-  max-height: 220px; overflow-y: auto; }
+  background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  max-height: 420px; overflow-y: auto; }
 .muted { color: var(--muted); }
-.checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.checkbox-row { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-small); color: var(--muted); }
 .checkbox-row input { width: auto; }
 </style>
 </head>
@@ -92,61 +198,72 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
   <h1>ESP32 SAPI</h1>
   <span id="sapi-revision" class="muted"></span>
   <span class="spacer"></span>
-  <span id="device-state" class="muted"></span>
-  <span id="conn-state"><span id="conn-dot"></span><span id="conn-label">disconnected</span></span>
+  <span id="device-state"></span>
+  <div class="conn-wrap">
+    <button id="conn-toggle" type="button"><span id="conn-dot"></span><span id="conn-label">disconnected</span></button>
+    <div id="conn-popover" class="conn-popover" hidden>
+      <h2>Connection</h2>
+      <div class="row">
+        <label>Broker host<input id="f-host" placeholder="192.168.1.22" autocomplete="off"></label>
+        <label>Port<input id="f-port" placeholder="9001" autocomplete="off"></label>
+      </div>
+      <div class="row">
+        <label>Topic prefix<input id="f-prefix" placeholder="mykola-lavryk" autocomplete="off"></label>
+        <label>Device client-id<input id="f-client" placeholder="mqtt-esp32-c3" autocomplete="off"></label>
+      </div>
+      <div class="row">
+        <label>Username<input id="f-user" placeholder="sapi-esp32-c3" autocomplete="off"></label>
+        <label>Password<input id="f-pass" type="password" autocomplete="off"></label>
+      </div>
+      <div class="row">
+        <label class="checkbox-row"><input type="checkbox" id="f-autologin">Auto-connect on load</label>
+      </div>
+      <div class="row">
+        <button id="btn-conn-action" class="act">Connect</button>
+        <span class="spacer"></span>
+        <button id="btn-forget" class="act ghost danger">Forget saved</button>
+      </div>
+    </div>
+  </div>
 </header>
+
+<nav>
+  <button class="active" data-tab="system-info">System</button>
+  <button data-tab="wifi-status">Wi-Fi</button>
+  <button data-tab="ecoflow-status">EcoFlow</button>
+  <button data-tab="log">Log</button>
+</nav>
 
 <main>
 
-  <section class="panel" id="conn-panel">
-    <h2>Connection</h2>
-    <div class="row">
-      <label>Broker host<input id="f-host" placeholder="192.168.1.22" autocomplete="off"></label>
-      <label>Port<input id="f-port" placeholder="9001" autocomplete="off"></label>
-      <label>Topic prefix<input id="f-prefix" placeholder="mykola-lavryk" autocomplete="off"></label>
-    </div>
-    <div class="row">
-      <label>Username<input id="f-user" placeholder="sapi-esp32-c3" autocomplete="off"></label>
-      <label>Password<input id="f-pass" type="password" autocomplete="off"></label>
-      <label>Device client-id<input id="f-client" placeholder="mqtt-esp32-c3" autocomplete="off"></label>
-    </div>
-    <div class="row" style="margin-top: 4px">
-      <button id="btn-connect" class="primary">Connect</button>
-      <button id="btn-disconnect" disabled>Disconnect</button>
-      <span class="spacer"></span>
-      <button id="btn-forget" class="danger">Forget saved connection</button>
-    </div>
-  </section>
-
-  <section class="panel cmd-panel" data-cmd="system-info">
-    <h2>system-info <span class="cmd-status muted">-</span><span class="spacer"></span>
+  <section class="active cmd-section" data-tab="system-info" data-cmd="system-info">
+    <h2 class="hrow">system-info <span class="cmd-status muted">-</span><span class="spacer"></span>
       <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
-      <button class="btn-refresh" disabled>Refresh</button>
+      <button class="btn-refresh act ghost" disabled>Refresh</button>
     </h2>
     <div class="out">-</div>
   </section>
 
-  <section class="panel cmd-panel" data-cmd="wifi-status">
-    <h2>wifi-status <span class="cmd-status muted">-</span><span class="spacer"></span>
+  <section class="cmd-section" data-tab="wifi-status" data-cmd="wifi-status">
+    <h2 class="hrow">wifi-status <span class="cmd-status muted">-</span><span class="spacer"></span>
       <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
-      <button class="btn-refresh" disabled>Refresh</button>
+      <button class="btn-refresh act ghost" disabled>Refresh</button>
     </h2>
     <div class="out">-</div>
   </section>
 
-  <section class="panel cmd-panel" data-cmd="ecoflow-status">
-    <h2>ecoflow-status <span class="cmd-status muted">-</span><span class="spacer"></span>
+  <section class="cmd-section" data-tab="ecoflow-status" data-cmd="ecoflow-status">
+    <h2 class="hrow">ecoflow-status <span class="cmd-status muted">-</span><span class="spacer"></span>
       <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
-      <button class="btn-refresh" disabled>Refresh</button>
+      <button class="btn-refresh act ghost" disabled>Refresh</button>
     </h2>
     <div class="out">-</div>
   </section>
 
-  <section class="panel">
-    <h2>Log <span class="muted" style="font-weight:400; font-size:12px">(останні 500 рядків)</span></h2>
-    <div class="row" style="margin-bottom:8px">
-      <button id="btn-clear-log">Clear</button>
-    </div>
+  <section data-tab="log">
+    <h2 class="hrow">Log <span class="muted" style="font-weight:400; font-size:var(--font-size-small)">(останні 500 рядків)</span><span class="spacer"></span>
+      <button id="btn-clear-log" class="act ghost">Clear</button>
+    </h2>
     <div id="log"></div>
   </section>
 
@@ -201,6 +318,7 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
       username: $('#f-user').value.trim(),
       password: $('#f-pass').value,
       clientId: $('#f-client').value.trim(),
+      autoLogin: $('#f-autologin').checked,
     };
   }
   function fillForm(conn) {
@@ -210,7 +328,23 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
     $('#f-user').value = conn.username || '';
     $('#f-pass').value = conn.password || '';
     $('#f-client').value = conn.clientId || '';
+    // Дефолт - вимкнено: автоконект без явної згоди користувача - це те, що
+    // могло б непомітно з'єднатись із чужим брокером на чужому Wi-Fi
+    // (ноутбук з локальним файлом сторінки в кишені). Увімкнено лише якщо
+    // користувач сам поставив галочку минулого разу (autoLogin===true).
+    $('#f-autologin').checked = conn.autoLogin === true;
   }
+  // Чекбокс autoLogin зберігається одразу на зміну (merge в збережений
+  // об'єкт, не перезапис усієї форми) - незалежно від того, чи користувач
+  // потім натисне Connect, Disconnect, чи взагалі нічого. Раніше значення
+  // зберігалось лише всередині connect() (readForm() там же) - тому знята
+  // під час перегляду попапу галочка губилась на Disconnect, який форму не
+  // читав узагалі.
+  $('#f-autologin').addEventListener('change', () => {
+    const conn = loadConn();
+    conn.autoLogin = $('#f-autologin').checked;
+    saveConn(conn);
+  });
 
   fillForm(loadConn());
 
@@ -225,10 +359,22 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
     el.scrollTop = el.scrollHeight;
   }
 
+  // --- вкладки (system-info/wifi-status/ecoflow-status/log) - видимі й
+  // перемикаються незалежно від стану з'єднання, той самий каркас, що й у
+  // порталі (nav button.active / section.active), а не дві різні "сторінки"
+  // до і після конекту. ---
+  const tabButtons = $$('nav button');
+  const tabSections = $$('main > section');
+  function activateTab(name) {
+    for (const b of tabButtons) b.classList.toggle('active', b.dataset.tab === name);
+    for (const s of tabSections) s.classList.toggle('active', s.dataset.tab === name);
+  }
+  for (const b of tabButtons) b.addEventListener('click', () => activateTab(b.dataset.tab));
+
   // --- стан панелей команд ---
   const panels = {};
   for (const cmd of COMMANDS) {
-    const el = $(`.cmd-panel[data-cmd="${cmd}"]`);
+    const el = $(`.cmd-section[data-cmd="${cmd}"]`);
     panels[cmd] = {
       el,
       out: $('.out', el),
@@ -310,18 +456,78 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
     });
   }
 
+  // --- попап підключення ---
+  const connWrap = $('.conn-wrap');
+  const connPopover = $('#conn-popover');
+  const connActionBtn = $('#btn-conn-action');
+  const navEl = $('nav');
+  const mainEl = $('main');
+  // Поля форми - readonly, поки з'єднання активне: редагувати host/port/...
+  // "під живим з'єднанням" однаково нічого не змінює (client уже підключений
+  // зі старими значеннями), а виглядає так, ніби зміна щось робить. Спершу
+  // Disconnect - тоді форма знову редагована. btn-forget/btn-conn-action -
+  // не тут: це самі дії керування з'єднанням, вони мають лишатись активними.
+  const connFields = $$('.conn-popover input');
+  function setConnFieldsDisabled(disabled) {
+    for (const el of connFields) el.disabled = disabled;
+  }
+  function openPopover() { connPopover.hidden = false; }
+  function closePopover() { connPopover.hidden = true; }
+  function togglePopover() { connPopover.hidden = !connPopover.hidden; }
+  // Клік поза попапом закриває його - той самий очікуваний патерн, що й
+  // ▾-меню порталу, інакше форма лишається висіти, поки її не закриють
+  // повторним кліком по тій самій кнопці.
+  document.addEventListener('click', (ev) => {
+    if (connPopover.hidden) return;
+    if (connWrap.contains(ev.target)) return;
+    closePopover();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && !connPopover.hidden) closePopover();
+  });
+
   // --- з'єднання ---
   let client = null;
+  let connState = 'off'; // 'off' | 'connecting' | 'on'
 
   function setConnState(state) {
-    // state: 'off' | 'connecting' | 'on'
+    connState = state;
     const dot = $('#conn-dot');
     const label = $('#conn-label');
     dot.className = state === 'off' ? '' : state;
     label.textContent = { off: 'disconnected', connecting: 'connecting...', on: 'connected' }[state];
-    $('#btn-connect').disabled = state !== 'off';
-    $('#btn-disconnect').disabled = state === 'off';
     for (const cmd of COMMANDS) panels[cmd].refreshBtn.disabled = state !== 'on';
+
+    // Вкладки System/Wi-Fi/EcoFlow/Log мають сенс лише з живими даними -
+    // поки не connected, показувати їх порожніми ("-" у кожній) створює
+    // враження, що сторінка чекає на якесь диво. Замість цього - взагалі
+    // ховаємо nav/main, лишається тільки шапка з попапом підключення.
+    navEl.hidden = state !== 'on';
+    mainEl.hidden = state !== 'on';
+
+    // Поля форми - readonly під активним з'єднанням (розділ вище,
+    // setConnFieldsDisabled): змінити host/port/... на льоту й так нічого не
+    // означає, поки client не переперепідключений - спершу Disconnect.
+    setConnFieldsDisabled(state === 'on');
+
+    // Один видимий контрол на дію: connect/disconnect - та сама кнопка,
+    // підпис і поведінка змінюються з станом, а не дві кнопки, з яких
+    // одна завжди задизейблена. Попап відкривається сам, коли з'єднання
+    // немає (перше завантаження сторінки і будь-яке розірвання з'єднання -
+    // той самий випадок, форма підключення завжди під рукою), і ховається,
+    // коли з'єднання встановлено, звільняючи місце під вкладки.
+    if (state === 'off') {
+      connActionBtn.textContent = 'Connect';
+      connActionBtn.disabled = false;
+      openPopover();
+    } else if (state === 'connecting') {
+      connActionBtn.textContent = 'Connecting...';
+      connActionBtn.disabled = true;
+    } else {
+      connActionBtn.textContent = 'Disconnect';
+      connActionBtn.disabled = false;
+      closePopover();
+    }
   }
 
   function disconnect() {
@@ -397,8 +603,15 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
     });
   }
 
-  $('#btn-connect').addEventListener('click', connect);
-  $('#btn-disconnect').addEventListener('click', disconnect);
+  // Індикатор стану - лише перемикач видимості попапу, незалежно від
+  // з'єднання: розрив з'єднання - дія попапу (кнопка Disconnect нижче), а
+  // не одного кліку по пілюлі - випадковий клік по шапці більше не рве
+  // з'єднання без жодного проміжного кроку.
+  $('#conn-toggle').addEventListener('click', togglePopover);
+  connActionBtn.addEventListener('click', () => {
+    if (connState === 'off') connect();
+    else if (connState === 'on') disconnect();
+  });
   $('#btn-forget').addEventListener('click', () => {
     forgetConn();
     fillForm({});
@@ -415,6 +628,18 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
   }
 
   setConnState('off');
+
+  // Автологін - лише якщо є збережене підключення (host+client-id) І
+  // користувач сам увімкнув чекбокс "Auto-connect on load" минулого разу
+  // (дефолт - вимкнено, fillForm() вище) - тиснемо Connect самі, без
+  // очікування ручного кліку. Попап усе одно щойно відкрився
+  // (setConnState('off') вище) - користувач бачить "Connecting...", а не
+  // миттєвий стрибок одразу у вкладки без пояснення, і на невдалому
+  // конекті попап лишається відкритим із формою, як і зараз.
+  const savedConn = loadConn();
+  if (savedConn.host && savedConn.clientId && savedConn.autoLogin === true) {
+    connect();
+  }
 })();
 </script>
 </body>
