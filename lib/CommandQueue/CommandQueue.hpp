@@ -35,6 +35,8 @@
 #include <ResponseTarget.hpp>
 #include <TLogger.hpp>
 
+#include "JsonApiEntry.hpp"
+
 #if defined(ESP32)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -72,6 +74,15 @@ public:
   // reply == nullptr - вивід іде лише в лог (serial, веб-консоль).
   bool submit(const char* line, std::shared_ptr<ResponseTarget> reply = {});
 
+  // JSON-команда MQTT SAPI-каналу (docs/mqtt-web-handoff.md, фаза 1). entry -
+  // запис реєстру (уже знайдений і провалідований викликачем - resolve()
+  // відпрацював ДО цього виклику), requestId - ехо у відповіді, args/argsSize
+  // - сирі байти Args-структури з того самого resolve(). Той самий контракт
+  // відмови, що й у submit(): false - черга повна, викликач публікує
+  // "busy" сам, повз чергу.
+  bool submitJson(const JsonApiEntry* entry, uint32_t requestId, const uint8_t* args, size_t argsSize,
+                   std::shared_ptr<ResponseTarget> reply);
+
   // Виконує НЕ БІЛЬШЕ однієї команди. Кликати з loop(). true - щось виконали.
   bool runNext();
 
@@ -83,13 +94,28 @@ public:
   uint32_t rejected() const { return _rejected; }
 
 private:
+  enum class Kind : uint8_t { kText, kJson };
+
   struct Slot {
-    char line[kLineSize] = {};
+    Kind kind = Kind::kText;
+    // kText - рядок команди; kJson - сирі байти Args-структури конкретної
+    // команди (memcpy з resolve()). Один буфер на обидва кейси: розмір
+    // Args сьогодні і в осяжному майбутньому - частка kLineSize.
+    char payload[kLineSize] = {};
     std::shared_ptr<ResponseTarget> reply;
+    // kJson-специфічні поля, ігноруються для kText. Кілька зайвих байтів на
+    // джерела, які kJson не використовують, - прийнятна ціна уніфікованої
+    // черги (docs/mqtt-web-handoff.md, "Рекомендована архітектура - фінальна").
+    const JsonApiEntry* jsonEntry = nullptr;
+    uint32_t jsonRequestId = 0;
   };
 
   void lock() const;
   void unlock() const;
+
+  // kJson-гілка runNext(): один атомарний deliver(), повз Journal/
+  // CommandResponse (docs/mqtt-web-handoff.md, "Ключова технічна знахідка").
+  void runJsonNow(const Slot& slot);
 
   Executor _executor;
 

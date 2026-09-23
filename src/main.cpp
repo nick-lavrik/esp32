@@ -676,6 +676,32 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 }
 #endif
 
+#if HAS_MQTT_CLIENT && HAS_WEB_PORTAL
+// Пре-альфа MQTT SAPI-каналу (docs/mqtt-web-handoff.md, фаза 1): один
+// пілотний запис реєстру JSON-команд. Мінімальний статичний набір - без
+// LittleFS/SD (ті прив'язані до інстанс-колбеків WebSystemModule, а не до
+// незалежних static-методів; розширення - окремим кроком, коли з'явиться
+// другий провайдер такого роду).
+static bool jsonApiNoArgs(JsonVariantConst /*args*/, uint8_t* /*rawOut*/, size_t /*rawCapacity*/) { return true; }
+
+static String jsonApiSystemInfoExecute(const uint8_t* /*raw*/) {
+  String out = "{\"chip\":";
+  out += WebSystemModule::chipInfoJson();
+  out += ",\"heap\":";
+  out += WebSystemModule::heapStatsJson();
+  out += ",\"flash\":";
+  out += WebSystemModule::flashStatsJson();
+  out += ",\"nvs\":";
+  out += WebSystemModule::nvsStatsJson();
+  out += ",\"partitions\":";
+  out += WebSystemModule::partitionsJson();
+  out += "}";
+  return out;
+}
+
+static const JsonApiEntry kJsonApiSystemInfo = {"system-info", jsonApiNoArgs, jsonApiSystemInfoExecute};
+#endif
+
 #if LIGHT_SENSOR_PIN > 0
 AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 #endif
@@ -1286,7 +1312,7 @@ void setupEcoflow() {
     payload += "}";
 
     const String topic =
-        "devices/" PIO_PIOENV "/ecoflow/" + String(state.info->serialNumber) + "/grid";
+        "devices/" MQTT_CLIENT_ID "/ecoflow/" + String(state.info->serialNumber) + "/grid";
     mqtt.publish(topic.c_str(), payload.c_str(), /*retained=*/true);
     #endif
   });
@@ -1970,7 +1996,31 @@ void setupMqttClient() {
   });
   #endif
 
-  // LWT_TOPIC "mykola-lavryk:devices/${PIOENV}/status"
+#if HAS_WEB_PORTAL
+  // MQTT SAPI-канал, фаза 1 (docs/mqtt-web-handoff.md): devices/<client-id>/
+  // api/<cmd> - той самий листовий сегмент, що й у devices/<client-id>/status,
+  // /ecoflow/.../grid, /light-sensor - зовнішній моніторинг розрізняє
+  // призначення без парсингу payload. Пре-альфа: один пілотний cmd.
+  mqtt.addJsonListener("devices/" MQTT_CLIENT_ID "/api/system-info",
+                       [](const char* topic, JsonDocument& doc) {
+    (void)topic;
+    const uint32_t id = doc["id"] | 0;
+    uint8_t args[CommandQueue::kLineSize];
+    if (!kJsonApiSystemInfo.resolve(doc["args"], args, sizeof(args))) {
+      mqtt.publish("devices/" MQTT_CLIENT_ID "/api/system-info/reply",
+                   (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"bad args\"}").c_str());
+      return;
+    }
+    auto reply = std::make_shared<MqttReplyTarget>(mqtt, "devices/" MQTT_CLIENT_ID "/api/system-info/reply");
+    if (!commandQueue.submitJson(&kJsonApiSystemInfo, id, args, sizeof(args), reply)) {
+      // Явна відмова, а не тиша - той самий контракт, що й для command/.
+      mqtt.publish("devices/" MQTT_CLIENT_ID "/api/system-info/reply",
+                   (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"busy\"}").c_str());
+    }
+  });
+#endif
+
+  // LWT_TOPIC "mykola-lavryk:devices/mqtt-${PIOENV}/status"
   mqtt.addStringListener("devices/+/status", [](const char* topic, const char* payload) {
     char t[9] = ""; ntp.ftime("%H:%M:%S", t, sizeof(t));
     _logger.info("%s %-45.45s LWT:%s", t, topic, payload);
@@ -1981,10 +2031,10 @@ void setupMqttClient() {
 #if LIGHT_SENSOR_PIN > 0
   // publish mqtt
   lightSensor.addListener([]() {
-      _logger.debug("devices/" PIO_PIOENV "/light-sensor => %d", lightSensor.value());
-      mqtt.publishNumber<int>("devices/" PIO_PIOENV "/light-sensor", (int)lightSensor.value());
+      _logger.debug("devices/" MQTT_CLIENT_ID "/light-sensor => %d", lightSensor.value());
+      mqtt.publishNumber<int>("devices/" MQTT_CLIENT_ID "/light-sensor", (int)lightSensor.value());
   });
-  _logger.info("devices/" PIO_PIOENV "/light-sensor MQTT done.");
+  _logger.info("devices/" MQTT_CLIENT_ID "/light-sensor MQTT done.");
 #else
   // subscribe on mqtt
   mqtt.addNumberListener<int>(
@@ -5622,14 +5672,19 @@ void loop() {
   commandHandler.update();
   // Один виконавець на всі джерела, не більше однієї команди за ітерацію:
   // команда може блокувати на десятки секунд (sdbench, sdmap, scan).
-  commandQueue.runNext();
+  // webPortal.loop() гейтиться тим самим runNext(): якщо цієї ітерації вже
+  // виконалась команда, задача порталу (скан ефіру, запис NVS) чекає
+  // наступну ітерацію - інакше вони підсумовуються в одній ітерації й
+  // наближають поріг Watchdog (docs/mqtt-web-handoff.md, "Точка F").
+  if (!commandQueue.runNext()) {
 #if HAS_WEB_PORTAL
-  // Тут виконуються задачі, поставлені з HTTP: скан ефіру, connect, запис у
-  // NVS. У таску сервера їм не місце - вони блокують на секунди (див.
-  // WebJobQueue.hpp). Serial-команди з веб-консолі сюди більше не ходять - з
-  // етапу 6 вони йдуть у CommandQueue разом з рештою джерел.
-  webPortal.loop();
+    // Тут виконуються задачі, поставлені з HTTP: скан ефіру, connect, запис у
+    // NVS. У таску сервера їм не місце - вони блокують на секунди (див.
+    // WebJobQueue.hpp). Serial-команди з веб-консолі сюди більше не ходять -
+    // з етапу 6 вони йдуть у CommandQueue разом з рештою джерел.
+    webPortal.loop();
 #endif
+  }
 #if HAS_DINO_GAME
   if (showClock && !dinoOn && !dinoTestMode && !testGfxActive) drawTime();
 #else

@@ -35,8 +35,9 @@ bool CommandQueue::submit(const char* line, std::shared_ptr<ResponseTarget> repl
   }
 
   Slot& slot = _slots[_head];
-  strncpy(slot.line, line, kLineSize - 1);
-  slot.line[kLineSize - 1] = '\0';
+  slot.kind = Kind::kText;
+  strncpy(slot.payload, line, kLineSize - 1);
+  slot.payload[kLineSize - 1] = '\0';
   slot.reply = std::move(reply);
 
   _head = (_head + 1) % kSlots;
@@ -45,9 +46,38 @@ bool CommandQueue::submit(const char* line, std::shared_ptr<ResponseTarget> repl
   return true;
 }
 
+bool CommandQueue::submitJson(const JsonApiEntry* entry, uint32_t requestId, const uint8_t* args, size_t argsSize,
+                               std::shared_ptr<ResponseTarget> reply) {
+  if (entry == nullptr) return false;
+  if (argsSize > kLineSize) {
+    ++_rejected;
+    return false;
+  }
+
+  lock();
+  if (_count >= kSlots) {
+    ++_rejected;
+    unlock();
+    return false;
+  }
+
+  Slot& slot = _slots[_head];
+  slot.kind = Kind::kJson;
+  if (args != nullptr && argsSize > 0) {
+    memcpy(slot.payload, args, argsSize);
+  }
+  slot.reply = std::move(reply);
+  slot.jsonEntry = entry;
+  slot.jsonRequestId = requestId;
+
+  _head = (_head + 1) % kSlots;
+  ++_count;
+  unlock();
+  return true;
+}
+
 bool CommandQueue::runNext() {
-  char line[kLineSize];
-  std::shared_ptr<ResponseTarget> reply;
+  Slot slot;
 
   lock();
   if (_count == 0) {
@@ -55,17 +85,34 @@ bool CommandQueue::runNext() {
     return false;
   }
   // Копіюємо під замком і одразу звільняємо слот: сама команда виконується
-  // довго (sdbench - десятки секунд), а submit() з таска сервера не має на неї
-  // чекати.
-  memcpy(line, _slots[_tail].line, sizeof(line));
-  reply = std::move(_slots[_tail].reply);
+  // довго (sdbench - десятки секунд), а submit()/submitJson() з таска сервера
+  // не мають на неї чекати.
+  slot = _slots[_tail];
   _slots[_tail] = Slot{};
   _tail = (_tail + 1) % kSlots;
   --_count;
   unlock();
 
-  runNow(line, std::move(reply));
+  if (slot.kind == Kind::kJson) {
+    runJsonNow(slot);
+  } else {
+    runNow(slot.payload, std::move(slot.reply));
+  }
   return true;
+}
+
+void CommandQueue::runJsonNow(const Slot& slot) {
+  const uint32_t startedMs = millis();
+
+  String body = "{\"id\":" + String(slot.jsonRequestId) + ",\"ok\":true,\"data\":";
+  body += slot.jsonEntry->execute(reinterpret_cast<const uint8_t*>(slot.payload));
+  body += "}";
+
+  if (slot.reply) {
+    slot.reply->deliver(body.c_str(), body.length(), true);
+  }
+
+  _doneLogger.info("< json %s (%u ms)", slot.jsonEntry->name, (unsigned)(millis() - startedMs));
 }
 
 void CommandQueue::runNow(const char* line, std::shared_ptr<ResponseTarget> reply) {
