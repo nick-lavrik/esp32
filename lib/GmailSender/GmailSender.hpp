@@ -49,8 +49,23 @@
 #define GMAIL_SMTP_DEBUG 0
 #endif
 
-#if __has_include(<ReadyMail.h>)
-#define HAS_GMAIL_SENDER 1
+// HAS_GMAIL_SENDER - явний прапорець з src-<env>/environment.h (розділ 2),
+// не виведений з __has_include(): той самий принцип, що й HAS_WEB_PORTAL/
+// HAS_PING (CLAUDE.md, src/ping.h) - компілятор і IDE-індексатор мають
+// бачити ОДНЕ й те саме значення.
+#ifndef HAS_GMAIL_SENDER
+#error "HAS_GMAIL_SENDER не визначено - додай #define HAS_GMAIL_SENDER 0/1 у environment.h цього env"
+#endif
+
+// Наявність бібліотеки все одно перевіряється - якщо хтось виставить
+// HAS_GMAIL_SENDER=1 без mobizt/ReadyMail у lib_deps (чи навпаки забуде
+// прибрати прапорець при вимкненні lib_dep), збірка провалюється явно
+// (#error), а не мовчки згасить пошту в рантаймі.
+#if HAS_GMAIL_SENDER && !__has_include(<ReadyMail.h>)
+#error "HAS_GMAIL_SENDER=1, але mobizt/ReadyMail відсутній у lib_deps цього env"
+#endif
+
+#if HAS_GMAIL_SENDER
 
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
@@ -139,6 +154,4 @@ private:
 
   const TLogger _logger{"gmail"};
 };
-#else
-#define HAS_GMAIL_SENDER 0
-#endif
+#endif  // HAS_GMAIL_SENDER

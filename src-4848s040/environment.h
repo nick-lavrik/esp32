@@ -41,6 +41,12 @@
 // значення розійдеться з наявністю dvarrel/ESPping у lib_deps нижче.
 #define HAS_PING 1
 
+// Gmail (lib/GmailSender/GmailSender.hpp, команда 'smtp-probe' і т.п.).
+// Явний прапорець, як HAS_PING/HAS_WEB_PORTAL/HAS_ECOFLOW_CLIENT вище -
+// lib/GmailSender/GmailSender.hpp провалить збірку #error, якщо значення
+// розійдеться з наявністю mobizt/ReadyMail у lib_deps нижче.
+#define HAS_GMAIL_SENDER 1
+
 // ============================================================
 // 3. Системні піни та налаштування
 // ============================================================
