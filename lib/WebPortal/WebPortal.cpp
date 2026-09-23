@@ -32,6 +32,8 @@ void WebPortal::_registerCoreRoutes() {
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
     String json = "{\"env\":";
     json += webjson::quote(PIO_PIOENV);
+    json += ",\"revision\":";
+    json += webjson::quote(GIT_REVISION);
     json += ",\"uptimeMs\":";
     json += millis();
     json += ",\"freeHeap\":";

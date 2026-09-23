@@ -1174,6 +1174,7 @@ function renderSystemStatus(s) {
   if (!box) return;
   box.innerHTML = [
     ["Firmware env", s.env],
+    ["Revision", s.revision],
     ["Uptime", hhmmss(s.uptimeMs)],
     ["Free heap", Math.round(s.freeHeap / 1024) + " KB"],
     ["Portal auth", s.auth ? "enabled" : "disabled"],
@@ -3324,10 +3325,14 @@ async function pollStatus() {
     // Вшита сторінка однакова для всіх плат, тому назву плати ставимо з
     // відповіді, а не з build-time шаблону - інакше довелось би тримати
     // окремий gzip-вміст на кожен env. h1 і title - той самий рядок, обидва
-    // за одним читанням.
-    if (s.env && document.title !== "ESP32 Portal - " + s.env) {
-      document.title = "ESP32 Portal - " + s.env;
-      $("#app-title").textContent = "ESP32 Portal - " + s.env;
+    // за одним читанням. Ревізія (короткий git-sha прошивки, GIT_REVISION) -
+    // туди ж: сторінка теж їде з того самого коміту (tools/gen_web_assets.py
+    // вшиває її в ту саму збірку), тож розбіжність тут не буває взагалі -
+    // рядок лише підтверджує, з якого коміту зібрана прошивка на екрані.
+    const title = "ESP32 Portal - " + s.env + " @ " + s.revision;
+    if (s.env && document.title !== title) {
+      document.title = title;
+      $("#app-title").textContent = title;
     }
     renderSystemStatus(s);
     // Вкладка з'являється сама, коли розділ реально є в прошивці - на платах

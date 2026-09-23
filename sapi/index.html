@@ -90,6 +90,7 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
 
 <header>
   <h1>ESP32 SAPI</h1>
+  <span id="sapi-revision" class="muted"></span>
   <span class="spacer"></span>
   <span id="device-state" class="muted"></span>
   <span id="conn-state"><span id="conn-dot"></span><span id="conn-label">disconnected</span></span>
@@ -151,6 +152,7 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
 
 </main>
 
+<script src="revision.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js"></script>
 <script src="render.js"></script>
 <script>
@@ -403,6 +405,14 @@ details.raw pre { margin: 6px 0 0; font-size: 12px; line-height: 1.45; overflow-
     log('saved connection forgotten');
   });
   $('#btn-clear-log').addEventListener('click', () => { $('#log').textContent = ''; });
+
+  // Короткий git-sha, з яким зібрана ЦЯ сторінка (revision.js, той самий
+  // коміт, що й прошивка). Порівняння з живим "revision" пристрою (discovery,
+  // фаза 2) тут ще нема - discovery-канал на платі не реалізований, це лише
+  // видима мітка білда SAPI.
+  if (typeof SAPI_EXPECTED_REVISION !== 'undefined') {
+    $('#sapi-revision').textContent = 'build ' + SAPI_EXPECTED_REVISION;
+  }
 
   setConnState('off');
 })();
