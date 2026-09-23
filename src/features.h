@@ -7,21 +7,23 @@
 // повертає, без окремого Python-генератора.
 //
 // Свідомо НЕ включає прапорці, що й досі самі себе визначають через
-// __has_include() у власному бібліотечному заголовку (HAS_SCREEN_MIRROR -
-// src/Display.h): для нього "картина не губиться" - визначається в ОДНОМУ
-// місці, не в 8 environment.h, тож проблема, яку вирішує цей каталог, до
-// нього не застосовна. Показати його тут теж було б хитким: макрос має бути
-// визначений ДО цього заголовка, інакше мовчки "0" (undefined -> 0 -
-// навмисно безпечно для #if нижче, але оманливо, якщо реальний стан
-// платформи саме "не визначено ще").
-// **HAS_PING, HAS_GMAIL_SENDER, HAS_MQTT_CLIENT і HAS_CONSOLE_MQTT - вже
-// переведені на явний прапорець** (`src-<env>/environment.h`, розділ 2 +
-// build-fail у `src/ping.h`/`lib/GmailSender/GmailSender.hpp`/
+// __has_include() у власному бібліотечному заголовку - на цей момент таких
+// не лишилось (HAS_PING, HAS_GMAIL_SENDER, HAS_MQTT_CLIENT і
+// HAS_CONSOLE_MQTT переведені на явний прапорець у `src-<env>/environment.h`,
+// розділ 2, + build-fail у `src/ping.h`/`lib/GmailSender/GmailSender.hpp`/
 // `lib/MqttClient/MqttClient.hpp`/`lib/ConsoleMqtt/ConsoleMqtt.hpp`, якщо
-// значення розійдеться з наявністю бібліотеки/платформи) - рішення
-// переносити `HAS_SCREEN_MIRROR` на той самий патерн - окреме, ще не
-// прийняте (інша природа: похідний від `DISPLAY_SPLIT_COUNT`/
-// `SPRITE_COLOR_DEPTH`, не від наявності бібліотеки).
+// значення розійдеться з наявністю бібліотеки/платформи). Абзац лишається на
+// випадок, якщо такий прапорець з'явиться знову: показати його тут було б
+// хитким - макрос має бути визначений ДО цього заголовка, інакше мовчки "0"
+// (undefined -> 0 - навмисно безпечно для #if нижче, але оманливо, якщо
+// реальний стан платформи саме "не визначено ще").
+//
+// HAS_SCREEN_MIRROR - інша категорія: не self-detecting і не пряме поле
+// environment.h, а похідне з DISPLAY_SPLIT_COUNT/SPRITE_COLOR_DEPTH (розділ 4
+// environment.h) - той самий підхід, що BOARD_HAS_LIGHT_SENSOR нижче.
+// Обчислення перенесено сюди з src/Display.h (де воно раніше й жило,
+// помилково описане в цьому коментарі як self-detecting) - Display.h тепер
+// лише підключає цей файл.
 //
 // -include src-<env>/environment.h (platformio.ini) - глобальний build_flag,
 // діє на ВЕСЬ TU з першого рядка, тому порядок #include цього файлу в
@@ -85,6 +87,25 @@
 #define BOARD_HAS_LIGHT_SENSOR 0
 #endif
 
+// HAS_SCREEN_MIRROR - похідний прапорець (той самий підхід, що
+// BOARD_HAS_LIGHT_SENSOR вище): дзеркало екрана у веб-порталі (lib/ScreenMirror)
+// можливе лише там, де кадр збирається у спрайті RGB565 - без спрайта
+// (esp32-c3, DISPLAY_SPLIT_COUNT=0) буфера немає взагалі, а 1bpp-гілка
+// (SSD1306 на esp8266) не має що показати браузеру. #ifndef-дефолти нижче -
+// той самий трюк undefined -> 0, що й вище, хоча на практиці обидва макроси
+// вже задані в кожному environment.h, розділ 4.
+#ifndef DISPLAY_SPLIT_COUNT
+#define DISPLAY_SPLIT_COUNT 0
+#endif
+#ifndef SPRITE_COLOR_DEPTH
+#define SPRITE_COLOR_DEPTH 0
+#endif
+#if DISPLAY_SPLIT_COUNT > 0 && SPRITE_COLOR_DEPTH == 16
+#define HAS_SCREEN_MIRROR 1
+#else
+#define HAS_SCREEN_MIRROR 0
+#endif
+
 #define FEATURE_LIST(X) \
   X(BOARD_HAS_DISPLAY)  \
   X(BOARD_HAS_TOUCHSCREEN) \
@@ -98,7 +119,8 @@
   X(HAS_PING)            \
   X(HAS_GMAIL_SENDER)    \
   X(HAS_MQTT_CLIENT)     \
-  X(HAS_CONSOLE_MQTT)
+  X(HAS_CONSOLE_MQTT)    \
+  X(HAS_SCREEN_MIRROR)
 
 namespace features {
 
@@ -110,7 +132,7 @@ struct Entry {
 // Назва рядка - буквальне ім'я макроса (не перейменований варіант): друге
 // джерело назви того самого прапорця розходиться саме так, як розійшлись
 // "OPEN"/"open" у encryptionName() (CLAUDE.md, DRY). Дрібний, fixed-size
-// масив (8 записів) - PROGMEM тут не потрібен, розмір на порядки менший за
+// масив (13 записів) - PROGMEM тут не потрібен, розмір на порядки менший за
 // поріг, коли розміщення в RAM/DRAM (esp8266) взагалі помітне.
 #define FEATURE_ENTRY(flag) {#flag, static_cast<bool>(flag)},
 static const Entry kAll[] = {FEATURE_LIST(FEATURE_ENTRY)};

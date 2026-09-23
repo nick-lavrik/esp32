@@ -516,7 +516,7 @@ WebSystemModule webSystemModule(littleFsUsage);
 #if HAS_SCREEN_MIRROR
 // Дзеркало екрана. Плата без спрайта кадру (esp32-c3) або з 1bpp-панеллю
 // (esp8266) віддавати браузеру нічого не може - там розділу просто немає
-// (див. HAS_SCREEN_MIRROR у src/Display.h).
+// (див. HAS_SCREEN_MIRROR у src/features.h).
 WebScreenModule webScreenModule;
 #endif
 #if HAS_MQTT_CLIENT

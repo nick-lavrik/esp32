@@ -714,7 +714,7 @@ TFT_eSPI і Arduino_GFX — рідний little-endian), тому він не п
 дозволяє не мати: немає запиту - немає знімка, немає ні роботи, ні виділення
 пам'яті. Backpressure тут безкоштовний саме тому, що ініціатива в клієнта.
 
-**Де розділу немає.** `HAS_SCREEN_MIRROR` виводиться в `src/Display.h` з
+**Де розділу немає.** `HAS_SCREEN_MIRROR` виводиться в `src/features.h` з
 `DISPLAY_SPLIT_COUNT > 0 && SPRITE_COLOR_DEPTH == 16`, а не задається в
 `build_flags`: інакше його довелось би дублювати в кожному env. На `esp32-c3`
 спрайта немає взагалі (там і фізичного дисплея немає — `BOARD_HAS_DISPLAY=0`);

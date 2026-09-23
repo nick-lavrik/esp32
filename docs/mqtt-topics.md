@@ -73,15 +73,13 @@ Allowlist, не дзеркало всіх serial-команд:
 - `board` — рядок з рукописної мапи `BOARD_XXX` → назва (`src/main.cpp`,
   біля `registerJsonApiEntry()`), не `platformio.ini`'s `board=`.
 - `revision` — `GIT_REVISION` (короткий git-sha, `tools/pio_sapi_revision.py`).
-- `features` — масив АКТИВНИХ прапорців з `src/features.h` (каталог усіх
-  `BOARD_HAS_*`/`HAS_*`, що будь-коли з'являються в «Можливості та фічі»
-  (розділ 2) будь-якого `environment.h`), рядок — буквальне ім'я макроса
-  (`"BOARD_HAS_DISPLAY"`, не перейменований варіант). **Свідомо не включає**
-  прапорці, що самі себе визначають через `__has_include` у власних
-  бібліотечних заголовках (`HAS_MQTT_CLIENT`, `HAS_CONSOLE_MQTT`,
-  `HAS_GMAIL_SENDER`, `HAS_SCREEN_MIRROR`, `HAS_PING_LIB`) — вони вже мають
-  єдине джерело визначення (не розкидані по 8 `environment.h`), тож
-  проблема, яку каталог вирішує, до них не застосовна.
+- `features` — масив АКТИВНИХ прапорців з `src/features.h` (повний каталог
+  усіх `BOARD_HAS_*`/`HAS_*`, включно з похідними `BOARD_HAS_LIGHT_SENSOR`/
+  `HAS_SCREEN_MIRROR` і колишніми self-detecting `HAS_MQTT_CLIENT`/
+  `HAS_CONSOLE_MQTT`/`HAS_GMAIL_SENDER`/`HAS_PING`, усі вже переведені на
+  явний прапорець у `environment.h` або похідне обчислення в `features.h`),
+  рядок — буквальне ім'я макроса (`"BOARD_HAS_DISPLAY"`, не перейменований
+  варіант).
 - Публікується з `mqtt.onConnect()` — тому **недоступний на ESP8266**:
   PubSubClient-гілка `MqttClient::connect()` не викликає
   `_connected_callback` узагалі (лише PicoMQTT-гілка, `MqttClient.cpp:

@@ -13,17 +13,11 @@
 // Вибір відбувається через -DBOARD_4848S040 у build_flags конкретного env
 // (TftInstance.h), прикладний код нижче однаковий для обох плат.
 
-// Дзеркало екрана у веб-порталі (lib/ScreenMirror) можливе лише там, де кадр
-// збирається у спрайті RGB565: без спрайта (esp32-c3, DISPLAY_SPLIT_COUNT=0)
-// буфера немає взагалі, а 1bpp-гілка (SSD1306 на esp8266) не має що показати
-// браузеру. Значення виводиться тут, а не задається в build_flags: інакше
-// його довелось би дублювати в кожному env.
-#if defined(DISPLAY_SPLIT_COUNT) && DISPLAY_SPLIT_COUNT > 0 && defined(SPRITE_COLOR_DEPTH) && \
-    SPRITE_COLOR_DEPTH == 16
-#define HAS_SCREEN_MIRROR 1
-#else
-#define HAS_SCREEN_MIRROR 0
-#endif
+// HAS_SCREEN_MIRROR (дзеркало екрана у веб-порталі, lib/ScreenMirror) -
+// похідний прапорець з DISPLAY_SPLIT_COUNT/SPRITE_COLOR_DEPTH, тепер
+// обчислюється в одному місці - src/features.h (поруч із BOARD_HAS_LIGHT_SENSOR,
+// той самий підхід), а не тут.
+#include "features.h"
 
 class Display {
 public:
