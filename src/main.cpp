@@ -195,6 +195,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #endif
 #endif
 
+#include "features.h"
 #include "BackgroundImages.hpp"
 #include "TestGfx.hpp"
 #include "SizeFormatter.hpp"
@@ -758,10 +759,10 @@ static void registerJsonApiEntry(const JsonApiEntry& entry) {
 #endif
 
 #if HAS_MQTT_CLIENT && !ESP8266
-// Discovery, фаза 2 (docs/mqtt-web-handoff.md, розділ "Фаза 2"). Наразі лише
-// board+revision - features/commands свідомо не додані цим кроком
-// (docs/tech_debt.md, X-macro-каталог фіч і накопичення реєстру команд -
-// окремий наступний крок, не змішувати з невеликим retained-мірором тут).
+// Discovery, фаза 2 (docs/mqtt-web-handoff.md, розділ "Фаза 2"). Наразі
+// board+revision+features - commands свідомо не додані цим кроком (реєстр
+// команд у registerJsonApiEntry() ще не накопичує імена, окремий наступний
+// крок, не змішувати з цим).
 //
 // Не під HAS_WEB_PORTAL (на відміну від SAPI JSON API вище): board і
 // revision - build-time константи, не дані з WebSystemModule/WebWifiModule,
@@ -799,6 +800,24 @@ static constexpr const char* kDiscoveryBoard = "ttgo-t1";
 #error "Невідома плата: додай запис kDiscoveryBoard у src/main.cpp"
 #endif
 
+// features - пряме дзеркало активних BOARD_HAS_*/HAS_* з src/features.h
+// (каталог, не окрема таблиця перейменувань - той самий принцип, що вже
+// застосований до kDiscoveryBoard вище).
+static String discoveryFeaturesJson() {
+  String out = "[";
+  bool first = true;
+  for (size_t i = 0; i < features::kCount; ++i) {
+    if (!features::kAll[i].active) continue;
+    if (!first) out += ",";
+    out += "\"";
+    out += features::kAll[i].name;
+    out += "\"";
+    first = false;
+  }
+  out += "]";
+  return out;
+}
+
 // Retained, republish на КОЖЕН (пере)конект (onConnect() у setupMqttClient),
 // не одноразово при старті - інакше втрата єдиного publish лишає retained-
 // слот порожнім/застарілим без жодного видимого симптома
@@ -809,12 +828,14 @@ static void publishDiscovery() {
   payload += kDiscoveryBoard;
   payload += "\",\"revision\":\"";
   payload += GIT_REVISION;
-  payload += "\"}";
+  payload += "\",\"features\":";
+  payload += discoveryFeaturesJson();
+  payload += "}";
   mqtt.publish(topic.c_str(), payload.c_str(), /*retained=*/true);
 }
 #endif
 
-#if LIGHT_SENSOR_PIN > 0
+#if HAS_LIGHT_SENSOR
 AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 #endif
 
@@ -2129,7 +2150,7 @@ void setupMqttClient() {
 
   dispatcher.addListener(EVT_REBOOT, [](IEvent& e) { mqtt.disconnect("reboot"); });
 
-#if LIGHT_SENSOR_PIN > 0
+#if HAS_LIGHT_SENSOR
   // publish mqtt
   lightSensor.addListener([]() {
       _logger.debug("devices/" MQTT_CLIENT_ID "/light-sensor => %d", lightSensor.value());
@@ -4387,7 +4408,7 @@ void setupSerialCommander() {
     if (args.length() == 0) {
       Logger::info("use: brightness 0-100|auto");
     } else if (args.equalsIgnoreCase("auto")) {
-#if LIGHT_SENSOR_PIN > 0
+#if HAS_LIGHT_SENSOR
       display_brightness(lightSensor.value(), true);
       Logger::info(" isAutoBrighness = %s", isAutoBrightness ? "true" : "false");
 #else
@@ -5017,7 +5038,7 @@ void setupWebPortal() {
 void setupTaskCommander() {}
 
 void setupLightSensor() {
-#if LIGHT_SENSOR_PIN > 0
+#if HAS_LIGHT_SENSOR
   lightSensor.begin();
   scheduler.addCronTask(0, []() { lightSensor.update(); });
 
@@ -5175,7 +5196,7 @@ void drawSystemInfo() {
   display.setCursor(left, top + row++ * (space + display.fontHeight()));
   display.print(buf);
 
-  #if LIGHT_SENSOR_PIN > 0
+  #if HAS_LIGHT_SENSOR
     // display.setTextSize(1);
     // display.setTextColor(TFT_DARKGREY);
     // display.setCursor(10, display.height() - 1 * (5 + display.fontHeight()));

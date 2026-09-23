@@ -65,15 +65,23 @@ Allowlist, не дзеркало всіх serial-команд:
 ## 3. Фаза 2 — discovery
 
 `devices/{client-id}/discovery`, retained, republish на кожен
-`onConnect()`. **Реалізовано частково** — payload зараз лише
-`{"board","revision"}`; поля `features`/`commands` — заплановані, ще не
-додані (окремий крок, `src/features.h` X-macro каталог і накопичення
-реєстру команд у `registerJsonApiEntry()`). Дизайн —
-`docs/mqtt-web-handoff.md`, розділ «Фаза 2».
+`onConnect()`. **Реалізовано частково** — payload зараз
+`{"board","revision","features"}`; поле `commands` — заплановане, ще не
+додане (окремий крок — накопичення реєстру в `registerJsonApiEntry()`).
+Дизайн — `docs/mqtt-web-handoff.md`, розділ «Фаза 2».
 
 - `board` — рядок з рукописної мапи `BOARD_XXX` → назва (`src/main.cpp`,
   біля `registerJsonApiEntry()`), не `platformio.ini`'s `board=`.
 - `revision` — `GIT_REVISION` (короткий git-sha, `tools/pio_sapi_revision.py`).
+- `features` — масив АКТИВНИХ прапорців з `src/features.h` (каталог усіх
+  `BOARD_HAS_*`/`HAS_*`, що будь-коли з'являються в «Можливості та фічі»
+  (розділ 2) будь-якого `environment.h`), рядок — буквальне ім'я макроса
+  (`"BOARD_HAS_DISPLAY"`, не перейменований варіант). **Свідомо не включає**
+  прапорці, що самі себе визначають через `__has_include` у власних
+  бібліотечних заголовках (`HAS_MQTT_CLIENT`, `HAS_CONSOLE_MQTT`,
+  `HAS_GMAIL_SENDER`, `HAS_SCREEN_MIRROR`, `HAS_PING_LIB`) — вони вже мають
+  єдине джерело визначення (не розкидані по 8 `environment.h`), тож
+  проблема, яку каталог вирішує, до них не застосовна.
 - Публікується з `mqtt.onConnect()` — тому **недоступний на ESP8266**:
   PubSubClient-гілка `MqttClient::connect()` не викликає
   `_connected_callback` узагалі (лише PicoMQTT-гілка, `MqttClient.cpp:
