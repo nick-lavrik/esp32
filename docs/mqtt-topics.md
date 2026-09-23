@@ -65,9 +65,8 @@ Allowlist, не дзеркало всіх serial-команд:
 ## 3. Фаза 2 — discovery
 
 `devices/{client-id}/discovery`, retained, republish на кожен
-`onConnect()`. **Реалізовано частково** — payload зараз
-`{"board","revision","features"}`; поле `commands` — заплановане, ще не
-додане (окремий крок — накопичення реєстру в `registerJsonApiEntry()`).
+`onConnect()`. **Реалізовано повністю** — payload
+`{"board","revision","features","commands"}`.
 Дизайн — `docs/mqtt-web-handoff.md`, розділ «Фаза 2».
 
 - `board` — рядок з рукописної мапи `BOARD_XXX` → назва (`src/main.cpp`,
@@ -80,11 +79,18 @@ Allowlist, не дзеркало всіх serial-команд:
   явний прапорець у `environment.h` або похідне обчислення в `features.h`),
   рядок — буквальне ім'я макроса (`"BOARD_HAS_DISPLAY"`, не перейменований
   варіант).
+- `commands` — масив імен зареєстрованих JSON API команд (`"system-info"`,
+  `"wifi-status"`, `"ecoflow-status"` — залежно від env), джерело —
+  `registerJsonApiEntry()` (`src/main.cpp`): той самий виклик, що підписує
+  `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий fixed-size
+  масив (`kJsonApiCommandNames`, без heap). На платі без порталу — `[]`
+  (масив і сам накопичувач гейтовані `!ESP8266`, поле лишається постійним
+  за формою, не зникає з payload).
 - Публікується з `mqtt.onConnect()` — тому **недоступний на ESP8266**:
   PubSubClient-гілка `MqttClient::connect()` не викликає
   `_connected_callback` узагалі (лише PicoMQTT-гілка, `MqttClient.cpp:
   282-294`), не блокер (на ESP8266 і так немає `HAS_WEB_PORTAL`, JSON API
-  команд для discovery description поки нема).
+  команд немає взагалі).
 - **Не залежить від `HAS_WEB_PORTAL`** (на відміну від JSON API команд
   розділу 1) — `board`/`revision` є build-time константами, не даними з
   `WebSystemModule`/`WebWifiModule`.

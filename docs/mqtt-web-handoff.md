@@ -1656,12 +1656,11 @@ top-level поля клієнта спільні через один `buildStatu
 Кожна команда реєструється одним викликом `registerJsonApiEntry(kJsonApi...)`
 у `setupMqttClient()`.
 
-7. **Discovery фази 2 — почато, частково реалізовано (сесія 2026-09-23,
-   продовження).** `devices/<client-id>/discovery`: `board` (рукописна мапа
-   `BOARD_XXX` → рядок, `src/main.cpp`) + `revision` (`GIT_REVISION`) +
-   `features`, retained, republish на кожен `mqtt.onConnect()`. Зібрано на
-   всіх 8 середовищ. **Свідомо без `commands`** цим кроком — окремий
-   наступний крок (накопичення реєстру команд у `registerJsonApiEntry()`).
+7. **Discovery фази 2 — реалізовано (сесія 2026-09-23, продовження).**
+   `devices/<client-id>/discovery`: `board` (рукописна мапа `BOARD_XXX` →
+   рядок, `src/main.cpp`) + `revision` (`GIT_REVISION`) + `features`,
+   retained, republish на кожен `mqtt.onConnect()`. Зібрано на всіх 8
+   середовищ. (`commands` додано пізніше цим самим записом, нижче.)
    **Виправлено після рев'ю**: перша версія хибно гейтилась
    `#if HAS_WEB_PORTAL` (скопійовано за звичкою з сусіднього SAPI-коду) —
    `board`/`revision`/`features` не залежать від порталу взагалі, гейт
@@ -1726,6 +1725,26 @@ top-level поля клієнта спільні через один `buildStatu
    замість двох потенційних), `Display.h` тепер лише підключає `features.h`.
    Усі self-detecting `__has_include()`-прапорці на цьому закрито — `src/features.h`
    тепер повний каталог без винятків.
+
+   **`commands` у discovery-payload — реалізовано.** Джерело — сама
+   `registerJsonApiEntry()` (`src/main.cpp`), як і планувалось у розділі
+   «`commands` у discovery-payload…» вище: той самий виклик, що підписує
+   `mqtt.addJsonListener(...)`, тепер кладе `entry.name` у малий fixed-size
+   масив `kJsonApiCommandNames` (без heap, той самий принцип, що й
+   `features::kAll`). Масив-накопичувач визначено ПОЗА `HAS_WEB_PORTAL`-гейтом
+   (`#if HAS_MQTT_CLIENT && !ESP8266`, той самий гейт, що й навколо
+   `publishDiscovery()`) — інакше `publishDiscovery()` (яка сама не залежить
+   від `HAS_WEB_PORTAL`) не мала б звідки читати `commands` на гіпотетичній
+   платі без порталу. Гейт звужено з голого `HAS_MQTT_CLIENT` до
+   `&& !ESP8266` після того, як збірка `esp8266` показала `-Wunused-function`
+   на `registerJsonApiCommandName()`: там `HAS_WEB_PORTAL=0`, отже й писати
+   в масив, і читати з нього нема кому. На платі без порталу (сьогодні —
+   лише `esp8266`, де discovery і так не компілюється) `commands` був би `[]`,
+   не відсутнім полем. Payload тепер повний:
+   `{"board","revision","features","commands"}`. Зібрано на `esp32-c6`
+   (3 команди: `system-info`/`wifi-status`/`ecoflow-status`), `esp32-c3`,
+   `esp8266` (порожній масив, без warning) — без нових warning на жодному.
+   **Не перевірено на живій платі.**
 8. ~~Паралельно (не блокує 1-7, але блокує прибирання порталу): узгодити з
    rpi5-інфраструктурою модель видачі MQTT-credentials браузеру~~ —
    **storage-шар зроблено й перевірено наживо на rpi5 (2026-09-23).**

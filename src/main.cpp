@@ -677,6 +677,28 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 }
 #endif
 
+#if HAS_MQTT_CLIENT && !ESP8266
+// Реєстр імен зареєстрованих JSON API команд - джерело для discovery.commands
+// (нижче, поза HAS_WEB_PORTAL). Накопичувач лишається видимим НЕЗАЛЕЖНО від
+// HAS_WEB_PORTAL, хоча заповнює його лише registerJsonApiEntry() (HAS_WEB_PORTAL-
+// гейт нижче): сам publishDiscovery() під HAS_WEB_PORTAL не стоїть (той самий
+// принцип, що й для board/revision - коментар нижче), тож масив має бути
+// визначений тут, а не всередині гейтованого блоку. Гейт !ESP8266 - той самий,
+// що й навколо publishDiscovery(): на esp8266 HAS_WEB_PORTAL=0 і discovery
+// взагалі не компілюється, тож ні писати, ні читати цей масив нема кому -
+// без цього гейта registerJsonApiCommandName() лишався б "defined but not
+// used" саме на esp8266 (перевірено збіркою).
+static constexpr size_t kMaxJsonApiCommands = 8;  // 3 наявні (system-info/
+                                                   // wifi-status/ecoflow-status) + запас
+static const char* kJsonApiCommandNames[kMaxJsonApiCommands] = {};
+static size_t kJsonApiCommandCount = 0;
+
+static void registerJsonApiCommandName(const char* name) {
+  if (kJsonApiCommandCount >= kMaxJsonApiCommands) return;
+  kJsonApiCommandNames[kJsonApiCommandCount++] = name;
+}
+#endif
+
 #if HAS_MQTT_CLIENT && HAS_WEB_PORTAL
 // MQTT SAPI-канал, фаза 1 (docs/mqtt-web-handoff.md): реєстр JSON-команд.
 // Жодна з трьох поки не приймає аргументів - мінімальний статичний набір.
@@ -755,14 +777,13 @@ static void registerJsonApiEntry(const JsonApiEntry& entry) {
     (void)topic;
     handleJsonApiRequest(entry, replyTopic, doc);
   });
+  registerJsonApiCommandName(entry.name);
 }
 #endif
 
 #if HAS_MQTT_CLIENT && !ESP8266
-// Discovery, фаза 2 (docs/mqtt-web-handoff.md, розділ "Фаза 2"). Наразі
-// board+revision+features - commands свідомо не додані цим кроком (реєстр
-// команд у registerJsonApiEntry() ще не накопичує імена, окремий наступний
-// крок, не змішувати з цим).
+// Discovery, фаза 2 (docs/mqtt-web-handoff.md, розділ "Фаза 2"):
+// board+revision+features+commands.
 //
 // Не під HAS_WEB_PORTAL (на відміну від SAPI JSON API вище): board і
 // revision - build-time константи, не дані з WebSystemModule/WebWifiModule,
@@ -818,6 +839,22 @@ static String discoveryFeaturesJson() {
   return out;
 }
 
+// commands - імена зареєстрованих JSON API команд (kJsonApiCommandNames,
+// заповнюється registerJsonApiEntry() вище, HAS_WEB_PORTAL-гейт). На платі
+// без порталу масив лишається порожнім - "[]" в payload, а не відсутнє поле
+// взагалі: SAPI бачить постійну форму discovery на будь-якій платі.
+static String discoveryCommandsJson() {
+  String out = "[";
+  for (size_t i = 0; i < kJsonApiCommandCount; ++i) {
+    if (i != 0) out += ",";
+    out += "\"";
+    out += kJsonApiCommandNames[i];
+    out += "\"";
+  }
+  out += "]";
+  return out;
+}
+
 // Retained, republish на КОЖЕН (пере)конект (onConnect() у setupMqttClient),
 // не одноразово при старті - інакше втрата єдиного publish лишає retained-
 // слот порожнім/застарілим без жодного видимого симптома
@@ -830,6 +867,8 @@ static void publishDiscovery() {
   payload += GIT_REVISION;
   payload += "\",\"features\":";
   payload += discoveryFeaturesJson();
+  payload += ",\"commands\":";
+  payload += discoveryCommandsJson();
   payload += "}";
   mqtt.publish(topic.c_str(), payload.c_str(), /*retained=*/true);
 }
