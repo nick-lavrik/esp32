@@ -757,6 +757,63 @@ static void registerJsonApiEntry(const JsonApiEntry& entry) {
 }
 #endif
 
+#if HAS_MQTT_CLIENT && !ESP8266
+// Discovery, фаза 2 (docs/mqtt-web-handoff.md, розділ "Фаза 2"). Наразі лише
+// board+revision - features/commands свідомо не додані цим кроком
+// (docs/tech_debt.md, X-macro-каталог фіч і накопичення реєстру команд -
+// окремий наступний крок, не змішувати з невеликим retained-мірором тут).
+//
+// Не під HAS_WEB_PORTAL (на відміну від SAPI JSON API вище): board і
+// revision - build-time константи, не дані з WebSystemModule/WebWifiModule,
+// тож жодної залежності від порталу тут немає - і не повинно бути, мета
+// MQTT-каналу саме прибрати цю залежність, не додати нову.
+//
+// !ESP8266 тут - не архітектурне рішення, а той самий гейт, що вже стоїть
+// навколо mqtt.onConnect()/onDisconnect()/onConnectionFail() нижче:
+// PubSubClient-гілка MqttClient::connect() не викликає _connected_callback
+// узагалі (MqttClient.cpp:206-234, лише PicoMQTT-гілка це робить,
+// MqttClient.cpp:282-294) - publishDiscovery() фізично нема звідки
+// покликати на ESP8266 сьогодні.
+//
+// board - BOARD_XXX-ідентичність env (environment.h), НЕ platformio.ini's
+// board= (грубший, ділиться між різними env - docs/mqtt-web-handoff.md,
+// "Discovery payload"). Мапа рукописна: BOARD_XXX - унікальний #define на
+// env, стрінгувати macro NAME напряму препроцесор не вміє.
+#if defined(BOARD_4848S040)
+static constexpr const char* kDiscoveryBoard = "4848s040";
+#elif defined(BOARD_ESP32_C3)
+static constexpr const char* kDiscoveryBoard = "esp32-c3";
+#elif defined(BOARD_ESP32_C6_LCD096)
+static constexpr const char* kDiscoveryBoard = "esp32-c6-lcd096";
+#elif defined(BOARD_ESP32_C6)
+static constexpr const char* kDiscoveryBoard = "esp32-c6";
+#elif defined(BOARD_ESP32_S3_LCD147)
+static constexpr const char* kDiscoveryBoard = "esp32-s3-lcd147";
+#elif defined(BOARD_ESP8266)
+static constexpr const char* kDiscoveryBoard = "esp8266";
+#elif defined(BOARD_ST7789)
+static constexpr const char* kDiscoveryBoard = "esp32-st7789";
+#elif defined(BOARD_TTGO_T1)
+static constexpr const char* kDiscoveryBoard = "ttgo-t1";
+#else
+#error "Невідома плата: додай запис kDiscoveryBoard у src/main.cpp"
+#endif
+
+// Retained, republish на КОЖЕН (пере)конект (onConnect() у setupMqttClient),
+// не одноразово при старті - інакше втрата єдиного publish лишає retained-
+// слот порожнім/застарілим без жодного видимого симптома
+// (docs/mqtt-web-handoff.md, розділ "\"Lossy\" для discovery").
+static void publishDiscovery() {
+  const String topic = String("devices/") + MQTT_CLIENT_ID + "/discovery";
+  String payload = "{\"board\":\"";
+  payload += kDiscoveryBoard;
+  payload += "\",\"revision\":\"";
+  payload += GIT_REVISION;
+  payload += "\"}";
+  mqtt.publish(topic.c_str(), payload.c_str(), /*retained=*/true);
+}
+#endif
+
 #if LIGHT_SENSOR_PIN > 0
 AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 #endif
@@ -2003,6 +2060,7 @@ void setupMqttClient() {
   #if !ESP8266
   mqtt.onConnect([](const MqttTransportClient& client) {
     _logger.info("MQTT connected       [%s:%d]", client.host.c_str(), client.port);
+    publishDiscovery();
   });
 
   mqtt.onDisconnect([](const MqttTransportClient& client) {
