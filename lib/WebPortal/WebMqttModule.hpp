@@ -38,6 +38,12 @@ public:
   const char* name() const override { return "mqtt"; }
   void registerRoutes(AsyncWebServer& server, WebPortal& portal) override;
 
+  // Той самий JSON, що й /api/mqtt/status - метод, не лише роут: MQTT
+  // SAPI-канал (mqtt-status, src/main.cpp, docs/mqtt-web-handoff.md) бере ці
+  // ж поля напряму, без другого будівельника того самого об'єкта (DRY,
+  // CLAUDE.md - той самий патерн, що вже застосований до WebPortal::statusJson()).
+  String statusJson() const;
+
 private:
   MqttClient& _client;
   // CommandQueue - спільна для serial/web/MQTT/cron (lib/CommandQueue), не

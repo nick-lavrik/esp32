@@ -50,6 +50,7 @@ Allowlist, не дзеркало всіх serial-команд:
 | `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `wifi-status` | `WebWifiModule::portalStatusJson()` | — |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | + `HAS_ECOFLOW_CLIENT` |
+| `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | — |
 
 **Заплановано, ще не реалізовано:** опційне поле `replyTopic` у запиті
 (відповідь в інший топік замість дефолтного `.../reply`) — обов'язково
@@ -80,7 +81,8 @@ Allowlist, не дзеркало всіх serial-команд:
   рядок — буквальне ім'я макроса (`"BOARD_HAS_DISPLAY"`, не перейменований
   варіант).
 - `commands` — масив імен зареєстрованих JSON API команд (`"system-info"`,
-  `"wifi-status"`, `"ecoflow-status"` — залежно від env), джерело —
+  `"wifi-status"`, `"ecoflow-status"`, `"mqtt-status"` — залежно від env),
+  джерело —
   `registerJsonApiEntry()` (`src/main.cpp`): той самий виклик, що підписує
   `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий fixed-size
   масив (`kJsonApiCommandNames`, без heap). На платі без порталу — `[]`

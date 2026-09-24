@@ -11,14 +11,15 @@
   хоститься окремо (rpi5, GitHub Pages, локальний файл - будь-що статичне).
 
   Пре-альфа: маніфест discovery (фаза 2) ще не існує, тому список команд
-  нижче (COMMANDS) - жорстко зашитий, той самий allowlist, що в
-  src/main.cpp (kJsonApiSystemInfo/kJsonApiWifiStatus/kJsonApiEcoflowStatus).
-  Рендер під конкретні поля кожної команди (render.js: renderSystemInfo/
-  renderWifiStatus/renderEcoflowStatus) - жорстко прив'язаний до COMMANDS
-  вище, той самий дух пре-альфи: коли з'явиться discovery-маніфест, він і
-  замінить цей список разом із рендерами на щось, що будується з даних, а не
-  з коду тут. Сирий JSON лишається поруч (<details class="raw">) - для
-  діагностики полів, яких рендер ще не показує.
+  нижче (COMMANDS) - жорстко зашитий, той самий allowlist, що в src/main.cpp
+  (kJsonApiSystemInfo/kJsonApiWifiStatus/kJsonApiEcoflowStatus/
+  kJsonApiMqttStatus). Рендер під конкретні поля кожної команди (render.js:
+  renderSystemInfo/renderWifiStatus/renderEcoflowStatus/renderMqttStatus) -
+  жорстко прив'язаний до COMMANDS вище, той самий дух пре-альфи: коли
+  з'явиться discovery-маніфест, він і замінить цей список разом із
+  рендерами на щось, що будується з даних, а не з коду тут. Сирий JSON
+  лишається поруч (<details class="raw">) - для діагностики полів, яких
+  рендер ще не показує.
 
   render.js винесений окремим файлом (не в цей інлайн-скрипт) свідомо - той
   самий код без змін прогонить test/render.test.js у Node, без браузера/DOM.
@@ -36,6 +37,7 @@
 :root {
   --bg: #14171c; --panel: #1c2027; --line: #2b313b; --text: #e6e9ef;
   --muted: #8b94a3; --accent: #4da3ff; --ok: #4cc38a; --warn: #e0a33e; --err: #e5534b;
+  --sig-bar: 8px; --sig-bar-gap: 3px;
   --font-size-base: 14px;
   --font-scale: 1.125;
   --font-size-small: calc(var(--font-size-base) / var(--font-scale));
@@ -145,6 +147,11 @@ button.act.ghost { background: none; border: 1px solid var(--line); color: var(-
 button.act:disabled { opacity: .5; cursor: default; }
 button.act.ghost.danger { color: var(--err); }
 button.act.ghost.danger:hover { border-color: var(--err); }
+/* Стан "призупинено" (#btn-log-pause) - видима позначка, не лише зміна
+   підпису (Pause -> Resume): той самий принцип, що hintIcon()/hint-mark -
+   прихований стан, який видно лише прочитавши текст кнопки, легко
+   пропустити на біглий погляд. */
+button.act.ghost.paused { border-color: var(--warn); color: var(--warn); }
 
 .cmd-status { font-size: var(--font-size-small); color: var(--muted); font-weight: 400; }
 .cmd-status.ok { color: var(--ok); }
@@ -184,6 +191,38 @@ dd { margin: 0; }
 .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
 .card { border: 1px solid var(--line); border-radius: 6px; padding: 12px; flex: 1 1 300px; min-width: 260px; }
 .card dl { grid-template-columns: max-content 1fr; }
+/* Другорядне уточнення в значенні (кількість переходів, Гц, "(inferred)") -
+   власним рядком під основним, не впритул через " · " (та сама причина, що
+   в порталі: переносилось би посередині слова на вузькій картці). */
+.eco-sub { display: block; color: var(--muted); font-size: var(--font-size-small); margin-top: 1px; }
+.eco-counts { display: flex; flex-wrap: wrap; column-gap: 6px; row-gap: 2px; }
+.eco-counts span:not(:last-child)::after { content: " ·"; color: var(--muted); }
+/* Компактний перелік пристроїв EcoFlow у System-картці - 1:1 з порталом
+   (assets/www/index.html, ecoSysDeviceRow()/renderEcoflowSystemSummary()):
+   згорнутий рядок - охайна табличка (grid, не вільний текст через " · "),
+   розгорнутий <details> додає ті самі поля, що повна картка вкладки
+   EcoFlow (ecoDeviceDetailRows() - render.js, спільна з нею). */
+.sys-eco-devices { margin-top: 16px; }
+.sys-eco-device { padding: 3px 0; }
+.sys-eco-device[open] { border-top: 0 solid var(--line); border-bottom: 1px solid var(--line);
+  margin: 2px 0; padding: 3px 0 8px 0; }
+.sys-eco-device summary { cursor: pointer; user-select: none; list-style: none; }
+.sys-eco-device summary::-webkit-details-marker { display: none; }
+/* Каретка - руками замість штатного трикутника <summary> (штатний живе лише
+   при display:list-item, а рядок нижче - grid). */
+.sys-eco-device summary { display: grid; grid-template-columns: 12px 1fr 62px 44px;
+  column-gap: 8px; align-items: baseline; }
+.sys-eco-device summary .eco-caret { color: var(--muted); transition: transform .15s; }
+.sys-eco-device[open] summary .eco-caret { transform: rotate(90deg); }
+.sys-eco-device summary .eco-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-eco-device summary .eco-charge, .sys-eco-device summary .eco-remain { text-align: right;
+  font-variant-numeric: tabular-nums; }
+.sys-eco-device summary .eco-remain { display: none; }
+@media (min-width: 1300px) {
+  .sys-eco-device summary { grid-template-columns: 12px 1fr 62px 44px 56px; }
+  .sys-eco-device summary .eco-remain { display: inline; }
+}
+.sys-eco-device dl { margin-top: 8px; }
 table.zebra { width: 100%; border-collapse: collapse; margin-top: 6px; }
 table.zebra th, table.zebra td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 /* th БІЛЬШОГО кегля за td, не меншого - той самий портал (assets/www/
@@ -202,6 +241,51 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 .badge.err { background: rgba(229,83,75,.18); color: var(--err); }
 .badge.warn { background: rgba(224,163,62,.18); color: var(--warn); }
 .badge.muted { background: rgba(139,148,163,.18); color: var(--muted); }
+/* Позначка "це значення несе title-хінт" - той самий портал (CLAUDE.md,
+   "Видимість..."): курсор "help" непомітний сам по собі, тому кожен такий
+   рядок (mqttDroppedText/mqttHeartbeatText, render.js) супроводжує hintIcon(). */
+.hint-mark { color: var(--muted); font-size: .75em; margin-left: .3em; position: relative; top: -0.3em; }
+/* Бар heap (System - Memory, render.js: heapBarHtml()) - НЕ з порталу, новий
+   віджет цієї сесії. Під dl, не над ним - над dl рвало звичний вигляд
+   картки (спершу заголовок, одразу dl, як у решти карток System). Трек
+   (фон .heap-bar) - той самий колір, що й .heap-bar-free (порожній
+   <div>, без власного фону) - лежить ЗВЕРХУ фону лише заради власного
+   hover/title (кожен розмір - used/free/largest/min - окремий елемент із
+   власним title, а не один title на увесь бар, за проханням користувача:
+   "загальний... незрозуміло як відображати"). Marker - тонка вертикальна
+   риска поверх усього (z-index не потрібен - вона останній child). */
+.heap-bar { position: relative; height: 20px; border-radius: 4px; background: var(--line);
+  overflow: hidden; margin: 10px 0 8px; }
+.heap-bar-used, .heap-bar-largest, .heap-bar-free { position: absolute; top: 0; bottom: 0; }
+.heap-bar-used { left: 0; background: var(--accent); }
+.heap-bar-largest { background: var(--ok); opacity: .55; }
+.heap-bar-marker { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--warn); }
+.heap-bar-legend { display: flex; flex-wrap: wrap; column-gap: 12px; row-gap: 4px;
+  font-size: var(--font-size-small); color: var(--muted); }
+/* Кожен пункт легенди - inline-flex, не голий <i> з vertical-align:middle:
+   те вирівнювало квадратик до середини x-height ШРИФТУ (за формулою CSS
+   "middle"), не до візуального центру рядка тексту поруч - на око виглядало
+   "не по центру" (зауваження користувача). Flex-align:center центрує
+   квадратик і текст по фактичній висоті обох, без цієї формули. */
+.heap-bar-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.heap-bar-legend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.heap-bar-legend .sw-used { background: var(--accent); }
+.heap-bar-legend .sw-largest { background: var(--ok); opacity: .55; }
+.heap-bar-legend .sw-free { background: var(--line); border: 1px solid var(--muted); }
+.heap-bar-legend .sw-marker { background: var(--warn); }
+/* Рівень сигналу - той самий вигляд/CSS, що signal()/.sig у порталі
+   (assets/www/index.html): блоки фіксованого розміру, не гліфи ▮/▯ (різна
+   ширина в system-ui хитала б шкалу). render.js: signal(rssi, quality). */
+.sig { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.sig b { display: inline-flex; gap: var(--sig-bar-gap); margin-right: 4px; }
+.sig i { width: var(--sig-bar); height: 11px; border-radius: 2px; background: var(--line); }
+.sig i.on { background: var(--accent); }
+.sig .q { min-width: 4ch; text-align: right; }
+.sig .u, .sig .q { color: var(--muted); }
+@media (max-width: 560px) {
+  .sig { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .sig .val, .sig .q { min-width: 0; text-align: left; }
+}
 details.raw { margin-top: 10px; }
 details.raw summary { cursor: pointer; font-size: var(--font-size-small); color: var(--muted); }
 details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-height: 1.45; overflow-x: auto; }
@@ -317,6 +401,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   <button class="active" data-tab="system-info">System</button>
   <button data-tab="wifi-status">Wi-Fi</button>
   <button data-tab="ecoflow-status">EcoFlow</button>
+  <button data-tab="mqtt-status">MQTT</button>
   <button data-tab="log">Log</button>
 </nav>
 
@@ -346,9 +431,18 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     <div class="out">-</div>
   </section>
 
+  <section class="cmd-section" data-tab="mqtt-status" data-cmd="mqtt-status">
+    <h2 class="hrow">mqtt-status <span class="cmd-status muted">-</span><span class="spacer"></span>
+      <label class="checkbox-row"><input type="checkbox" class="auto-toggle">auto</label>
+      <button class="btn-refresh act ghost" disabled>Refresh</button>
+    </h2>
+    <div class="out">-</div>
+  </section>
+
   <section data-tab="log">
     <h2 class="hrow">Log <span class="muted" style="font-weight:400; font-size:var(--font-size-small)">(останні 500 рядків)</span><span class="spacer"></span>
-      <label class="checkbox-row"><input type="checkbox" id="log-newest-first">Newest first</label>
+      <button id="btn-log-pause" class="act ghost">Pause</button>
+      <label class="checkbox-row"><input type="checkbox" id="log-newest-first" data-persist="newest-first">Newest first</label>
       <button id="btn-clear-log" class="act ghost">Clear</button>
     </h2>
     <div id="log"></div>
@@ -366,7 +460,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   // Пре-альфа allowlist - той самий, що в src/main.cpp (kJsonApi*). Коли
   // з'явиться discovery-маніфест (фаза 2), цей список замінить сам себе на
   // дані з брокера, а не буде жорстко зашитим тут.
-  const COMMANDS = ['system-info', 'wifi-status', 'ecoflow-status'];
+  const COMMANDS = ['system-info', 'wifi-status', 'ecoflow-status', 'mqtt-status'];
   const AUTO_BASE_MS = 5000;
   const AUTO_BACKOFF_MAX = 8; // множник база: 5с -> 40с максимум при busy
   const LOG_MAX_LINES = 500;
@@ -395,6 +489,75 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch (e) { /* нічого критичного */ }
+  }
+
+  // Персист UI-чекбоксів/перемикачів сторінки (ПРАВИЛО НА МАЙБУТНЄ: якщо
+  // з'являється контрол, що керує ВИГЛЯДОМ/поведінкою сторінки - будь-який
+  // чекбокс, перемикач, збережений порядок тощо - він має пережити
+  // refresh і re-connect, а не скидатись до дефолту щоразу). Один спільний
+  // ключ (не по одному localStorage-ключу на кожен контрол, як раніше було
+  // для "Newest first" саме собою) - новий контрол просто додає своє поле в
+  // той самий об'єкт, без нового STORAGE_KEY і без правок тут.
+  //
+  // Пишемо ОДРАЗУ на зміну (saveUiToggle нижче, викликається з кожного
+  // change-обробника). Читаємо - НЕ одразу при завантаженні сторінки, а
+  // саме при connected (applyPersistedToggles(), викликається з
+  // client.on('connect') нижче): для "Auto" це єдиний момент, коли
+  // відновлення взагалі має сенс (requestCmd()/scheduleAuto() всередині
+  // change-обробника нічого не зроблять без живого client) - тому й решта
+  // контролів (Newest first, Pause) читаються в той самий момент, а не
+  // раніше, заради ОДНОГО правила для всіх, а не для кожного свого часу
+  // відновлення.
+  const UI_TOGGLES_KEY = 'sapi.uiToggles.v1';
+  function loadUiToggles() {
+    try {
+      return JSON.parse(localStorage.getItem(UI_TOGGLES_KEY) || '{}');
+    } catch (e) {
+      return {};
+    }
+  }
+  function saveUiToggle(key, value) {
+    try {
+      const all = loadUiToggles();
+      all[key] = value;
+      localStorage.setItem(UI_TOGGLES_KEY, JSON.stringify(all));
+    } catch (e) { /* нічого критичного - контрол лишається в поточному DOM-стані */ }
+  }
+  // Будь-який <input type="checkbox" data-persist="..."> - автоматично: за
+  // ключ править сам data-persist (унікальний, тому кілька контролів не
+  // затирають одне одного в тому самому об'єкті). Новий чекбокс у
+  // майбутньому - лише додати data-persist у розмітці (чи виставити його
+  // програмно, як autoToggle.dataset.persist нижче) - без правок цієї функції.
+  //
+  // ФУНКЦІЯ, не одразу виконаний цикл: .auto-toggle отримує свій
+  // data-persist ПРОГРАМНО, у циклі створення панелей (нижче за файлом,
+  // ще не виконаний у цій точці скрипта) - querySelectorAll() тут одразу
+  // впіймав би лише "Newest first" (data-persist у статичній розмітці) і
+  // жоден .auto-toggle, бо в них атрибута ще нема. Викликається explicit
+  // одним рядком одразу ПІСЛЯ циклу створення панелей нижче.
+  function wireAllPersistedCheckboxes() {
+    for (const el of $$('input[type="checkbox"][data-persist]')) {
+      el.addEventListener('change', () => saveUiToggle(el.dataset.persist, el.checked));
+    }
+  }
+  // Pause - кнопка, не чекбокс (розділ нижче, "Log pause/resume"), тому не
+  // підхоплюється циклом вище - той самий ключ у тому самому об'єкті,
+  // записується/читається окремим викликом saveUiToggle()/loadUiToggles()
+  // поруч із setLogPaused() (визначена нижче, після #log-newest-first).
+  function applyPersistedToggles() {
+    const saved = loadUiToggles();
+    for (const el of $$('input[type="checkbox"][data-persist]')) {
+      const key = el.dataset.persist;
+      if (key in saved && el.checked !== saved[key]) {
+        el.checked = saved[key];
+        // dispatchEvent, не пряме присвоєння - той самий change-обробник, що
+        // й на ручний клік, сам застосовує ефект (перемальовка порядку логу,
+        // requestCmd()+scheduleAuto() для "Auto") - другого місця з тією
+        // самою логікою не заводимо (DRY).
+        el.dispatchEvent(new Event('change'));
+      }
+    }
+    if ('log-paused' in saved) setLogPaused(saved['log-paused']);
   }
 
   function readForm() {
@@ -457,24 +620,48 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   const logRows = [];
   const pendingRequests = new Map(); // id -> рядок запиту, що ще чекає на reply
 
-  const LOG_ORDER_KEY = 'sapi.logOrder.v1';
-  let logNewestFirst = true; // дефолт - вгору: сторінка тепер сама росте
-  // (без внутрішнього скролу #log, розділ вище), тож найновіший рядок одразу
-  // видно, не гортаючи вниз через екрани вже накопиченого логу.
-  try {
-    const saved = localStorage.getItem(LOG_ORDER_KEY);
-    if (saved !== null) logNewestFirst = JSON.parse(saved);
-  } catch (e) { /* лишається дефолт */ }
+  // Дефолт - вгору (checked у розмітці нема, але JS-стан і чекбокс
+  // синхронізовані рядком нижче): сторінка сама росте (без внутрішнього
+  // скролу #log, розділ вище), тож найновіший рядок одразу видно, не
+  // гортаючи вниз через екрани вже накопиченого логу. Персист - НЕ окремий
+  // ключ (як було) - `data-persist="newest-first"` у розмітці, той самий
+  // спільний механізм, що описаний вище ("Персист UI-чекбоксів"):
+  // відновлюється при connected (applyPersistedToggles()), не тут.
+  let logNewestFirst = true;
   const logOrderCheckbox = $('#log-newest-first');
   logOrderCheckbox.checked = logNewestFirst;
   logOrderCheckbox.addEventListener('change', () => {
     logNewestFirst = logOrderCheckbox.checked;
-    try { localStorage.setItem(LOG_ORDER_KEY, JSON.stringify(logNewestFirst)); } catch (e) { /* нічого критичного */ }
     // Перевпорядкувати вже наявні рядки теж, не лише майбутні - append() з
     // уже прикріпленими вузлами ПЕРЕСУВАЄ їх (Node лишається єдиним в DOM),
     // повторного створення рядків не треба.
     const ordered = logNewestFirst ? [...logRows].reverse() : logRows;
     $('#log').append(...ordered);
+  });
+
+  // Pause/resume ЛИШЕ показу логу, не самого MQTT-трафіку: підписки й
+  // request/reply (renderReply(), System-панель) працюють незалежно від
+  // цього прапорця - client.on('message') і далі викликає обробку команд,
+  // логу торкається лише сам logEvent() нижче. Події під час паузи
+  // ПРОПУСКАЮТЬСЯ, не буферизуються - той самий принцип, що й для решти
+  // логів проєкту (CLAUDE.md - "лог можна губити, команду - ні"): показати
+  // назад усе, що трапилось "поки дивився", ускладнило б і код, і сприйняття
+  // (розрив у часі рядків був би непомітним), а сама мета паузи - просто
+  // зафіксувати вигляд на екрані на хвилину, не архів.
+  let logPaused = false;
+  const logPauseBtn = $('#btn-log-pause');
+  // Окрема функція (не лише інлайн у click) - той самий сеттер викликає й
+  // клік користувача, і відновлення при connected (applyPersistedToggles()
+  // вище, "Персист UI-чекбоксів") - друге місце з тією самою логікою
+  // (текст/клас кнопки) не заводимо (DRY).
+  function setLogPaused(paused) {
+    logPaused = paused;
+    logPauseBtn.textContent = logPaused ? 'Resume' : 'Pause';
+    logPauseBtn.classList.toggle('paused', logPaused);
+  }
+  logPauseBtn.addEventListener('click', () => {
+    setLogPaused(!logPaused);
+    saveUiToggle('log-paused', logPaused);
   });
 
   function prettyBlock(rawText) {
@@ -582,6 +769,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   }
 
   function logEvent(dir, topic, payloadText, note) {
+    if (logPaused) return; // показ призупинено - подія не записується (не буферизується на потім)
     const el = $('#log');
     const t = new Date().toLocaleTimeString();
     const raw = payloadText != null ? payloadText : (note || '');
@@ -672,7 +860,16 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       backoffFactor: 1,
       timer: null,
     };
+    // data-persist - програмно, не в статичній розмітці: ключ ("auto-<cmd>")
+    // іде з того самого COMMANDS, тому 5-та команда в майбутньому підхопить
+    // персист автоматично, без правки розмітки під неї (розділ "Персист
+    // UI-чекбоксів" нижче).
+    panels[cmd].autoToggle.dataset.persist = 'auto-' + cmd;
   }
+  // Саме тут, не раніше - усі data-persist (і статичні, і щойно виставлені
+  // programmatically рядком вище) уже на місці, wireAllPersistedCheckboxes()
+  // (розділ "Персист UI-чекбоксів" вище) підписує їх усі одним проходом.
+  wireAllPersistedCheckboxes();
 
   function setPanelStatus(cmd, text, cls) {
     const p = panels[cmd];
@@ -686,17 +883,56 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   // renderReply() - рендер не показує все (напр. partitions/params на
   // портальному боці).
 
+  // Остання відома відповідь кожної команди - System-картки Network/EcoFlow
+  // (render.js: renderSystemInfo(data, extra)) читають wifi-status/
+  // ecoflow-status, не роблячи власного другого MQTT-запиту (той самий
+  // принцип, що statusRows() у порталі малює і вкладку Wi-Fi, і System-картку
+  // з ОДНОГО /api/wifi/status). lastSystemInfo - чи взагалі вже приходив
+  // system-info (renderSystemPanel() нічого не малює, поки нема бодай одного).
+  let lastSystemInfo = null;
+  let lastWifiStatus = null;
+  let lastEcoflowStatus = null;
+  let lastMqttStatus = null;
+
+  function buildPanelHtml(cmd, data, extra) {
+    let html;
+    try {
+      html = extra !== undefined ? RENDERERS[cmd](data, extra) : RENDERERS[cmd](data);
+    } catch (e) {
+      return `<p class="muted">render error: ${esc(e.message)}</p>`;
+    }
+    return html + `<details class="raw"><summary>raw JSON</summary><pre>${esc(JSON.stringify(data, null, 2))}</pre></details>`;
+  }
+
+  // Розгорнуті пристрої EcoFlow (System-картка) - сканується з DOM ПЕРЕД
+  // кожною перемальовкою (той самий патерн, що ecoSysOpenDetails у порталі):
+  // innerHTML= нижче знищує й перестворює вузли, тому "open" на <details>
+  // сам по собі не переживає перемальовку - треба явно прочитати й повернути.
+  function renderSystemPanel() {
+    if (!lastSystemInfo) return; // ще жодної відповіді system-info - нема що перемальовувати
+    const openSerials = new Set(
+      Array.from(panels['system-info'].out.querySelectorAll('.sys-eco-device[open]'))
+        .map((el) => el.dataset.sn));
+    panels['system-info'].out.innerHTML = buildPanelHtml('system-info', lastSystemInfo,
+      { wifi: lastWifiStatus, ecoflow: lastEcoflowStatus, ecoflowOpenSerials: openSerials, mqtt: lastMqttStatus });
+  }
+
   function renderReply(cmd, msg) {
     const p = panels[cmd];
     if (msg.ok) {
-      let html;
-      try {
-        html = RENDERERS[cmd](msg.data);
-      } catch (e) {
-        html = `<p class="muted">render error: ${esc(e.message)}</p>`;
+      if (cmd === 'wifi-status') lastWifiStatus = msg.data;
+      else if (cmd === 'ecoflow-status') lastEcoflowStatus = msg.data;
+      else if (cmd === 'mqtt-status') lastMqttStatus = msg.data;
+      else if (cmd === 'system-info') lastSystemInfo = msg.data;
+
+      if (cmd === 'system-info') {
+        renderSystemPanel();
+      } else {
+        p.out.innerHTML = buildPanelHtml(cmd, msg.data);
+        // wifi-status/ecoflow-status/mqtt-status теж тримають відповідні
+        // System-картки свіжими - без чекання наступного system-info-поллу.
+        renderSystemPanel();
       }
-      html += `<details class="raw"><summary>raw JSON</summary><pre>${esc(JSON.stringify(msg.data, null, 2))}</pre></details>`;
-      p.out.innerHTML = html;
       setPanelStatus(cmd, `ok (id ${msg.id})`, 'ok');
       p.backoffFactor = 1;
     } else {
@@ -872,6 +1108,16 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       logEvent('info', null, null, 'connected');
       client.subscribe(`${conn.prefix}/devices/${conn.clientId}/api/+/reply`);
       client.subscribe(statusTopic());
+      // Відновлення персистентних UI-контролів - ПІСЛЯ підписки, ПЕРЕД
+      // безумовним циклом нижче (розділ "Персист UI-чекбоксів" вище):
+      // "Auto" без живого client однаково нічого не зробив би, а зроблений
+      // ДО subscribe() ризикував би загубити відповідь на власний запит
+      // (publish раніше за subscribe на топік reply). Може дати один зайвий
+      // дублікат requestCmd() для команд з увімкненим Auto (change-обробник
+      // усередині сам робить один запит, а безумовний цикл нижче - ще
+      // один) - прийнятно, не вартий спеціального обходу заради економії
+      // одного MQTT-повідомлення раз на конект.
+      applyPersistedToggles();
       for (const cmd of COMMANDS) requestCmd(cmd);
     });
 

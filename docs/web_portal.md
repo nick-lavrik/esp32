@@ -906,6 +906,117 @@ ACL для нових плат можна забути додати мовчки
 запобіжник, що наступного разу таку прогалину буде видно з браузера, а не
 лише з тиші в MQTT.
 
+## MQTT JSON API (SAPI) — доступ до тих самих даних без HTTP
+
+Паралельний, повністю незалежний від `HttpServer`/`AsyncWebServer` канал:
+браузер (SAPI, `sapi/`) підключається НАПРЯМУ до MQTT-брокера (WebSockets) і
+читає ту саму інформацію, що показує HTTP-портал, коли сам портал вимкнений
+(`HAS_WEB_PORTAL=0`) чи недоступний по IP (MQTT іде через хмарний/rpi5
+брокер, портал — лише в локальній мережі/AP). Повна історія рішень і
+обговорень (два варіанти архітектури, чому обрано саме цей) — робочий
+документ `docs/mqtt-web-handoff.md`; тут — лише стабільний стан.
+
+**Топік-простір** — `devices/<client-id>/api/<cmd>` (запит,
+`{"id":<num>}`) / `.../api/<cmd>/reply` (відповідь,
+`{"id","ok":true,"data":{...}}` або `{"id","ok":false,"error":"bad args"|
+"busy"}`). Повний реєстр — `docs/mqtt-topics.md`. Листовий сегмент `<cmd>`
+у ТОПІКУ (не в payload) — той самий патерн, що й
+`devices/<client-id>/status`/`.../ecoflow/<serial>/grid`: зовнішній
+моніторинг розрізняє призначення повідомлення без парсингу payload.
+
+**`CommandQueue` — уніфікована черга, не окрема під MQTT-JSON.**
+`Slot` несе `kind` (`kText`/`kJson`): `kText` — наявний serial/web/MQTT/cron
+шлях без змін (`CommandResponse`/`Journal`-міст); `kJson` —
+`submitJson()`/`runJsonNow()`, атомарна доставка ОДНИМ `deliver()` повз
+`Journal` (людський `CommandResponse` розрубав би довгий JSON-документ на
+кілька MQTT-повідомлень порціями по 512Б — непридатно для структурованої
+відповіді). Один спільний `kSlots`, один `rejected()`, один виклик
+`runNext()` у `loop()` — структурна гарантія «не більше однієї команди за
+ітерацію» лишається на всіх джерелах разом, не лише на MQTT.
+
+**Команди (allowlist, не дзеркало всіх ~75 serial-команд — свідомо звужений
+рівень розкриття інформації через публічний канал):**
+
+| `<cmd>` | Джерело | Умова збірки |
+|---|---|---|
+| `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebPortal::statusJson()` (поле `"portal"` — env/revision/uptime/auth/pendingJobs/modules) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `wifi-status` | `WebWifiModule::portalStatusJson()` | — |
+| `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` (без сирого `params`) | + `HAS_ECOFLOW_CLIENT` |
+| `mqtt-status` | `WebMqttModule::statusJson()` (той самий, що й `/api/mqtt/status` вище) | — |
+
+Кожна команда перевикористовує вже наявний метод відповідного `IWebModule`
+(жоден MQTT-специфічний форматер не пишеться заново) — той самий принцип,
+що вже описаний у розділах вище для кожного модуля окремо. `WebWifiModule`/
+`WebEcoflowModule` розділені на provider (кешований знімок під мьютексом —
+`statusSnapshot()`/`devicesSnapshot()`) і formatter (`portalStatusJson()`/
+`mqttStatusJson()`), саме щоб MQTT-канал міг узяти ті самі дані без другого
+читання `NetworkSupervisor`/`EcoflowClient` з чужого FreeRTOS-таска.
+`WebPortal`/`WebMqttModule` такого розділення не потребують — обидва читають
+свої джерела (`_httpServer`/`_jobs`/`_modules`, `MqttClient`/`ConsoleMqtt`/
+`CommandQueue`) напряму, без стороннього таска між ними.
+
+**Discovery** — `devices/<client-id>/discovery`, retained, republish на
+кожен `mqtt.onConnect()` (не одноразово при старті — втрата ЄДИНОГО publish
+лишила б retained-слот порожнім/застарілим без жодного видимого симптома).
+Payload — `{"board","revision","features","commands"}`:
+
+- `board` — `BOARD_XXX`-ідентичність env (рукописна мапа в `src/main.cpp`),
+  НЕ `platformio.ini`'s грубший `board=`.
+- `revision` — короткий git-sha (`GIT_REVISION`, `tools/gen_sapi_revision.py`
+  + `tools/pio_sapi_revision.py`), стемпиться і в прошивку, і в окремий
+  `sapi/revision.js` — SAPI звіряє точний збіг коміту.
+- `features` — дзеркало активних `HAS_*`/`BOARD_HAS_*` з `src/features.h`
+  (повний каталог усіх прапорців проєкту, генерується компілятором з
+  X-macro, без окремого Python-кроку).
+- `commands` — імена зареєстрованих JSON API команд, джерело —
+  `registerJsonApiEntry()` (той самий виклик, що й підписує топік).
+
+Схема ПОЛІВ кожної команди (яка панель, які поля, як рендерити) свідомо НЕ
+входить у discovery — лишається виключно в `sapi/render.js`, звіреним з
+кодом виконавця вручну в тому самому коміті монорепо (третя копія контракту
+поруч із `execute()`/`render.js` — той самий клас дублювання, що
+`encryptionName()`/`WiFi_getAuthTypeName()`, `CLAUDE.md`).
+
+**Браузерний клієнт — `sapi/index.html` + `sapi/render.js`.** Не частина
+прошивки (`pio run` цю теку не бачить), монорепо свідомо (контракт і
+сторінка змінюються синхронно), нуль build-кроку, MQTT.js з CDN. Деталі —
+`sapi/README.md`. Коротко:
+
+- System-вкладка компонує кілька відповідей в один набір карток (Device/
+  Network/EcoFlow/MQTT/Memory/…) — той самий підхід, що й HTTP-портал
+  (розділ «Розділ «System»» вище): останню відому відповідь `wifi-status`/
+  `ecoflow-status`/`mqtt-status` перемальовує в System-картку одразу, без
+  другого MQTT-запиту, коли та відповідь приходить для власної вкладки.
+  EcoFlow-картка — той самий компактний розгортний список пристроїв, що на
+  порталі (`ecoSysDeviceRow()`/`ecoDeviceDetailRows()`, буквальний порт).
+- Memory-картка — бар використання heap (Used/Largest free block/Free
+  фрагментоване/маркер Min free ever), якого в самому HTTP-порталі немає —
+  новий SAPI-специфічний віджет, не порт.
+- Log-вкладка — Pause/Resume (лише показу, не самого MQTT-трафіку) і
+  Newest first, структурований рядок на подію з кореляцією запит/відповідь
+  за `id`.
+- **Правило (`sapi/README.md`, «Контрол сторінки переживає refresh/
+  reconnect»): будь-який чекбокс/перемикач, що керує виглядом сторінки, має
+  пережити перезавантаження й повторний конект** — один спільний
+  `localStorage`-ключ (`sapi.uiToggles.v1`), запис одразу на зміну, читання
+  саме при `connected` (не раніше — контроли на кшталт «Auto» без живого
+  client однаково нічого не запустили б).
+
+**Безпека.** Окремий MQTT-over-WebSockets listener на rpi5 (`9001`,
+`per_listener_settings`), окремий `sapi_passwd`/`sapi_acl` від тих, якими
+користуються самі плати: `read devices/<client-id>/#` + `write
+devices/<client-id>/api/+`, без доступу до `command/<id>` (повний allowlist
+serial-команд) і без доступу до інших пристроїв. Один статичний акаунт на
+пристрій (MVP, ротація вручну) — динамічні токени розглядались і відкладені
+як зайва інфраструктура. TLS/WSS — поза MVP (LAN, `ws://`).
+
+**Свідомо поза цим каналом (не борг, архітектурне рішення):** мутації через
+MQTT (WiFi connect, запис NVS, файлові операції) — лишаються на HTTP-порталі
+до окремого рішення; LittleFS/SD у `system-info` — дані прив'язані до
+інстанс-колбеків `WebSystemModule`, не до незалежних static-методів.
+Залишковий борг цього каналу — `docs/tech_debt.md`, розділ «Веб-портал через
+MQTT».
+
 ## Пастка, на яку вже наступили: ODR-колізія імен класів
 
 Перша робоча збірка віддавала **404 на всю статику**, хоча обробник

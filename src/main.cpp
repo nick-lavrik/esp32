@@ -688,8 +688,9 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 // взагалі не компілюється, тож ні писати, ні читати цей масив нема кому -
 // без цього гейта registerJsonApiCommandName() лишався б "defined but not
 // used" саме на esp8266 (перевірено збіркою).
-static constexpr size_t kMaxJsonApiCommands = 8;  // 3 наявні (system-info/
-                                                   // wifi-status/ecoflow-status) + запас
+static constexpr size_t kMaxJsonApiCommands = 8;  // 4 наявні (system-info/
+                                                   // wifi-status/ecoflow-status/
+                                                   // mqtt-status) + запас
 static const char* kJsonApiCommandNames[kMaxJsonApiCommands] = {};
 static size_t kJsonApiCommandCount = 0;
 
@@ -707,8 +708,18 @@ static bool jsonApiNoArgs(JsonVariantConst /*args*/, uint8_t* /*rawOut*/, size_t
 // Пре-альфа: без LittleFS/SD (ті прив'язані до інстанс-колбеків
 // WebSystemModule, а не до незалежних static-методів; розширення - окремим
 // кроком, коли з'явиться другий провайдер такого роду).
+//
+// "portal" - той самий об'єкт, що й /api/status (WebPortal::statusJson(),
+// docs/mqtt-web-handoff.md, розділ "SAPI ... UI-сесія"): env/revision/
+// uptime/auth/pendingJobs/modules - властивості ПРИСТРОЮ (не HTTP-каналу),
+// тому й на MQTT-каналі мають бути справжніми, а не '***' на SAPI-боці.
+// Команда взагалі не компілюється без HAS_WEB_PORTAL (гейт цього блоку
+// вище) - тобто немає плати, де system-info існує, а порталу нема: окремого
+// "портал вимкнено" стану тут не буває структурно.
 static String jsonApiSystemInfoExecute(const uint8_t* /*raw*/) {
-  String out = "{\"chip\":";
+  String out = "{\"portal\":";
+  out += webPortal.statusJson();
+  out += ",\"chip\":";
   out += WebSystemModule::chipInfoJson();
   out += ",\"heap\":";
   out += WebSystemModule::heapStatsJson();
@@ -745,6 +756,17 @@ static String jsonApiEcoflowStatusExecute(const uint8_t* /*raw*/) {
 
 static const JsonApiEntry kJsonApiEcoflowStatus = {"ecoflow-status", jsonApiNoArgs, jsonApiEcoflowStatusExecute};
 #endif
+
+// Дзеркало /api/mqtt/status - webMqttModule читає лише свій MqttClient/
+// ConsoleMqtt/CommandQueue напряму (жоден з них не живе у власному таску з
+// мьютексом-кешем, на відміну від NetworkSupervisor/EcoflowClient), тому тут
+// нема окремого provider/formatter-розділення - той самий метод, що й /api/
+// mqtt/status (розділ «Провайдер ≠ форматер», docs/mqtt-web-handoff.md).
+static String jsonApiMqttStatusExecute(const uint8_t* /*raw*/) {
+  return webMqttModule.statusJson();
+}
+
+static const JsonApiEntry kJsonApiMqttStatus = {"mqtt-status", jsonApiNoArgs, jsonApiMqttStatusExecute};
 
 // Спільна диспетчеризація запиту на будь-яку команду з реєстру вище - три
 // майже ідентичні addJsonListener()-колбеки (system-info/wifi-status/
@@ -2179,6 +2201,7 @@ void setupMqttClient() {
 #if HAS_ECOFLOW_CLIENT
   registerJsonApiEntry(kJsonApiEcoflowStatus);
 #endif
+  registerJsonApiEntry(kJsonApiMqttStatus);
 #endif
 
   // LWT_TOPIC "mykola-lavryk:devices/mqtt-${PIOENV}/status"

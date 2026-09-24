@@ -26,29 +26,33 @@ void WebPortal::setCredentials(const String& user, const String& password) {
   _storage.setString(kCfgPassword, password);
 }
 
+String WebPortal::statusJson() const {
+  String json = "{\"env\":";
+  json += webjson::quote(PIO_PIOENV);
+  json += ",\"revision\":";
+  json += webjson::quote(GIT_REVISION);
+  json += ",\"uptimeMs\":";
+  json += millis();
+  json += ",\"freeHeap\":";
+  json += (uint32_t)ESP.getFreeHeap();
+  json += ",\"auth\":";
+  json += webjson::boolean(_httpServer.hasAuth());
+  json += ",\"pendingJobs\":";
+  json += (uint32_t)_jobs.pending();
+  json += ",\"modules\":[";
+  for (size_t i = 0; i < _modules.size(); ++i) {
+    if (i > 0) json += ',';
+    json += webjson::quote(_modules[i]->name());
+  }
+  json += "]}";
+  return json;
+}
+
 void WebPortal::_registerCoreRoutes() {
   AsyncWebServer& server = _httpServer.server();
 
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
-    String json = "{\"env\":";
-    json += webjson::quote(PIO_PIOENV);
-    json += ",\"revision\":";
-    json += webjson::quote(GIT_REVISION);
-    json += ",\"uptimeMs\":";
-    json += millis();
-    json += ",\"freeHeap\":";
-    json += (uint32_t)ESP.getFreeHeap();
-    json += ",\"auth\":";
-    json += webjson::boolean(_httpServer.hasAuth());
-    json += ",\"pendingJobs\":";
-    json += (uint32_t)_jobs.pending();
-    json += ",\"modules\":[";
-    for (size_t i = 0; i < _modules.size(); ++i) {
-      if (i > 0) json += ',';
-      json += webjson::quote(_modules[i]->name());
-    }
-    json += "]}";
-    request->send(200, "application/json", json);
+    request->send(200, "application/json", statusJson());
   });
 
   // Єдина точка отримання результату будь-якої задачі: і команди консолі, і

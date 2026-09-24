@@ -88,6 +88,12 @@ public:
 
   bool isRunning() const { return _httpServer.isRunning(); }
 
+  // Той самий JSON, що й /api/status - env/revision/uptime/heap/auth/
+  // pendingJobs/modules. Метод, не лише роут: MQTT SAPI-канал (system-info,
+  // src/main.cpp, docs/mqtt-web-handoff.md) бере ці ж поля напряму, без
+  // другого будівельника того самого об'єкта (DRY, CLAUDE.md).
+  String statusJson() const;
+
 private:
   // /api/status - спільний для всіх розділів мінімум: чи живий портал,
   // скільки задач у черзі, які розділи зареєстровані.

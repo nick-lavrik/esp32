@@ -15,6 +15,19 @@ function esc(s) {
 }
 function badge(text, cls) { return `<span class="badge ${cls}">${esc(text)}</span>`; }
 function boolBadge(b, okText = 'yes', noText = 'no') { return badge(b ? okText : noText, b ? 'ok' : 'err'); }
+// Той самий рівень сигналу, що signal() у порталі (assets/www/index.html) -
+// блоки фіксованого розміру (CSS .sig, sapi/index.html), не гліфи ▮/▯ (різна
+// ширина в system-ui хитала б шкалу). rssi відсутній (0/null/undefined) -
+// прочерк, без спроби намалювати нульову шкалу.
+function signal(rssi, quality) {
+  if (!rssi) return '<span class="muted">-</span>';
+  const bars = rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -80 ? 2 : 1;
+  let html = '<span class="sig"><b>';
+  for (let i = 1; i <= 4; i++) html += i <= bars ? '<i class="on"></i>' : '<i></i>';
+  html += `</b><span class="val">${Number(rssi)} <span class="u">dBm</span></span>`;
+  if (quality !== undefined && quality !== null) html += `<span class="q">${Number(quality)}%</span>`;
+  return html + '</span>';
+}
 function kv(pairs) {
   return '<dl class="kv">' + pairs.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('') + '</dl>';
 }
@@ -62,30 +75,373 @@ function fmtMs(ms) {
 }
 function fmtEpoch(sec) { return sec ? new Date(sec * 1000).toLocaleString() : '-'; }
 
+// Той самий рядок, що statusRows() у порталі (assets/www/index.html) -
+// System-картка Network заповнюється ЖИВИМИ даними з wifi-status (той самий
+// SAPI-запит, що й вкладка Wi-Fi, лише інша команда вже мала свою відповідь -
+// renderReply() в index.html кладе останню відому сюди), а не власним другим
+// MQTT-запитом. "Signal" - той самий signal() (смужки), що й портал.
+function wifiSystemRows(data) {
+  const ap = data.ap || {};
+  return [
+    ['State', esc(dash(data.state))],
+    ['SSID', esc(data.ssid || '-')],
+    ['IP address', esc(data.ip || '-')],
+    ['Gateway', esc(data.connected ? (data.gateway || '-') : '-')],
+    ['Signal', data.connected ? signal(data.rssi, data.quality) : '<span class="muted">-</span>'],
+    ['Connection type', esc(data.connected ? (data.phyMode || '-') : '-')],
+    ['MAC', esc(dash(data.mac))],
+    ['Auto reconnect', data.autoReconnect ? 'on' : 'off'],
+    ['Hotspot', ap.active
+      ? `${esc(dash(ap.ssid))} · ${esc(dash(ap.ip))} · ${dash(ap.clients)} client(s) · ${esc(dash(ap.security))}`
+      : 'off'],
+  ];
+}
+
+// Той самий підсумок, що renderEcoflowSystemSummary() у порталі - рядки
+// Connection/Broker/.../Messages received, буквально той самий текст
+// (portal: без badge на "Connection" - лишається так само тут, для 1:1).
+function ecoflowSystemRows(data) {
+  const devices = Array.isArray(data.devices) ? data.devices : [];
+  const online = devices.filter((d) => d.presence === 'online').length;
+  const offline = devices.filter((d) => d.presence === 'offline').length;
+  const unknown = devices.length - online - offline;
+  const counts = [[online, 'online'], [offline, 'offline'], [unknown, 'unknown']]
+    .filter(([n]) => n > 0).map(([n, label]) => `<span>${n} ${label}</span>`).join('');
+  return [
+    ['Connection', data.connected ? 'connected' : 'disconnected'],
+    ['Broker', esc(dash(data.brokerHost)) + (data.brokerHost ? ':' + esc(dash(data.brokerPort)) : '')],
+    ['Connection type', data.viaProxy ? 'proxy (plain MQTT)' : 'direct (TLS)'],
+    ['Devices', `<span class="eco-counts">${counts}</span>`, true],
+    ['Messages received', dash(data.messageCount)],
+  ];
+}
+
+// --- EcoFlow: компактний розгортний перелік пристроїв (System-картка) -
+// буквальний порт portal (assets/www/index.html: ecoDuration/ecoRemain/
+// ecoGrid/ecoWatts/ecoAcVolts/ecoAcText/ecoCharge/ecoChargeRounded/ecoRow/
+// ecoAgo/ecoPresence/ecoDeviceDetailRows/ecoSysDeviceRow), не переказ -
+// "1:1 як на порталі" (запит користувача цієї сесії). Ті самі формули, той
+// самий набір/порядок полів у розгорнутій картці.
+
+function ecoDuration(ms) {
+  if (ms == null) return '-';
+  const total = Math.floor(ms / 1000);
+  const d = Math.floor(total / 86400), h = Math.floor((total % 86400) / 3600), m = Math.floor((total % 3600) / 60);
+  if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+  if (h > 0) return h + 'h ' + m + 'm';
+  if (m > 0) return m + 'm';
+  return (total % 60) + 's';
+}
+function ecoRemain(minutes) {
+  if (minutes == null) return '-';
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return h > 0 ? h + 'h' + String(m).padStart(2, '0') + 'm' : m + 'm';
+}
+function ecoAgo(ms) { return ms == null ? 'never' : ecoDuration(ms) + ' ago'; }
+function ecoPresence(presence) {
+  const color = presence === 'online' ? 'var(--ok)' : presence === 'offline' ? 'var(--err)' : 'var(--muted)';
+  return `<span style="color:${color}">${esc(dash(presence))}</span>`;
+}
+function ecoGrid(grid, inferred) {
+  const color = grid === 'on-grid' ? 'var(--ok)' : grid === 'off-grid' ? 'var(--warn)' : 'var(--muted)';
+  return `<span style="color:${color}">${esc(dash(grid))}</span>` + (inferred ? '<span class="muted"> (inferred)</span>' : '');
+}
+function ecoWatts(inputWatts, outputWatts) {
+  if (inputWatts == null && outputWatts == null) return '-';
+  return 'in ' + (inputWatts ?? '-') + ' W · out ' + (outputWatts ?? '-') + ' W';
+}
+function ecoCharge(d) {
+  if (d.socPercent == null) return '-';
+  return d.socPrecise != null ? d.socPrecise + '%' : d.socPercent + '%';
+}
+function ecoChargeRounded(d) { return d.socPercent == null ? '-' : d.socPercent + '%'; }
+function ecoAcVolts(d) { return d.acInputMilliVolts == null ? '-' : (d.acInputMilliVolts / 1000).toFixed(1) + ' V'; }
+function ecoAcText(d) {
+  const hz = d.acInputFrequency != null ? ' · ' + d.acInputFrequency + ' Hz' : '';
+  const text = ecoAcVolts(d) + hz;
+  return d.acInputMilliVolts === 0 ? `<span class="muted">${text}</span>` : text;
+}
+// Другорядна частина значення - завжди окремим рядком під основним (.eco-sub,
+// CSS), а не впритул через " · " (переносилось би посередині слова на
+// вузькій картці). sub зібраний тут же - esc() усередині не потрібен.
+function ecoRow(primary, sub) { return primary + (sub ? `<span class="eco-sub">${sub}</span>` : ''); }
+
+// Спільний перелік dt/dd розгорнутого пристрою - той самий список, що на
+// повній картці вкладки EcoFlow мав би бути (тут - System-картка, компактний
+// вхід), щоб поля не розходились між копіями (DRY, CLAUDE.md).
+function ecoDeviceDetailRows(d) {
+  const acVolts = ecoAcVolts(d);
+  return [
+    ['Presence', ecoPresence(d.presence), true],
+    ['Charge', ecoCharge(d)],
+    ['Grid', ecoRow(ecoGrid(d.grid, d.gridInferred),
+      (d.gridForMs != null ? 'for ' + ecoDuration(d.gridForMs) + ' · ' : '') +
+      dash(d.gridChangeCount) + ' change(s) all-time'), true],
+    ['Power', ecoWatts(d.inputWatts, d.outputWatts), true],
+    ['Remaining', ecoRemain(d.remainTimeMinutes)],
+    ['AC input', ecoRow(acVolts, d.acInputFrequency != null ? d.acInputFrequency + ' Hz' : ''), true],
+    ['Last message', ecoRow(esc(ecoAgo(d.ageMs)), dash(d.messageCount) + ' message(s)'), true],
+    ['REST snapshot', d.snapshotAvailable ? 'available' : 'not allowed by device'],
+  ].map(([k, v, raw]) => `<dt>${esc(k)}</dt><dd>${raw ? v : esc(String(v))}</dd>`).join('');
+}
+
+// isOpen - переданий явно, не читання DOM тут (render.js без DOM, той самий
+// принцип, що й решта файлу): index.html сканує поточні відкриті <details>
+// ПЕРЕД перемальовкою (той самий патерн, що ecoSysOpenDetails у порталі) і
+// передає множину серійників в ecoflowSystemDevicesHtml() нижче.
+function ecoSysDeviceRow(d, isOpen) {
+  return `<details class="sys-eco-device"${isOpen ? ' open' : ''} data-sn="${esc(d.serialNumber)}">
+    <summary>
+      <span class="eco-caret">▸</span>
+      <span class="eco-name">${esc(d.name)}</span>
+      ${ecoGrid(d.grid, d.gridInferred)}
+      <span class="eco-charge">${ecoChargeRounded(d)}</span>
+      <span class="eco-remain">${ecoRemain(d.remainTimeMinutes)}</span>
+    </summary>
+    <dl>${ecoDeviceDetailRows(d)}</dl>
+  </details>`;
+}
+
+function ecoflowSystemDevicesHtml(devices, openSerials) {
+  const list = Array.isArray(devices) ? devices : [];
+  if (!list.length) return '<p class="muted">No devices configured.</p>';
+  const open = openSerials || new Set();
+  return list.map((d) => ecoSysDeviceRow(d, open.has(d.serialNumber))).join('');
+}
+
+// --- MQTT: буквальний порт portal (assets/www/index.html: hintIcon/
+// mqttDeniedText/mqttCommandsRejectedText/mqttDroppedText/mqttDroppedRows/
+// mqttLwtRows/mqttHeartbeatText/mqttHeartbeatRows/mqttConnectionRows/
+// mqttConsoleMirrorRows/renderMqtt/renderMqttSystemSummary) - "1:1 як на
+// порталі" (запит користувача цієї сесії). Портал-мапер dt/dd сам екранує
+// текстові значення (третій елемент пари - "це вже розмітка, не екранувати
+// вдруге") - dlRows()/kv() тут такого розрізнення не роблять (dd лишається
+// на відповідальність викликача, як і в решті файлу), тому нижче esc()
+// викликається явно на кожному текстовому полі, без третього елемента пари.
+
+function hintIcon() { return '<span class="hint-mark">ⓘ</span>'; }
+
+// subscribeDeniedCount > 0 - брокер відхилив підписку (ACL), клієнт лишається
+// "connected", але мовчить (docs/tech_debt.md, "EcoFlow: відкликані ключі").
+function mqttDeniedText(count) {
+  if (!count) return '0';
+  return `<span style="color:var(--err)">${count} - check ACL (docs/ecoflow_mqtt_proxy_setup.md)</span>`;
+}
+function mqttCommandsRejectedText(count) {
+  if (!count) return '0';
+  return `<span style="color:var(--err)">${count} - command queue was full</span>`;
+}
+// Компактний однорядковий варіант (System-картка - місця на два окремі рядки
+// нема) - розбивка out/in у хінті (title).
+function mqttDroppedText(out, incoming) {
+  const total = (out || 0) + (incoming || 0);
+  const hint = [
+    'Not enough memory (heap) to send or receive a message,',
+    'or the queue was full.',
+    `Dropped out: ${out} message(s)`,
+    `Dropped in: ${incoming} message(s)`,
+  ].join('\n');
+  const color = total > 0 ? ' style="color:var(--err)"' : '';
+  return `<span title="${esc(hint)}"${color}>${total}${hintIcon()}</span>`;
+}
+// Два окремі рядки - для повної вкладки MQTT.
+function mqttDroppedRows(out, incoming) {
+  const text = (n) => n > 0 ? `<span style="color:var(--err)">${n} message(s)</span>` : '0 message(s)';
+  return [
+    ['Dropped out', text(out)],
+    ['Dropped in', text(incoming)],
+  ];
+}
+// Три окремі рядки - і для повної вкладки MQTT, і для System-картки, той
+// самий формат в обох місцях.
+function mqttLwtRows(lwt) {
+  if (!lwt) return [['LWT', 'not configured']];
+  return [
+    ['LWT topic', esc(lwt.topic)],
+    ['LWT online', esc(lwt.onlineMessage || '(none)')],
+    ['LWT offline', esc(lwt.offlineMessage || '(none)')],
+  ];
+}
+const kHeartbeatHint = 'Periodic keep-alive message published to the LWT topic between ' +
+  'connects/disconnects, so a silent device is caught even without a network drop.';
+// Компактний варіант - для System (LWT там теж три рядки, Heartbeat лишається згорнутим).
+function mqttHeartbeatText(hb) {
+  if (!hb || !hb.message) return `<span title="${esc(kHeartbeatHint)}">not configured${hintIcon()}</span>`;
+  return `<span title="${esc(kHeartbeatHint)}">"${esc(hb.message)}" every ` +
+    `${hb.intervalMs / 1000} s${hintIcon()}</span>`;
+}
+function mqttHeartbeatRows(hb) {
+  if (!hb || !hb.message) return [['Heartbeat', 'not configured']];
+  return [
+    ['Heartbeat message', esc(hb.message)],
+    ['Heartbeat interval', (hb.intervalMs / 1000) + ' s'],
+  ];
+}
+// Спільний перелік dt/dd - і повна вкладка MQTT, і System-картка. LWT сюди
+// навмисно не входить - додається окремо через mqttLwtRows() в обох місцях.
+// droppedRows - параметр (вкладка/System показують Dropped по-різному), а не
+// власний виклик усередині.
+function mqttConnectionRows(data, droppedRows) {
+  return [
+    ['Connection', data.connected ? 'connected' : 'disconnected'],
+    ['Broker', esc(dash(data.host)) + ':' + dash(data.port)],
+    ['Security', data.security === 'tls' ? 'TLS' : 'plain'],
+    ['Client ID', esc(dash(data.clientId))],
+    ['Login', data.login == null ? '(anonymous)' : esc(data.login)],
+    ['Topic prefix', esc(dash(data.topicPrefix))],
+    ['Published / received', dash(data.publishedCount) + ' / ' + dash(data.receivedCount)],
+    ...droppedRows,
+    ['Subscribe denied', mqttDeniedText(data.subscribeDeniedCount)],
+    ['Commands rejected', mqttCommandsRejectedText(data.commandsRejectedCount)],
+  ];
+}
+function mqttConsoleMirrorRows(cm) {
+  if (!cm || !cm.available) return [['Console mirror', 'not built into this firmware']];
+  const rules = cm.allowRules.length + cm.denyRules.length;
+  const rulesText = rules === 0 ? 'none (everything goes out)' :
+    [...cm.allowRules.map((t) => 'allow ' + t), ...cm.denyRules.map((t) => 'deny ' + t)].join(', ');
+  return [
+    ['Mirror', cm.active ? 'on' : 'off'],
+    ['Topic', esc(cm.topic)],
+    ['Published', dash(cm.publishedCount)],
+    ['Dropped (rate limit)', dash(cm.droppedByRateLimitCount)],
+    ['Tag rules', esc(rulesText)],
+  ];
+}
+
+// Повна вкладка MQTT (renderMqtt() у порталі) - Connection/.../Commands
+// rejected + LWT (3 рядки) + Heartbeat (2 рядки, розгорнутий) окремим блоком,
+// Console mirror окремим блоком нижче.
+function renderMqttStatus(data) {
+  const droppedRows = mqttDroppedRows(data.droppedOutgoingCount, data.droppedIncomingCount);
+  const rows = mqttConnectionRows(data, droppedRows).concat(mqttLwtRows(data.lwt), mqttHeartbeatRows(data.heartbeat));
+  return kv(rows) + '<div class="section-group"><h3>Console mirror</h3>' + kv(mqttConsoleMirrorRows(data.consoleMirror)) + '</div>';
+}
+
+// System-картка (renderMqttSystemSummary() у порталі) - той самий перелік,
+// Dropped згорнутий в один рядок (mqttDroppedText), Console mirror - лише
+// коли зібраний у прошивку (available), одним компактним рядком on/off.
+function mqttSystemRows(data) {
+  const droppedRow = [['Messages dropped', mqttDroppedText(data.droppedOutgoingCount, data.droppedIncomingCount)]];
+  const rows = mqttConnectionRows(data, droppedRow).concat(mqttLwtRows(data.lwt));
+  rows.push(['Heartbeat', mqttHeartbeatText(data.heartbeat)]);
+  if (data.consoleMirror && data.consoleMirror.available) {
+    rows.push(['Console mirror', data.consoleMirror.active ? 'on' : 'off']);
+  }
+  return rows;
+}
+
 // Той самий каркас карток, що System-вкладка порталу (assets/www/index.html,
 // #sys-cards/.card): Device/Network/EcoFlow/MQTT/Memory/LittleFS/SD card/
 // NVS/Modules + таблиця розділів під картками, той самий порядок карток.
-// system-info (kJsonApiSystemInfo, src/main.cpp) сьогодні несе лише
-// chip/heap/flash/nvs/partitions - решта портальних карток (env/uptime/
-// мережа/EcoFlow/MQTT/LittleFS/SD/modules) цим каналом ще не їдуть, тому
-// mockDl()/"***" замість того, щоб тихо пропустити картку чи рядок: форма
-// вже готова під майбутнє поле, видно, що саме ще не підключено, а не що
-// воно нульове.
 //
-// Network/EcoFlow дублюють окремі SAPI-команди (wifi-status/ecoflow-status,
-// свої вкладки) - навмисно мок і тут: об'єднання System-картки з даними
-// сусідньої команди (один HTTP-подібний запит на вкладку, як у порталі,
-// а не один MQTT-запит на команду) - відкрите архітектурне питання, ще не
-// вирішене (сесія 2026-09-24, обговорення "як генерувати SAPI-контент з
-// різних повідомлень"). MQTT-картка (стан ВЛАСНОГО MQTT-клієнта плати,
-// docs/mqtt-topics.md) - мок повністю, для неї ще немає жодної SAPI-команди
-// взагалі.
-function renderSystemInfo(data) {
-  const c = data.chip || {}, h = data.heap || {}, f = data.flash || {}, n = data.nvs || {};
+// `extra.wifi`/`extra.ecoflow` - остання відома відповідь wifi-status/
+// ecoflow-status (той самий формат, що й renderWifiStatus()/
+// renderEcoflowStatus() нижче отримують), яку index.html передає сюди після
+// БУДЬ-ЯКОЇ з трьох відповідей (система/wifi/ecoflow) - той самий принцип,
+// що statusRows() у порталі малює і вкладку Wi-Fi, і System-картку з ОДНОГО
+// запиту. Немає ще жодної відповіді на wifi-status/ecoflow-status в цій
+// сесії SAPI - картка лишається mockDl() (форма готова, дані ще не
+// приїхали, а не "нуль"), той самий контракт, що вже несе `data.portal`
+// нижче для полів, яких system-info взагалі ще не носить.
+//
+// `extra.ecoflowOpenSerials` - Set серійників, чий <details> зараз
+// розгорнутий (index.html сканує DOM ПЕРЕД перемальовкою - render.js сам
+// без DOM); EcoFlow-картка тепер 1:1 з порталом - той самий підсумок
+// (ecoflowSystemRows) + той самий компактний розгортний список пристроїв
+// (ecoflowSystemDevicesHtml/ecoSysDeviceRow), не лише мок.
+//
+// `extra.mqtt` - остання відома відповідь mqtt-status (той самий принцип,
+// що wifi/ecoflow вище) - MQTT-картка тепер теж 1:1 з порталом
+// (mqttSystemRows), мок лише поки жодної відповіді ще не було.
 
-  const deviceTop = mockDl(['Firmware env', 'Revision', 'Uptime']);
+// Бар використання heap (картка Memory) - НЕ порт порталу: портал сьогодні
+// не має жодного bar/progress-віджета (лише текстові dl), це нова
+// візуалізація за проханням користувача цієї сесії, специфічна для SAPI.
+//
+// Ширина бара = h.totalBytes. Зліва - Used (суцільний колір). Одразу за ним
+// - Largest free block (яскравіший відтінок "вільного"): показує, скільки з
+// вільного лежить ОДНИМ безперервним шматком. Решта смуги лишається фоном
+// бара (var(--line), той самий "порожній трек" колір) - це вільне, побите
+// на дрібніші шматки. Розрив між "Largest" і рештою смуги показує
+// фрагментацію напряму, без окремого числа поруч (fragmentationPercent
+// лишається в dl нижче як точне число - бар лише дає оком оцінити масштаб).
+//
+// Min free ever - НЕ окремий сегмент (другий бар плутав би, яка межа до
+// чого - саме той сумнів, який user описав), а вертикальна позначка
+// (маркер) на тій самій смузі: де проходила межа used/free в НАЙГІРШИЙ
+// момент з часу старту пристрою. Відповідає на "наскільки близько
+// підходили до вичерпання" одним поглядом, а не ще одним числом.
+//
+// Hover-tooltip на кожному розмірі (used/free/largest/min) окремо, НЕ один
+// загальний title на весь бар - користувач прямо зазначив, що загальний
+// незрозуміло як показувати (чотири числа в одному title нечитабельні).
+// Тому "вільний фрагментований залишок" (сьогодні - просто фон бара) тут
+// стає окремим <div> (heap-bar-free) - інакше йому нема на чому висіти
+// власним title. Total - свідомо БЕЗ tooltip (сам користувач це виключив).
+//
+// Відкрите питання (навмисно не вирішене цієї сесії, за словами
+// користувача): графік вільної пам'яті в часі - вимагає циклічного
+// опитування (SAPI сам зберігає історію точок, а не пристрій) - записано в
+// docs/mqtt-web-handoff.md, не реалізовано.
+function heapBarHtml(h) {
+  const total = h.totalBytes;
+  if (!total) return ''; // ще нема даних (мок-стан) - бар без чисел не малюємо
+  const used = Math.max(0, total - (h.freeBytes || 0));
+  const usedPct = Math.min(100, (used / total) * 100);
+  const largestBytes = Math.min(h.largestFreeBlockBytes || 0, total - used);
+  const largestPct = Math.min(100 - usedPct, (largestBytes / total) * 100);
+  const freeBytesTotal = Math.max(0, total - used);
+  const fragmentedBytes = Math.max(0, freeBytesTotal - largestBytes);
+  const fragmentedPct = Math.max(0, 100 - usedPct - largestPct);
+
+  let markerHtml = '';
+  if (h.minFreeEverBytes != null) {
+    const markerPct = Math.min(100, Math.max(0, ((total - h.minFreeEverBytes) / total) * 100));
+    markerHtml = `<div class="heap-bar-marker" style="left:${markerPct.toFixed(2)}%" ` +
+      `title="Min free ever: ${esc(fmtBytes(h.minFreeEverBytes))} (most memory ever used at once since boot)"></div>`;
+  }
+
+  let freeHtml = '';
+  if (fragmentedPct > 0) {
+    freeHtml = `<div class="heap-bar-free" style="left:${(usedPct + largestPct).toFixed(2)}%;width:${fragmentedPct.toFixed(2)}%" ` +
+      `title="Free: ${esc(fmtBytes(fragmentedBytes))} in smaller fragments (${esc(fmtBytes(freeBytesTotal))} free in total)"></div>`;
+  }
+
+  return `<div class="heap-bar">` +
+      `<div class="heap-bar-used" style="width:${usedPct.toFixed(2)}%" ` +
+        `title="Used: ${esc(fmtBytes(used))} of ${esc(fmtBytes(total))}"></div>` +
+      `<div class="heap-bar-largest" style="left:${usedPct.toFixed(2)}%;width:${largestPct.toFixed(2)}%" ` +
+        `title="Largest free block: ${esc(fmtBytes(largestBytes))} (largest single contiguous chunk)"></div>` +
+      freeHtml +
+      markerHtml +
+    `</div>` +
+    `<div class="heap-bar-legend">` +
+      `<span><i class="sw sw-used"></i>Used</span>` +
+      `<span><i class="sw sw-largest"></i>Largest free block</span>` +
+      `<span><i class="sw sw-free"></i>Free (fragmented)</span>` +
+      (h.minFreeEverBytes != null ? `<span><i class="sw sw-marker"></i>Min free ever</span>` : '') +
+    `</div>`;
+}
+
+function renderSystemInfo(data, extra) {
+  extra = extra || {};
+  const c = data.chip || {}, h = data.heap || {}, f = data.flash || {}, n = data.nvs || {};
+  // portal - той самий об'єкт, що й /api/status (WebPortal::statusJson(),
+  // src/main.cpp: jsonApiSystemInfoExecute()) - властивості ПРИСТРОЮ, не
+  // HTTP-каналу, тому реальні одразу, без прив'язки до окремої SAPI-команди.
+  const portal = data.portal || null;
+
+  const deviceTop = portal ? dlRows([
+    ['Firmware env', esc(dash(portal.env))],
+    ['Revision', esc(dash(portal.revision))],
+    ['Uptime', fmtMs(portal.uptimeMs)],
+  ]) : mockDl(['Firmware env', 'Revision', 'Uptime']);
   const deviceHeap = dlRows([['Free heap', fmtBytes(h.freeBytes)]]);
-  const deviceRest = mockDl(['Portal auth', 'Pending jobs']);
+  const deviceRest = portal ? dlRows([
+    ['Portal auth', boolBadge(portal.auth, 'enabled', 'disabled')],
+    ['Pending jobs', dash(portal.pendingJobs)],
+  ]) : mockDl(['Portal auth', 'Pending jobs']);
   const deviceFlash = dlRows([
     ['Chip model', esc(dash(c.model)) + (c.revision != null ? ` (rev ${c.revision})` : '')],
     ['CPU', `${dash(c.cores)} core${c.cores === 1 ? '' : 's'} @ ${c.cpuFreqMHz ?? '-'} MHz`],
@@ -94,21 +450,37 @@ function renderSystemInfo(data) {
     ['Flash speed', f.speedHz ? (f.speedHz / 1e6).toFixed(0) + ' MHz' : '-'],
   ]);
   let html = '<div class="cards">';
-  html += `<div class="card"><h2>Device</h2><dl>${deviceTop}${deviceHeap}${deviceRest}</dl><dl>${deviceFlash}</dl></div>`;
+  // Один <dl>, не два (портал розводить #sys-device/#sys-device-flash - але
+  // там причина в РІЗНІЙ частоті оновлення: перший - на кожен тік, другий -
+  // лише за Refresh). Тут обидва шматки приїжджають ОДНИМ system-info-запитом
+  // і рендеряться одним викликом - двох незалежних CSS-grid (кожен dl рахує
+  // свою колонку max-content окремо) без причини лишало враження "двох різних
+  // блоків", а не однієї картки.
+  html += `<div class="card"><h2>Device</h2><dl>${deviceTop}${deviceHeap}${deviceRest}${deviceFlash}</dl></div>`;
 
-  html += '<div class="card"><h2>Network</h2><dl>' + mockDl([
-    'State', 'SSID', 'IP address', 'Gateway', 'Signal', 'Connection type', 'MAC', 'Auto reconnect', 'Hotspot',
-  ]) + '</dl></div>';
+  html += '<div class="card"><h2>Network</h2><dl>' + (extra.wifi
+    ? dlRows(wifiSystemRows(extra.wifi))
+    : mockDl(['State', 'SSID', 'IP address', 'Gateway', 'Signal', 'Connection type', 'MAC', 'Auto reconnect', 'Hotspot'])
+  ) + '</dl></div>';
 
-  html += '<div class="card"><h2>EcoFlow</h2><dl>' + mockDl([
-    'Connection', 'Broker', 'Connection type', 'Devices', 'Messages received',
-  ]) + '</dl></div>';
+  {
+    const eco = extra.ecoflow;
+    const devices = eco && Array.isArray(eco.devices) ? eco.devices : [];
+    const countLabel = eco ? `<span class="muted" style="font-size:.75em; font-weight:400">${devices.length} device(s)</span>` : '';
+    html += `<div class="card"><h2>EcoFlow ${countLabel}</h2><dl>` + (eco
+      ? dlRows(ecoflowSystemRows(eco))
+      : mockDl(['Connection', 'Broker', 'Connection type', 'Devices', 'Messages received'])
+    ) + '</dl>' + (eco
+      ? `<div class="sys-eco-devices">${ecoflowSystemDevicesHtml(devices, extra.ecoflowOpenSerials)}</div>`
+      : '') + '</div>';
+  }
 
-  html += '<div class="card"><h2>MQTT</h2><dl>' + mockDl([
-    'Connection', 'Broker', 'Security', 'Client ID', 'Login', 'Topic prefix',
-    'Published / received', 'Messages dropped', 'Subscribe denied', 'Commands rejected',
-    'LWT topic', 'LWT online', 'LWT offline', 'Heartbeat', 'Console mirror',
-  ]) + '</dl></div>';
+  html += '<div class="card"><h2>MQTT</h2><dl>' + (extra.mqtt
+    ? dlRows(mqttSystemRows(extra.mqtt))
+    : mockDl(['Connection', 'Broker', 'Security', 'Client ID', 'Login', 'Topic prefix',
+        'Published / received', 'Messages dropped', 'Subscribe denied', 'Commands rejected',
+        'LWT topic', 'LWT online', 'LWT offline', 'Heartbeat', 'Console mirror'])
+  ) + '</dl></div>';
 
   const memUnit = fsUnit(h.totalBytes || h.freeBytes || 1);
   const freePct = h.totalBytes > 0 ? Math.round((h.freeBytes / h.totalBytes) * 100) : null;
@@ -118,7 +490,7 @@ function renderSystemInfo(data) {
     ['Largest free block', fsSizeIn(h.largestFreeBlockBytes, memUnit)],
     ['Fragmentation', (h.fragmentationPercent ?? '-') + '%'],
     ['Min free ever', h.minFreeEverBytes ? fsSizeIn(h.minFreeEverBytes, memUnit) : '-'],
-  ]) + '</dl></div>';
+  ]) + '</dl>' + heapBarHtml(h) + '</div>';
 
   html += `<div class="card"><h2>LittleFS</h2><dl>${mockDl(['Total', 'Used', 'Free'])}</dl></div>`;
   html += `<div class="card"><h2>SD card</h2><dl>${mockDl(['Type', 'Total', 'Used', 'Free'])}</dl></div>`;
@@ -133,7 +505,12 @@ function renderSystemInfo(data) {
     ];
   })()) : '<dt>NVS</dt><dd class="muted">not available</dd>') + '</dl></div>';
 
-  html += '<div class="card"><h2>Modules</h2><p class="muted">***</p></div>';
+  html += '<div class="card"><h2>Modules</h2>' + (portal
+    ? (portal.modules && portal.modules.length
+        ? `<p>${portal.modules.map(esc).join(', ')}</p>`
+        : '<p class="muted">-</p>')
+    : '<p class="muted">***</p>'
+  ) + '</div>';
   html += '</div>'; // .cards
 
   // Звичайний <h2> (як card-заголовки вище), не .section-group h3 - портал
@@ -164,8 +541,7 @@ function renderWifiStatus(data) {
     ['ssid', esc(dash(data.ssid))],
     ['ip', esc(dash(data.ip))],
     ['gateway', esc(dash(data.gateway))],
-    ['rssi', data.rssi != null ? data.rssi + ' dBm' : '-'],
-    ['quality', data.quality != null ? data.quality + ' %' : '-'],
+    ['signal', data.connected ? signal(data.rssi, data.quality) : '<span class="muted">-</span>'],
     ['phy mode', esc(dash(data.phyMode))],
     ['mac', esc(dash(data.mac))],
     ['auto-reconnect', boolBadge(data.autoReconnect)],
@@ -222,6 +598,7 @@ const RENDERERS = {
   'system-info': renderSystemInfo,
   'wifi-status': renderWifiStatus,
   'ecoflow-status': renderEcoflowStatus,
+  'mqtt-status': renderMqttStatus,
 };
 
 // UMD-подібний хвіст: у браузері (класичний <script>, без type="module")
@@ -230,7 +607,9 @@ const RENDERERS = {
 // (require() з test/render.test.js) - експортуємо явно.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    esc, badge, boolBadge, kv, dlRows, mockDl, dash, fmtBytes, fmtMs, fmtEpoch, fsUnit, fsSizeIn,
-    renderSystemInfo, renderWifiStatus, renderEcoflowStatus, RENDERERS,
+    esc, badge, boolBadge, signal, kv, dlRows, mockDl, dash, fmtBytes, fmtMs, fmtEpoch, fsUnit, fsSizeIn,
+    wifiSystemRows, ecoflowSystemRows, ecoflowSystemDevicesHtml, ecoSysDeviceRow, ecoDeviceDetailRows,
+    mqttSystemRows, mqttConnectionRows, mqttLwtRows, mqttConsoleMirrorRows, heapBarHtml,
+    renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus, RENDERERS,
   };
 }

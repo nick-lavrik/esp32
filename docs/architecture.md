@@ -1068,6 +1068,11 @@ EcoFlow-блок і показувалась не та конфігурація 
 - **Веб-портал** (усі плати, крім `esp8266`): налаштування Wi-Fi, консоль логу наживо
   (SSE, з відкатом на опитування) і запуск тих самих команд із браузера. Працює і в домашній
   мережі, і на AP-fallback точці `ESP-<env>`. Опис — **`docs/web_portal.md`**
+- **MQTT JSON API (SAPI)** — той самий доступ до даних порталу, лише поверх
+  MQTT (не HTTP): чотири команди (`system-info`/`wifi-status`/
+  `ecoflow-status`/`mqtt-status`) + retained discovery-маніфест, окрема
+  браузерна сторінка `sapi/`. Опис — **`docs/web_portal.md`**, розділ
+  «MQTT JSON API (SAPI)»
 - SerialCommander — керування пристроєм через serial-консоль (`list` для команд)
 - **Один вхід для команд** (`lib/CommandQueue`): serial, MQTT, cron і веб кладуть рядок у ту саму
   чергу, виконує її `loop()`. Черга повна — джерело отримує ЯВНУ відмову (`busy` / `503`)
@@ -1190,6 +1195,27 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-09-22/24 — **MQTT JSON API (SAPI) — паралельний, повністю read-only
+  канал доступу до даних веб-порталу без HTTP**, поверх нового топік-
+  простору `devices/<client-id>/api/<cmd>`/`.../reply` (`docs/mqtt-topics.md`).
+  Чотири команди (`system-info`/`wifi-status`/`ecoflow-status`/
+  `mqtt-status`), кожна перевикористовує вже наявний метод відповідного
+  `IWebModule` (`WebSystemModule`/`WebWifiModule::portalStatusJson()`/
+  `WebEcoflowModule::mqttStatusJson()`/`WebMqttModule::statusJson()` —
+  жодного нового форматера). `CommandQueue` уніфікована (не окрема черга
+  під JSON): `Slot.kind` (`kText`/`kJson`), атомарна доставка повз
+  `Journal` (людський `CommandResponse` розрубав би JSON на кілька
+  MQTT-повідомлень). Discovery (`devices/<client-id>/discovery`, retained) —
+  `board`/`revision`/`features`/`commands`, republish на кожен `onConnect()`.
+  Браузерний клієнт — окрема сторінка `sapi/` (монорепо, поза прошивкою):
+  System-вкладка компонує кілька відповідей в один набір карток (той самий
+  підхід, що HTTP-портал), heap-бар на Memory, Pause/Resume і Newest first
+  на Log, усі UI-перемикачі переживають refresh/reconnect
+  (`sapi/README.md`). Безпека — окремий MQTT-over-WebSockets listener на
+  rpi5, окремий ACL на пристрій, без доступу до `command/<id>` чи інших
+  пристроїв. Повний опис — `docs/web_portal.md`, розділ «MQTT JSON API
+  (SAPI)»; залишковий борг — `docs/tech_debt.md`, той самий розділ;
+  історія рішень — `docs/mqtt-web-handoff.md`.
 - 2026-09-20 — **новий розділ веб-порталу «MQTT»** (`lib/WebPortal/WebMqttModule`,
   `docs/web_portal.md`) + однойменна картка на System — стан ЗАГАЛЬНОГО
   клієнта (`mqtt`/`ConsoleMqtt`, не EcoFlow — у того свій розділ): host/port/
