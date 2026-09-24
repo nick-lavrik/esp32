@@ -44,7 +44,15 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--bg); color: var(--text);
+/* min-height (не height) - тіло росте вище за 100vh, коли вмісту більше за
+   екран (Log-вкладка, розділ нижче), а не обрізається на рівні viewport;
+   flex-колонка - щоб main (нижче) міг зайняти РЕШТУ висоти, а не лише
+   власний вміст. header/nav лишаються без flex:none - дефолтний
+   flex:0 1 auto їх і так не розтягує (жодного flex-grow), а стиснення
+   ніколи не настає: тіло без фіксованої height, лише min-height, тому
+   "дефіциту" простору для flex-shrink не буває в принципі. */
+body { margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+  background: var(--bg); color: var(--text);
   font: var(--font-size-base)/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -89,10 +97,23 @@ nav button.active { background: var(--panel); border-color: var(--line); color: 
    картки System удвічі вужчими, ніж дозволяє екран, і саме це, разом із
    .out нижче, робило вигляд "зовсім іншим", ніж на порталі (сесія
    2026-09-24). */
-main { padding: 0 16px 24px; }
+/* flex: 1 0 auto (не скорочена "flex:1" = "1 1 0%") - зростає, щоб
+   заповнити решту висоти тіла, але НІКОЛИ не стискається нижче власного
+   вмісту (shrink:0). Той самий патерн нижче - на Log-секції й на #log
+   самому - три ланки одного ланцюга: тіло без фіксованої height (вище) ->
+   main росте до решти екрана -> активна Log-секція росте до решти main ->
+   #log росте до решти секції. Розтягування, вимкнене на shrink, означає:
+   короткий лог - блок все одно на всю доступну висоту; довгий лог - блок
+   росте понад екран, скролиться СТОРІНКА, не #log. */
+main { padding: 0 16px 24px; flex: 1 0 auto; display: flex; flex-direction: column; }
 section { display: none; background: var(--panel); border: 1px solid var(--line);
   border-radius: 0 8px 8px 8px; padding: 16px; }
 section.active { display: block; }
+/* Вужчий за .active селектор ([data-tab="log"] додає специфічність) - лише
+   Log-секція стає flex-колонкою на всю решту main; System/Wi-Fi/EcoFlow
+   лишаються звичайним display:block (їхня верстка карток/kv не потребує
+   full-height розтягування, займають рівно стільки, скільки треба). */
+section[data-tab="log"].active { display: flex; flex-direction: column; flex: 1 0 auto; }
 section > h2:first-child, .card > h2:first-child { margin-top: 0; }
 h2 { font-size: var(--font-size-large); text-transform: uppercase; letter-spacing: .05em;
   color: var(--text); margin: 24px 0 10px; font-weight: 600; }
@@ -184,9 +205,74 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 details.raw { margin-top: 10px; }
 details.raw summary { cursor: pointer; font-size: var(--font-size-small); color: var(--muted); }
 details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-height: 1.45; overflow-x: auto; }
-#log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap;
-  background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
-  max-height: 420px; overflow-y: auto; }
+/* Без max-height/overflow-y - навмисно (розділ вище, "flex: 1 0 auto"):
+   #log росте разом із секцією/main/тілом, сторінка скролиться сама,
+   власного внутрішнього скролу тут більше нема. */
+#log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+  background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 4px 0;
+  flex: 1 0 auto; }
+/* Один DOM-рядок на подію (не textContent-блоб) - grid тримає колонки
+   вирівняними, а text-overflow:ellipsis на topic/payload не дає жодній події
+   розповзтись на другий рядок, навіть коли payload - кілька КБ JSON
+   (система-info). ::before-стрілку тут не тримаємо - для .has-json рядків
+   JS сам пише "▸"/"▾" у .log-expand при кожному toggle. */
+.log-row { border-bottom: 1px solid #ffffff08; }
+.log-row:last-child { border-bottom: none; }
+.log-line { display: grid; grid-template-columns: 12px 78px 12px minmax(0,1fr) minmax(0,1.6fr);
+  gap: 8px; align-items: baseline; padding: 3px 12px; }
+.log-row.has-json .log-line { cursor: pointer; }
+.log-row.has-json .log-line:hover { background: #ffffff08; }
+.log-expand { color: var(--muted); }
+.log-t { color: var(--muted); white-space: nowrap; }
+.log-dir { text-align: center; font-weight: 700; }
+.log-dir.dir-out { color: var(--accent); }
+.log-dir.dir-in { color: var(--text); }
+.log-dir.dir-info { color: var(--muted); }
+.log-dir.dir-err { color: var(--err); }
+/* dir-io - об'єднаний рядок запит+відповідь (mergeReply): 'ok' зелений,
+   'error' той самий колір, що й звичайна err-подія. */
+.log-dir.dir-io { color: var(--ok); }
+.log-row.reply-err .log-dir.dir-io { color: var(--err); }
+.log-row.reply-err .log-payload { color: var(--err); }
+.log-topic { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-payload { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-row.dir-err .log-payload { color: var(--err); }
+/* Pretty JSON - лише для рядків, де payload розпарсився в об'єкт (не для
+   "heartbeat" і подібного простого тексту), розгортається кліком по
+   .log-line, схований за замовчуванням (`hidden`). Для об'єднаного рядка
+   (mergeReply) - дві підписані частини (request/reply) в тому самому блоці. */
+/* .log-pretty-body - єдиний реальний flex-child (скрол вмісту, на всю
+   висоту .log-pretty). .log-pretty-resize - НЕ flex-child, а
+   position:absolute overlay поверх body (position:relative тут же) - не
+   position:sticky (той зависав посеред JSON під час скролу, виглядав як
+   баг) і не окремий flex-рядок під вмістом (той з'їдав 14px власної
+   висоти - під ручкою просто не лишалось тексту, щоб крізь неї щось
+   бачити). Overlay напівпрозорий (.log-pretty-resize нижче) - останній
+   рядок під ним видно, притлумленим, а не відрізаним. */
+.log-pretty { position: relative; margin: 0 12px 8px 38px; background: #00000030;
+  border: 1px solid var(--line); border-radius: 4px; max-height: 320px;
+  display: flex; flex-direction: column; overflow: hidden; }
+/* padding-bottom (22, не 8) - запас під overlay-ручку (14px): реальний
+   текст завжди можна доскролити ВИЩЕ ручки, вона перекриває лише цей
+   запасний "хвіст", не останній рядок даних. */
+.log-pretty-body { padding: 8px 10px 22px; overflow: auto; flex: 1 1 auto;
+  font-size: 11.5px; line-height: 1.45; }
+.log-pretty-body pre { margin: 0; white-space: pre-wrap; }
+.log-pretty-label { color: var(--muted); font-weight: 600; margin: 8px 0 2px; }
+.log-pretty-label:first-child { margin-top: 0; }
+/* Ручка зміни висоти - Pointer Events (JS, attachResizeHandle), а не
+   нативний CSS `resize`: той на тач-браузерах (iOS Safari) підтримується
+   неповно/зовсім, Pointer Events працюють однаково для миші, тача й пера.
+   Напівпрозорий фон (не лише сама смужка-хват) - текст під ручкою
+   лишається читабельним, притлумленим; максимальна висота драгу обмежена
+   в JS повною висотою вмісту (body.scrollHeight) - розтягнути порожнечу
+   понад те, що реально є в блоці, не можна. */
+.log-pretty-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 14px;
+  cursor: ns-resize; touch-action: none; display: flex; align-items: center; justify-content: center;
+  background: rgba(14, 17, 22, .55); }
+.log-pretty-resize:hover, .log-pretty-resize.dragging { background: rgba(14, 17, 22, .8); }
+.log-pretty-resize::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--accent); opacity: .8; }
+.log-pretty-resize:hover::before, .log-pretty-resize.dragging::before { opacity: 1; }
 .muted { color: var(--muted); }
 .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-small); color: var(--muted); }
 .checkbox-row input { width: auto; }
@@ -262,6 +348,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 
   <section data-tab="log">
     <h2 class="hrow">Log <span class="muted" style="font-weight:400; font-size:var(--font-size-small)">(останні 500 рядків)</span><span class="spacer"></span>
+      <label class="checkbox-row"><input type="checkbox" id="log-newest-first">Newest first</label>
       <button id="btn-clear-log" class="act ghost">Clear</button>
     </h2>
     <div id="log"></div>
@@ -348,15 +435,215 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 
   fillForm(loadConn());
 
-  function log(line) {
+  // --- лог (вкладка Log) ---
+  // Один DOM-рядок на подію (не textContent-блоб, як було раніше) -
+  // time/dir/topic/payload у grid-колонках з ellipsis, тому подія завжди
+  // лишається одним рядком, навіть коли payload - кілька КБ JSON
+  // (system-info). Pretty-друк JSON - лише по кліку на рядок (`has-json`).
+  //
+  // Запит і відповідь з тим самим `id` (кореляція SAPI, docs/
+  // mqtt-web-handoff.md, "Погоджені рішення фази 1") зводяться в ОДИН
+  // рядок, а не два: `pendingRequests` тримає щойно залогований запит, поки
+  // не прийде відповідь із тим самим id (mergeReply() дописує її в ТОЙ
+  // САМИЙ рядок) або поки рядок не витіснеться зі старості
+  // (evictOldestRow() прибирає його з мапи теж - інакше вона росла б без
+  // обмеження на пристрої, що ніколи не відповідає).
+  const DIR_LABEL = { out: '>', in: '<', info: 'i', err: '!', io: '⇄' };
+  // logRows - завжди хронологічний порядок (push = найновіший в кінці),
+  // незалежно від того, як його показано - "порядок зберігання" і "порядок
+  // показу" свідомо розведені: evictOldestRow() (найстаріший - завжди
+  // logRows[0]) і кореляція id в pendingRequests не залежать від чекбокса
+  // "Newest first" нижче, лише DOM-вставка (logEvent) на нього зважає.
+  const logRows = [];
+  const pendingRequests = new Map(); // id -> рядок запиту, що ще чекає на reply
+
+  const LOG_ORDER_KEY = 'sapi.logOrder.v1';
+  let logNewestFirst = true; // дефолт - вгору: сторінка тепер сама росте
+  // (без внутрішнього скролу #log, розділ вище), тож найновіший рядок одразу
+  // видно, не гортаючи вниз через екрани вже накопиченого логу.
+  try {
+    const saved = localStorage.getItem(LOG_ORDER_KEY);
+    if (saved !== null) logNewestFirst = JSON.parse(saved);
+  } catch (e) { /* лишається дефолт */ }
+  const logOrderCheckbox = $('#log-newest-first');
+  logOrderCheckbox.checked = logNewestFirst;
+  logOrderCheckbox.addEventListener('change', () => {
+    logNewestFirst = logOrderCheckbox.checked;
+    try { localStorage.setItem(LOG_ORDER_KEY, JSON.stringify(logNewestFirst)); } catch (e) { /* нічого критичного */ }
+    // Перевпорядкувати вже наявні рядки теж, не лише майбутні - append() з
+    // уже прикріпленими вузлами ПЕРЕСУВАЄ їх (Node лишається єдиним в DOM),
+    // повторного створення рядків не треба.
+    const ordered = logNewestFirst ? [...logRows].reverse() : logRows;
+    $('#log').append(...ordered);
+  });
+
+  function prettyBlock(rawText) {
+    const pre = document.createElement('pre');
+    try {
+      const v = JSON.parse(rawText);
+      pre.textContent = (v && typeof v === 'object') ? JSON.stringify(v, null, 2) : rawText;
+    } catch (e) {
+      pre.textContent = rawText; // не JSON (heartbeat тощо) - як є
+    }
+    return pre;
+  }
+  function prettyLabeled(label, timeStr, rawText) {
+    const frag = document.createDocumentFragment();
+    const lab = document.createElement('div');
+    lab.className = 'log-pretty-label';
+    lab.textContent = `${label} · ${timeStr}`;
+    frag.appendChild(lab);
+    frag.appendChild(prettyBlock(rawText));
+    return frag;
+  }
+
+  // Ручка зміни висоти .log-pretty - Pointer Events, не нативний CSS
+  // `resize` (той на iOS Safari не працює тачем узагалі). setPointerCapture
+  // прив'язує подальші move/up до САМОЇ ручки, незалежно від того, куди
+  // фізично зʼїхав палець/курсор - document-рівневих слухачів не треба.
+  // Стартова висота - поточна відрендерена (getBoundingClientRect), а не
+  // CSS max-height - працює однаково, чи вміст був "своєю" висотою, чи вже
+  // раз розтягнутий користувачем раніше. maxTotal - висота, за якою body
+  // вже показує ввесь вміст без власного скролу (body.scrollHeight) - ручка
+  // тепер overlay (CSS, position:absolute), не власний flex-рядок, тому
+  // додавати її висоту зверху не треба (padding-bottom body вже несе запас
+  // під неї). Рахується ОДИН раз на pointerdown (не на кожен pointermove -
+  // зайвий reflow), далі drag просто клемпиться нею - розтягнути блок
+  // більше, ніж є реального вмісту, не можна.
+  function attachResizeHandle(pretty, body) {
+    const handle = document.createElement('div');
+    handle.className = 'log-pretty-resize';
+    handle.title = 'потягнути - змінити висоту блока';
+    let startY = 0;
+    let startH = 0;
+    let maxTotal = Infinity;
+    handle.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault(); // не тягнути виділення тексту під час драгу
+      handle.setPointerCapture(ev.pointerId);
+      startY = ev.clientY;
+      startH = pretty.getBoundingClientRect().height;
+      maxTotal = body.scrollHeight;
+      handle.classList.add('dragging');
+    });
+    handle.addEventListener('pointermove', (ev) => {
+      if (!handle.classList.contains('dragging')) return;
+      pretty.style.maxHeight = 'none'; // інакше CSS max-height:320px ріже ріст
+      const h = Math.max(60, startH + (ev.clientY - startY));
+      pretty.style.height = Math.min(h, maxTotal) + 'px';
+    });
+    handle.addEventListener('pointerup', (ev) => {
+      handle.classList.remove('dragging');
+      handle.releasePointerCapture(ev.pointerId);
+    });
+    pretty.appendChild(handle);
+  }
+  // Спільний шлях наповнення .log-pretty (одиночне повідомлення й
+  // mergeReply) - завжди чистить і заново кладе вміст у .log-pretty-body +
+  // ручку одним викликом, щоб жодне місце не забуло причепити ручку після
+  // innerHTML=''. Body - окремий скрольований елемент (не сам .log-pretty) -
+  // саме це розводить вміст і ручку по різних flex-дітях (CSS вище).
+  function setPrettyContent(pretty, ...nodes) {
+    pretty.innerHTML = '';
+    const body = document.createElement('div');
+    body.className = 'log-pretty-body';
+    for (const n of nodes) body.appendChild(n);
+    pretty.appendChild(body);
+    attachResizeHandle(pretty, body);
+  }
+
+  function evictOldestRow() {
+    const old = logRows.shift();
+    if (old._reqId !== undefined && pendingRequests.get(old._reqId) === old) {
+      pendingRequests.delete(old._reqId);
+    }
+    old.remove();
+  }
+
+  function mergeReply(reqRow, replyTime, replyRaw, replyParsed) {
+    reqRow.classList.remove('dir-out');
+    reqRow.classList.add('dir-io', replyParsed.ok === false ? 'reply-err' : 'reply-ok');
+
+    const line = $('.log-line', reqRow);
+    const dirEl = $('.log-dir', line);
+    dirEl.className = 'log-dir dir-io';
+    dirEl.textContent = DIR_LABEL.io;
+
+    const dtMs = Math.round(performance.now() - (reqRow._reqT0 || performance.now()));
+    const statusText = replyParsed.ok === false ? `error: ${replyParsed.error || '?'}` : 'ok';
+    $('.log-payload', line).textContent = `id ${replyParsed.id} · ${statusText} · ${dtMs} ms`;
+
+    // Pretty з одного повідомлення (запиту, залогованого раніше) стає
+    // pretty з ДВОХ підписаних частин - request/reply - у тому самому
+    // елементі, той самий click-toggle (line нижче), що вже навішаний.
+    const pretty = $('.log-pretty', reqRow);
+    setPrettyContent(pretty,
+      prettyLabeled('→ request', reqRow._reqTime, reqRow._reqRaw),
+      prettyLabeled('← reply', replyTime, replyRaw));
+  }
+
+  function logEvent(dir, topic, payloadText, note) {
     const el = $('#log');
     const t = new Date().toLocaleTimeString();
-    el.textContent += `[${t}] ${line}\n`;
-    const lines = el.textContent.split('\n');
-    if (lines.length > LOG_MAX_LINES) {
-      el.textContent = lines.slice(lines.length - LOG_MAX_LINES).join('\n');
+    const raw = payloadText != null ? payloadText : (note || '');
+
+    let parsed = null;
+    if (payloadText != null) {
+      try {
+        const v = JSON.parse(payloadText);
+        if (v && typeof v === 'object') parsed = v;
+      } catch (e) { /* не JSON - heartbeat тощо, лишається простим текстом */ }
     }
-    el.scrollTop = el.scrollHeight;
+
+    if (dir === 'in' && parsed && parsed.id !== undefined && pendingRequests.has(parsed.id)) {
+      const reqRow = pendingRequests.get(parsed.id);
+      pendingRequests.delete(parsed.id);
+      mergeReply(reqRow, t, raw, parsed);
+      return;
+    }
+
+    const row = document.createElement('div');
+    row.className = 'log-row dir-' + dir + (parsed ? ' has-json' : '');
+
+    // shortTopic() ховає повторюваний devices/<client-id>-префікс за
+    // "<client-id>" (розділ нижче, біля reqTopic/replyTopic) - повний топік
+    // лишається в title (hover), нічого не втрачено, лише не в кожному рядку.
+    const topicShort = topic ? shortTopic(topic) : '';
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML =
+      `<span class="log-expand">${parsed ? '▸' : ''}</span>` +
+      `<span class="log-t">${t}</span>` +
+      `<span class="log-dir dir-${dir}">${DIR_LABEL[dir] || '?'}</span>` +
+      `<span class="log-topic"${topic ? ` title="${esc(topic)}"` : ''}>${esc(topicShort)}</span>` +
+      `<span class="log-payload">${esc(raw)}</span>`;
+    row.appendChild(line);
+
+    if (parsed) {
+      const pretty = document.createElement('div');
+      pretty.className = 'log-pretty';
+      pretty.hidden = true;
+      setPrettyContent(pretty, prettyBlock(raw));
+      row.appendChild(pretty);
+      line.addEventListener('click', () => {
+        pretty.hidden = !pretty.hidden;
+        $('.log-expand', line).textContent = pretty.hidden ? '▸' : '▾';
+      });
+    }
+
+    if (dir === 'out' && parsed && parsed.id !== undefined) {
+      row._reqId = parsed.id;
+      row._reqTime = t;
+      row._reqRaw = raw;
+      row._reqT0 = performance.now();
+      pendingRequests.set(parsed.id, row);
+    }
+
+    // Вставка - за поточним порядком показу; logRows.push() лишається
+    // хронологічним завжди (коментар при оголошенні logRows вище).
+    if (logNewestFirst) el.insertBefore(row, el.firstChild);
+    else el.appendChild(row);
+    logRows.push(row);
+    if (logRows.length > LOG_MAX_LINES) evictOldestRow();
   }
 
   // --- вкладки (system-info/wifi-status/ecoflow-status/log) - видимі й
@@ -423,6 +710,23 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   function reqTopic(cmd) { return `${conn.prefix}/devices/${conn.clientId}/api/${cmd}`; }
   function replyTopic(cmd) { return `${conn.prefix}/devices/${conn.clientId}/api/${cmd}/reply`; }
   function statusTopic() { return `${conn.prefix}/devices/${conn.clientId}/status`; }
+  // Лог (logEvent) показує топік у кожному рядку - сьогодні всі підписки й
+  // публікації скоуплені на ОДИН пристрій (reqTopic/replyTopic/statusTopic
+  // вище), тому <prefix>/devices/<client-id> - це 99% символів, не
+  // інформація. shortTopic() ховає той самий повторюваний префікс за
+  // "<client-id>" (сам clientId, не слово "device" - той самий
+  // ідентифікатор, що й у формі підключення/f-client, легше зіставити з
+  // кількома пристроями, якби колись знадобилось), лишає лише змінний хвіст
+  // (api/system-info, status тощо) - повний топік і далі доступний через
+  // title (hover) у .log-topic.
+  function shortTopic(topic) {
+    if (!conn) return topic;
+    const prefix = `${conn.prefix}/devices/${conn.clientId}`;
+    const short = `<${conn.clientId}>`;
+    if (topic === prefix) return short;
+    if (topic.startsWith(prefix + '/')) return short + topic.slice(prefix.length);
+    return topic;
+  }
 
   function requestCmd(cmd) {
     if (!client || !client.connected) return;
@@ -432,7 +736,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     setPanelStatus(cmd, 'loading...', '');
     const payload = JSON.stringify({ id });
     client.publish(reqTopic(cmd), payload);
-    log(`> ${reqTopic(cmd)} ${payload}`);
+    logEvent('out', reqTopic(cmd), payload);
   }
 
   function scheduleAuto(cmd) {
@@ -552,7 +856,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     saveConn(conn);
 
     const url = `ws://${conn.host}:${conn.port}`;
-    log(`connecting to ${url} as '${conn.username}', device '${conn.clientId}'`);
+    logEvent('info', null, null, `connecting to ${url} as '${conn.username}', device '${conn.clientId}'`);
     setConnState('connecting');
 
     client = mqtt.connect(url, {
@@ -565,7 +869,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 
     client.on('connect', () => {
       setConnState('on');
-      log('connected');
+      logEvent('info', null, null, 'connected');
       client.subscribe(`${conn.prefix}/devices/${conn.clientId}/api/+/reply`);
       client.subscribe(statusTopic());
       for (const cmd of COMMANDS) requestCmd(cmd);
@@ -573,11 +877,11 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 
     client.on('reconnect', () => setConnState('connecting'));
     client.on('close', () => setConnState('off'));
-    client.on('error', (err) => log(`error: ${err.message || err}`));
+    client.on('error', (err) => logEvent('err', null, null, err.message || err));
 
     client.on('message', (topic, payloadBuf) => {
       const text = payloadBuf.toString();
-      log(`< ${topic} ${text}`);
+      logEvent('in', topic, text);
 
       if (topic === statusTopic()) {
         $('#device-state').textContent = `device: ${text}`;
@@ -615,9 +919,13 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   $('#btn-forget').addEventListener('click', () => {
     forgetConn();
     fillForm({});
-    log('saved connection forgotten');
+    logEvent('info', null, null, 'saved connection forgotten');
   });
-  $('#btn-clear-log').addEventListener('click', () => { $('#log').textContent = ''; });
+  $('#btn-clear-log').addEventListener('click', () => {
+    logRows.length = 0;
+    pendingRequests.clear();
+    $('#log').innerHTML = '';
+  });
 
   // Короткий git-sha, з яким зібрана ЦЯ сторінка (revision.js, той самий
   // коміт, що й прошивка). Порівняння з живим "revision" пристрою (discovery,
