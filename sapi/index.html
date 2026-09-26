@@ -263,6 +263,19 @@ table { width: 100%; border-collapse: collapse; }
 .ecoflow-device summary { cursor: pointer; color: var(--muted); margin-top: 10px; user-select: none; }
 .ecoflow-device .eco-params-body table { margin-top: 8px; }
 .ecoflow-device .eco-params-body td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+/* Фото пристрою - той самий портал (assets/www/index.html: water-mark
+   ::before, ECO_DEVICE_IMAGE_SLUG/data-model у render.js вище), лише
+   url() відносний ("img/...", не "/img/..."): sapi - будь-який статичний
+   http-сервер із цієї теки (sapi/README.md), не гарантовано корінь домену. */
+.ecoflow-device { position: relative; z-index: 0; }
+.ecoflow-device[data-model]::before {
+  content: ""; position: absolute; z-index: -1; top: 48px; right: 10px; height: 130px;
+  width: 40%; max-width: 150px; background-repeat: no-repeat; background-position: right center;
+  background-size: contain; opacity: 0.5; pointer-events: none;
+}
+.ecoflow-device[data-model="delta2"]::before { background-image: url("img/delta2.webp"); }
+.ecoflow-device[data-model="delta-mini"]::before { background-image: url("img/delta-mini.webp"); }
+.ecoflow-device[data-model="delta-pro"]::before { background-image: url("img/delta-pro.webp"); }
 table.zebra { width: 100%; border-collapse: collapse; margin-top: 6px; }
 table.zebra th, table.zebra td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 /* th БІЛЬШОГО кегля за td, не меншого - той самий портал (assets/www/

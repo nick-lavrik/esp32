@@ -79,8 +79,18 @@ test('system-info: portal-поле присутнє - Device/Modules без "***
   assert.match(html, /a1b2c3d/);
   assert.match(html, /badge ok">enabled/); // Portal auth
   assert.match(html, /wifi, console, system/); // Modules
-  assert.match(html, /1\.0 h/); // Uptime: fmtMs(3725000)
+  assert.match(html, /Uptime<\/dt><dd>01:02:05/); // fmtUptime(3725000) - < доби, без днів
   assert.match(html, /Pending jobs<\/dt><dd>2/);
+});
+
+test('system-info: uptime > доби - "XXd hh:mm:ss"', () => {
+  const html = renderSystemInfo({
+    ...CHIP_FIXTURE,
+    portal: { env: 'esp32-c3', revision: 'a1b2c3d', uptimeMs: (2 * 86400 + 3 * 3600 + 4 * 60 + 5) * 1000,
+              freeHeap: 86400, auth: true, pendingJobs: 0, modules: ['wifi'] },
+  });
+  assertNoLeakedPlaceholders(html);
+  assert.match(html, /Uptime<\/dt><dd>2d 03:04:05/);
 });
 
 const ECO_DEVICE_FIXTURE = {
@@ -193,6 +203,7 @@ test('ecoflow-status: онлайн-пристрій on-grid (реальні да
   assert.match(html, /99\.7%/); // Charge (картка - ecoCharge, з дробовою частиною)
   assert.match(html, /in 70 W · out 57 W/);
   assert.match(html, /class="cards">/); // картки пристроїв
+  assert.match(html, /<div class="card ecoflow-device" data-sn="R331ZEB4ZEBW0026" data-model="delta2">/); // фото - за type
   assert.match(html, /Raw parameters \(not loaded\)/); // params не приходять цим каналом, окремий drill-down
   assert.match(html, /Load raw parameters/);
   assert.doesNotMatch(html, /<details class="eco-params" open/); // openParamsSerials не переданий - згорнуто
@@ -240,7 +251,7 @@ test('ecoflow-status: невідома presence/grid, null-параметри п
     connected: true, running: true, channel: 'app', account: 'acc', brokerHost: 'h', brokerPort: 1883,
     viaProxy: false, messageCount: 1, lastTopic: 't', lastError: '', heapFreeBytes: 1024,
     devices: [{
-      serialNumber: 'SN1', name: '', type: 'DELTA 2', presence: 'unknown', online: false,
+      serialNumber: 'SN1', name: '', type: 'DELTA 2 Max', presence: 'unknown', online: false,
       messageCount: 0, ageMs: null, lastMessageEpoch: 0, socPercent: null, socPrecise: null,
       grid: 'unknown', gridInferred: true, gridForMs: null, gridChangeCount: 0,
       acInputMilliVolts: null, acInputFrequency: null, inputWatts: null, outputWatts: null,
@@ -251,6 +262,9 @@ test('ecoflow-status: невідома presence/grid, null-параметри п
   assert.match(html, /<b>SN1<\/b>/); // без name - fallback на serialNumber (картка)
   assert.match(html, /color:var\(--muted\)">unknown/); // presence "unknown" - muted, не badge
   assert.match(html, /inferred/);
+  // Невідома модель (тут - "DELTA 2 Max", поза ECO_DEVICE_IMAGE_SLUG) - картка
+  // без фото (без data-model), а не з биткою заглушкою (той самий портал).
+  assert.doesNotMatch(html, /data-model=/);
 });
 
 test('ecoTableRow: рядок Overview-таблиці несе ті самі колонки, що портал', () => {

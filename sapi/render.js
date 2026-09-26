@@ -64,16 +64,19 @@ function fsUnit(bytes) {
   return { div: 1024 * 1024 * 1024, suffix: ' GB', digits: 2 };
 }
 function fsSizeIn(bytes, unit) { return (bytes / unit.div).toFixed(unit.digits) + unit.suffix; }
-function fmtMs(ms) {
-  if (ms === null || ms === undefined) return '-';
-  if (ms < 1000) return ms + ' ms';
-  const s = ms / 1000;
-  if (s < 60) return s.toFixed(1) + ' s';
-  const m = s / 60;
-  if (m < 60) return m.toFixed(1) + ' min';
-  return (m / 60).toFixed(1) + ' h';
-}
 function fmtEpoch(sec) { return sec ? new Date(sec * 1000).toLocaleString() : '-'; }
+
+// Uptime пристрою (System > Device) - "XXd hh:mm:ss", дні лише якщо плата
+// активна довше доби (за проханням користувача); без днів узагалі, коли
+// uptime < 24 год - "01:02:05", не "0d 01:02:05".
+function fmtUptime(ms) {
+  if (ms === null || ms === undefined) return '-';
+  const total = Math.floor(ms / 1000);
+  const days = Math.floor(total / 86400);
+  const pad = (n) => String(n).padStart(2, '0');
+  const dayPrefix = days > 0 ? days + 'd ' : '';
+  return dayPrefix + pad(Math.floor(total / 3600) % 24) + ':' + pad(Math.floor(total / 60) % 60) + ':' + pad(total % 60);
+}
 
 // Той самий рядок, що statusRows() у порталі (assets/www/index.html) -
 // System-картка Network заповнюється ЖИВИМИ даними з wifi-status (той самий
@@ -294,6 +297,12 @@ function ecoParamsSection(d, open) {
   </details>`;
 }
 
+// Той самий словник, що ECO_DEVICE_IMAGE_SLUG у порталі (assets/www/
+// index.html) - водяний знак фото за моделлю (data-model, CSS у sapi/
+// index.html). Невідома модель - без data-model, картка без фото, а не з
+// биткою заглушкою (той самий принцип, що й портал).
+const ECO_DEVICE_IMAGE_SLUG = { 'DELTA 2': 'delta2', 'DELTA mini': 'delta-mini', 'DELTA Pro': 'delta-pro' };
+
 // Картка пристрою - той самий перелік dt/dd, що ecoSysDeviceRow() (System),
 // той самий ecoDeviceDetailRows() (DRY - CLAUDE.md), лише БЕЗ згорнутого
 // стану верхнього рівня (тут завжди розгорнуто - повна вкладка, не
@@ -302,7 +311,9 @@ function ecoParamsSection(d, open) {
 // розділ картки має власний згорнутий стан.
 function ecoDeviceCard(d, openParamsSerials) {
   const open = (openParamsSerials || new Set()).has(d.serialNumber);
-  return `<div class="card ecoflow-device" data-sn="${esc(d.serialNumber)}">
+  const imgSlug = ECO_DEVICE_IMAGE_SLUG[d.type] || '';
+  const imgAttr = imgSlug ? ` data-model="${imgSlug}"` : '';
+  return `<div class="card ecoflow-device" data-sn="${esc(d.serialNumber)}"${imgAttr}>
     <div class="row" style="justify-content:space-between">
       <b>${esc(d.name || d.serialNumber)}</b><span class="muted">${esc(d.serialNumber)} · ${esc(dash(d.type))}</span>
     </div>
@@ -537,7 +548,7 @@ function renderSystemInfo(data, extra) {
   const deviceTop = portal ? dlRows([
     ['Firmware env', esc(dash(portal.env))],
     ['Revision', esc(dash(portal.revision))],
-    ['Uptime', fmtMs(portal.uptimeMs)],
+    ['Uptime', fmtUptime(portal.uptimeMs)],
   ]) : mockDl(['Firmware env', 'Revision', 'Uptime']);
   const deviceHeap = dlRows([['Free heap', fmtBytes(h.freeBytes)]]);
   const deviceRest = portal ? dlRows([
@@ -715,7 +726,7 @@ const RENDERERS = {
 // (require() з test/render.test.js) - експортуємо явно.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    esc, badge, boolBadge, signal, kv, dlRows, mockDl, dash, fmtBytes, fmtMs, fmtEpoch, fsUnit, fsSizeIn,
+    esc, badge, boolBadge, signal, kv, dlRows, mockDl, dash, fmtBytes, fmtUptime, fmtEpoch, fsUnit, fsSizeIn,
     wifiSystemRows, ecoflowSystemRows, ecoflowSystemDevicesHtml, ecoSysDeviceRow, ecoDeviceDetailRows,
     ecoBrokerText, ecoTransportText, ecoTableRow, ecoDeviceCard, ecoParamsTable,
     mqttSystemRows, mqttConnectionRows, mqttLwtRows, mqttConsoleMirrorRows, heapBarHtml,
