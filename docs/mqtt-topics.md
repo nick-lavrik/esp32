@@ -35,6 +35,8 @@
 | `command/{client-id}/reply` | текст: людський лог-вивід порціями (≤512Б×8, з обрізанням) або `"busy: command queue is full"` | ні | плата публікує через `MqttReplyTarget` (`src/main.cpp:665-675`); зовнішній клієнт підписується | `lib/CommandResponse/MqttReplyTarget.hpp`, `lib/CommandResponse/CommandResponse.cpp`, `src/main.cpp:2047-2049` |
 | `devices/{client-id}/api/<cmd>` | JSON: `{"id":<num>}` (+ `"args"` для команд з аргументами — наразі жодна) | ні | плата підписується (`addJsonListener`); зовнішній SAPI-клієнт публікує | `registerJsonApiEntry()`, `src/main.cpp:750-758,2054-2062` |
 | `devices/{client-id}/api/<cmd>/reply` | JSON: `{"id","ok":true,"data":{...}}` або `{"id","ok":false,"error":"bad args"\|"busy"}` | ні | плата публікує (через `MqttReplyTarget` або пряму відмову) | `handleJsonApiRequest()`, `src/main.cpp:731-742` |
+| `devices/{client-id}/api/ecoflow-params/<sn>` | JSON: `{"id":<num>}` | ні | плата підписується — ОДНА точна підписка на кожен серійник з `EcoflowDeviceRegistry::deviceTable()` (без wildcard), а не одна на `<cmd>` | `registerEcoflowDeviceParamsEntries()`, `src/main.cpp`, лише `HAS_ECOFLOW_CLIENT` |
+| `devices/{client-id}/api/ecoflow-params/<sn>/reply` | JSON: `{"id","ok":true,"data":{"serialNumber","captureAll","droppedParams","params":{...}}}` або `{"id","ok":false,"error":"busy"}` | ні | плата публікує; drill-down на "params" ОДНОГО пристрою — `ecoflow-status` (агрегат вище) їх свідомо не несе (розмір payload) | `WebEcoflowModule::mqttDeviceParamsJson()`, `src/main.cpp` |
 | `devices/{client-id}/ecoflow/<serial>/grid` | JSON: `{"grid","timestamp","charge","remain"}` | **так** | плата публікує (лише на реальний перехід стану мережі) | `src/main.cpp:1351-1371`, `docs/ecoflow-grid-handoff.md` |
 | `devices/{client-id}/light-sensor` | текст: число | ні | плата з сенсором публікує; плати без сенсора підписуються на `devices/+/light-sensor` | `src/main.cpp:2075-2089` |
 | `console/{client-id}` | текст: один рядок журналу (без `\n`) | ні | плата публікує (rate-limit + allow/deny фільтр по тегах, lossy); зовнішні інструменти підписуються | `lib/ConsoleMqtt/ConsoleMqtt.cpp:224`, лише `HAS_CONSOLE_MQTT`, вимкнено дефолтно (`CONSOLE_MQTT_ACTIVE=0`) |
@@ -51,6 +53,17 @@ Allowlist, не дзеркало всіх serial-команд:
 | `wifi-status` | `WebWifiModule::portalStatusJson()` | — |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | + `HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | — |
+
+**`ecoflow-params/<sn>` — окремий drill-down, не запис цієї таблиці.**
+Своя назва команди (не суфікс на `ecoflow-status`) — навмисно: повертає
+інше (сирі `params`, не статус), і жоден зовнішній підписник не сплутає
+базову відповідь `ecoflow-status/reply` із цим префіксом (колізія саме
+такого роду вже траплялась на живому SAPI, поки команди мали спільний
+префікс — виправлено перейменуванням, не костилем у клієнті). Кінцевий
+сегмент топіка тут — не сталий на етапі компіляції `<cmd>` (як у всіх
+записах вище), а серійний номер ПРИСТРОЮ — реєструється циклом по
+`EcoflowDeviceRegistry::deviceTable()`, окремо від `registerJsonApiEntry()`
+(розділ 1, рядки `.../ecoflow-params/<sn>` вище).
 
 **Заплановано, ще не реалізовано:** опційне поле `replyTopic` у запиті
 (відповідь в інший топік замість дефолтного `.../reply`) — обов'язково

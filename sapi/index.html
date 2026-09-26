@@ -43,6 +43,10 @@
   --font-size-small: calc(var(--font-size-base) / var(--font-scale));
   --font-size-medium: calc(var(--font-size-base) * var(--font-scale));
   --font-size-large: calc(var(--font-size-medium) * var(--font-scale));
+  /* Шар поверх вмісту на час очікування MQTT-відповіді (.busy нижче) -
+     буквальний порт з порталу (assets/www/index.html): світло-сірий, не тон
+     --bg, інакше на темних кнопках/картках спінер лишався б єдиною ознакою. */
+  --busy-overlay: rgba(230, 233, 239, .50);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -153,7 +157,24 @@ button.act.ghost.danger:hover { border-color: var(--err); }
    пропустити на біглий погляд. */
 button.act.ghost.paused { border-color: var(--warn); color: var(--warn); }
 
-.cmd-status { font-size: var(--font-size-small); color: var(--muted); font-weight: 400; }
+/* Спінер на час очікування MQTT-відповіді - буквальний порт .busy з порталу
+   (assets/www/index.html: setBusy()/job()), лише джерело "завершення" інше:
+   там - проміс job()/finally, тут - MQTT reply чи ECO_PARAMS_TIMEOUT_MS
+   (index.html, setEcoParamsBusy()). Клас спільний для кнопки й цілого блоку
+   (details.eco-params) - розмір/форму шару визначає сам елемент, якому його
+   навісили. isolation:isolate - той самий коментар, що в порталі: без
+   власного стекового контексту ::before/::after (z-index:1) програють будь-
+   якому positioned-нащадку, доданому в розмітці ПІСЛЯ них. */
+.busy { position: relative; pointer-events: none; isolation: isolate; }
+.busy::before { content: ""; position: absolute; inset: -0.7ch; background: var(--busy-overlay);
+  border-radius: 0.7ch; z-index: 1; }
+.busy::after { content: ""; position: absolute; top: 50%; left: 50%; width: 14px; height: 14px;
+  margin: -7px 0 0 -7px; border: 2px solid var(--line); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin .6s linear infinite; z-index: 1; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.busy button.act:not(.ghost), button.act.busy:not(.ghost) { background: var(--line); }
+
+.cmd-status { font-size: var(--font-size-small); color: var(--muted); font-weight: 400; min-width: 10em; }
 .cmd-status.ok { color: var(--ok); }
 .cmd-status.err { color: var(--err); }
 /* font-size тут НЕ small - портал жодного разу не зменшує кегль dl/картки,
@@ -162,19 +183,25 @@ button.act.ghost.paused { border-color: var(--warn); color: var(--warn); }
    портал текст" (сесія 2026-09-24). */
 .out { background: #0e1116; border: 1px solid var(--line); border-radius: 6px;
   padding: 10px 12px; line-height: 1.5; max-height: 420px; overflow-y: auto; }
-/* Картковий вивід (System, renderSystemInfo) не отримує темну рамку/власний
-   скрол консолі - портал не кладе картки в жодну додаткову коробку, вони
-   лежать просто на тлі секції (assets/www/index.html, #sys-cards). Раніше
-   .out малював ще одну рамку НАВКОЛО карток і різав їх висоту скролом -
-   саме "коробка в коробці" й відрізняла SAPI від порталу найбільше. Інші
-   команди (wifi-status/ecoflow-status) поки лишаються звичайним kv/badge-
-   виводом у консольній рамці - :has() відрізняє один випадок від іншого
-   без додаткового класу в розмітці чи в JS. */
+/* Картковий вивід (System/EcoFlow, renderSystemInfo/renderEcoflowStatus) не
+   отримує темну рамку/власний скрол консолі - портал не кладе картки в жодну
+   додаткову коробку, вони лежать просто на тлі секції (assets/www/
+   index.html, #sys-cards/#ecoflow-devices). Раніше .out малював ще одну
+   рамку НАВКОЛО карток і різав їх висоту скролом - саме "коробка в коробці"
+   й відрізняла SAPI від порталу найбільше. :has() ловить БУДЬ-ЯКОГО нащадка
+   з .cards (не лише прямий), тому й ecoflow-status (.cards лежить у
+   вкладеному .section-group, не прямим дитям .out) підпадає під те саме
+   правило автоматично. wifi-status - єдина команда, що поки лишається
+   звичайним kv/badge-виводом у консольній рамці (наступний крок, не цей). */
 .out:has(.cards) { background: none; border: none; padding: 0; max-height: none; overflow: visible; }
 /* dl/dt/dd - той самий глобальний вигляд, що в assets/www/index.html
    (портал), не власний клас .kv: System-вкладка (render.js,
-   renderSystemInfo) тепер емітить голий <dl>, як і портал. wifi-status/
-   ecoflow-status поки лишаються на .kv/badge - наступний крок, не цей. */
+   renderSystemInfo) тепер емітить голий <dl>, як і портал. wifi-status
+   поки лишається на .kv/badge - наступний крок, не цей. ecoflow-status/
+   mqtt-status використовують .kv для верхнього блоку (Connection) свідомо
+   (не голий dl) - та сама візуальна форма, простіше перевикористання
+   наявного класу, не нова стилізація під голий dl заради буквальної
+   відповідності розмітці порталу. */
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
 dt { color: var(--muted); }
 dd { margin: 0; }
@@ -223,6 +250,19 @@ dd { margin: 0; }
   .sys-eco-device summary .eco-remain { display: inline; }
 }
 .sys-eco-device dl { margin-top: 8px; }
+/* Базовий вигляд БУДЬ-якого <table> без .zebra - той самий портал
+   (assets/www/index.html: `table { width:100%; border-collapse:collapse; }`).
+   Потрібен ecoParamsTable() (render.js) - "Raw parameters" картки EcoFlow
+   лишається буквальним, неприкрашеним <table>, як на порталі, а не .zebra
+   (той стиль тут навмисно НЕ застосовано - "1:1 як на порталі", не "як решта
+   SAPI"). */
+table { width: 100%; border-collapse: collapse; }
+/* Розділ "Raw parameters" картки пристрою - той самий портал
+   (.ecoflow-device summary/table, assets/www/index.html): приглушений
+   клікабельний summary, невеликий відступ над таблицею/кнопкою. */
+.ecoflow-device summary { cursor: pointer; color: var(--muted); margin-top: 10px; user-select: none; }
+.ecoflow-device .eco-params-body table { margin-top: 8px; }
+.ecoflow-device .eco-params-body td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 table.zebra { width: 100%; border-collapse: collapse; margin-top: 6px; }
 table.zebra th, table.zebra td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 /* th БІЛЬШОГО кегля за td, не меншого - той самий портал (assets/www/
@@ -236,6 +276,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white
 th.num { text-align: right; }
 td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 @media (max-width: 560px) { .opt { display: none; } dl { grid-template-columns: 1fr; } }
+/* Стовпчики Overview-таблиці вкладки EcoFlow (render.js: ecoTableRow) - той
+   самий поріг/розподіл, що в порталі (assets/www/index.html): .opt2 ховає
+   найдругорядніше вже на планшеті (≤900px, #/Serial/Age), .ecoflow-wide -
+   навпаки, з'являється лише там, де вже й так порожньо (>1300px, Power/AC).
+   Скоуп на .ecoflow-table (не голий .opt2) - той самий клас колись знадобиться
+   іншій таблиці з іншим порогом (портал теж скоупить на #ecoflow-table). */
+@media (max-width: 900px) { .ecoflow-table .opt2 { display: none; } }
+.ecoflow-wide { display: none; }
+@media (min-width: 1300px) { .ecoflow-wide { display: table-cell; } }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; }
 .badge.ok { background: rgba(76,195,138,.18); color: var(--ok); }
 .badge.err { background: rgba(229,83,75,.18); color: var(--err); }
@@ -464,6 +513,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   const AUTO_BASE_MS = 5000;
   const AUTO_BACKOFF_MAX = 8; // множник база: 5с -> 40с максимум при busy
   const LOG_MAX_LINES = 500;
+  const ECO_PARAMS_TIMEOUT_MS = 10000; // ecoflow-params/<sn> - явний timeout, а не вічний спінер
 
   const STORAGE_KEY = 'sapi.connection.v1';
 
@@ -877,6 +927,96 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     p.status.className = 'cmd-status' + (cls ? ' ' + cls : '');
   }
 
+  // --- EcoFlow "Raw parameters" drill-down (devices/<client-id>/api/
+  // ecoflow-params/<sn>, docs/mqtt-topics.md) - окремий request/reply поза
+  // panels[cmd]: ecoflow-params/<sn> не одна з чотирьох команд COMMANDS
+  // (вкладок), а per-device підзапит УСЕРЕДИНІ вкладки ecoflow-status. Своя
+  // назва команди (не суфікс на ecoflow-status) - навмисно: повертає інше
+  // (сирі params, не статус), і жодна відповідь ecoflow-status тепер не
+  // може випадково збігтись із цим префіксом (був саме такий баг з
+  // "порожнім sn", коли тут стояв reqTopic('ecoflow-status')).
+  // pendingEcoParamsIds: серійник -> {id, timeoutTimer} очікуваної відповіді
+  // - той самий принцип, що panels[cmd].pendingId, лише поза panels (ключ -
+  // серійник, не ім'я команди) і з власним timeoutTimer (нижче) - той
+  // самий контракт, що job()/finally на порталі: спінер (.busy) не лишається
+  // вічним, якщо пристрій ніколи не відповість (offline, підписку відхилено).
+  const pendingEcoParamsIds = new Map();
+  // reqTopic() - оголошена нижче (розділ "топіки"), function-декларація
+  // хойститься в межах цього <script>, тому виклик звідси безпечний.
+  function ecoParamsReqTopic(sn) { return `${reqTopic('ecoflow-params')}/${sn}`; }
+
+  // details.eco-params[data-sn] - обидва стани (кнопка "Load"/"Refresh")
+  // лежать у ньому, тож .busy на самому details (а не лише на кнопці)
+  // притлумлює й таблицю під ним, не тільки контрол - той самий принцип, що
+  // portal's #wifi-form-block/#scan-block (CSS вище, ".busy - буквальний
+  // порт з порталу").
+  function ecoParamsDetailsEl(sn) {
+    return panels['ecoflow-status'].out.querySelector(`.eco-params[data-sn="${CSS.escape(sn)}"]`);
+  }
+  function setEcoParamsBusy(sn, busy) {
+    const details = ecoParamsDetailsEl(sn);
+    if (!details) return; // перемальовано/закрито до відповіді - нема на чому показувати спінер, і не треба
+    details.classList.toggle('busy', busy);
+    const btn = details.querySelector('.eco-params-btn');
+    if (btn) btn.disabled = busy; // той самий "if ('disabled' in el)" з setBusy() порталу, тут - завжди кнопка
+  }
+
+  function requestEcoflowDeviceParams(sn) {
+    if (!client || !client.connected) return;
+    const id = Math.floor(Math.random() * 1e9);
+    // Попередній необроблений запит на той самий sn (подвійний клік, ручний
+    // Refresh поки чекали timeout) - його таймер більше нікому не потрібен,
+    // інакше стрельнув би пізніше й міг би скинути busy вже ПІСЛЯ нового
+    // запиту, що щойно стартував.
+    const prev = pendingEcoParamsIds.get(sn);
+    if (prev) clearTimeout(prev.timeoutTimer);
+    const timeoutTimer = setTimeout(() => {
+      pendingEcoParamsIds.delete(sn);
+      setEcoParamsBusy(sn, false);
+      logEvent('err', ecoParamsReqTopic(sn), null, `timeout ${ECO_PARAMS_TIMEOUT_MS / 1000}s - no reply`);
+    }, ECO_PARAMS_TIMEOUT_MS);
+    pendingEcoParamsIds.set(sn, { id, timeoutTimer });
+    setEcoParamsBusy(sn, true);
+    const topic = ecoParamsReqTopic(sn);
+    const payload = JSON.stringify({ id });
+    client.publish(topic, payload);
+    logEvent('out', topic, payload);
+  }
+
+  // Періодичний ecoflow-status (auto-refresh) присилає СВІЖИЙ агрегат БЕЗ
+  // "params" (агрегат їх свідомо не несе, розділ "Провайдер ≠ форматер",
+  // docs/mqtt-web-handoff.md) - без цього злиття кожен наступний тик стирав
+  // би раніше довантажені raw parameters, і кнопка "Load" виглядала б так,
+  // ніби нічого не запам'ятала.
+  function mergeEcoflowParams(newData) {
+    if (!lastEcoflowStatus || !Array.isArray(newData.devices)) return;
+    const bySerial = new Map(lastEcoflowStatus.devices.map((d) => [d.serialNumber, d]));
+    for (const d of newData.devices) {
+      const prev = bySerial.get(d.serialNumber);
+      if (prev && prev.params) d.params = prev.params;
+    }
+  }
+
+  // Той самий патерн, що renderSystemPanel() (System-картка EcoFlow): відкриті
+  // <details> сканується з DOM ПЕРЕД перемальовкою (innerHTML= знищує вузли,
+  // "open" сам по собі не переживає перемальовку).
+  function renderEcoflowPanel() {
+    if (!lastEcoflowStatus) return;
+    const openParamsSerials = new Set(
+      Array.from(panels['ecoflow-status'].out.querySelectorAll('.eco-params[open]')).map((el) => el.dataset.sn));
+    panels['ecoflow-status'].out.innerHTML =
+      buildPanelHtml('ecoflow-status', lastEcoflowStatus, { openParamsSerials });
+  }
+
+  // Делегування - картки пристроїв перемальовуються цілком на кожен reply
+  // (innerHTML=), кнопка ".eco-params-btn" щоразу нова: слухач на статичному
+  // .out (переживає перемальовку), не на самій кнопці.
+  panels['ecoflow-status'].out.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.eco-params-btn');
+    if (!btn) return;
+    requestEcoflowDeviceParams(btn.dataset.sn);
+  });
+
   // Рендер-функції (esc/kv/RENDERERS/...) підключені окремим <script
   // src="render.js"> вище - той самий код прогонить headless test/render.test.js
   // (Node, без DOM). Сирий JSON лишається поруч у <details> в самому
@@ -921,16 +1061,22 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     const p = panels[cmd];
     if (msg.ok) {
       if (cmd === 'wifi-status') lastWifiStatus = msg.data;
-      else if (cmd === 'ecoflow-status') lastEcoflowStatus = msg.data;
+      else if (cmd === 'ecoflow-status') {
+        mergeEcoflowParams(msg.data); // раніше довантажені raw parameters - не стерти свіжим агрегатом
+        lastEcoflowStatus = msg.data;
+      }
       else if (cmd === 'mqtt-status') lastMqttStatus = msg.data;
       else if (cmd === 'system-info') lastSystemInfo = msg.data;
 
       if (cmd === 'system-info') {
         renderSystemPanel();
+      } else if (cmd === 'ecoflow-status') {
+        renderEcoflowPanel(); // openParamsSerials-скан DOM, не голий buildPanelHtml (як решта команд нижче)
+        renderSystemPanel();
       } else {
         p.out.innerHTML = buildPanelHtml(cmd, msg.data);
-        // wifi-status/ecoflow-status/mqtt-status теж тримають відповідні
-        // System-картки свіжими - без чекання наступного system-info-поллу.
+        // wifi-status/mqtt-status теж тримають відповідні System-картки
+        // свіжими - без чекання наступного system-info-поллу.
         renderSystemPanel();
       }
       setPanelStatus(cmd, `ok (id ${msg.id})`, 'ok');
@@ -1075,6 +1221,8 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       clearTimeout(panels[cmd].timer);
       panels[cmd].autoToggle.checked = false;
     }
+    for (const pending of pendingEcoParamsIds.values()) clearTimeout(pending.timeoutTimer);
+    pendingEcoParamsIds.clear();
     if (client) {
       client.end(true);
       client = null;
@@ -1107,6 +1255,10 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       setConnState('on');
       logEvent('info', null, null, 'connected');
       client.subscribe(`${conn.prefix}/devices/${conn.clientId}/api/+/reply`);
+      // "+/reply" вище ловить лише ОДИН листовий сегмент (api/<cmd>/reply) -
+      // devices/<client-id>/api/ecoflow-params/<sn>/reply має на сегмент
+      // більше (docs/mqtt-topics.md), окрема підписка на нього.
+      client.subscribe(`${conn.prefix}/devices/${conn.clientId}/api/ecoflow-params/+/reply`);
       client.subscribe(statusTopic());
       // Відновлення персистентних UI-контролів - ПІСЛЯ підписки, ПЕРЕД
       // безумовним циклом нижче (розділ "Персист UI-чекбоксів" вище):
@@ -1133,6 +1285,44 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
         $('#device-state').textContent = `device: ${text}`;
         return;
       }
+
+      // Device-specific drill-down (ecoflow-params/<sn>/reply) - ПЕРЕД
+      // циклом COMMANDS нижче: той цикл шукає ТОЧНИЙ збіг replyTopic(cmd),
+      // а тут топік має ще один сегмент (sn) понад будь-який replyTopic(cmd).
+      // sn ПОРОЖНІЙ - захисна гілка, не мала б траплятись структурно (на
+      // відміну від першої версії, де ecoParamsPrefix ділив префікс із
+      // reqTopic('ecoflow-status') і базова відповідь ecoflow-status мовчки
+      // ковталась тут із порожнім sn - System-картка EcoFlow лишалась на
+      // "***" назавжди; окрема назва команди 'ecoflow-params' цю колізію
+      // усуває структурно). Лишається як запобіжник - провал у звичайний
+      // цикл COMMANDS нижче, не return.
+      const ecoParamsPrefix = ecoParamsReqTopic('');
+      const isEcoParamsReply = topic.startsWith(ecoParamsPrefix) && topic.endsWith('/reply');
+      const ecoParamsSn = isEcoParamsReply ? topic.slice(ecoParamsPrefix.length, -'/reply'.length) : '';
+      if (isEcoParamsReply && ecoParamsSn) {
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch (e) {
+          return; // невалідний JSON - той самий випадок, що й COMMANDS нижче, але тут нема панелі для статусу помилки
+        }
+        const pending = pendingEcoParamsIds.get(ecoParamsSn);
+        if (!pending || pending.id !== msg.id) return; // застаріла відповідь
+        clearTimeout(pending.timeoutTimer);
+        pendingEcoParamsIds.delete(ecoParamsSn);
+        setEcoParamsBusy(ecoParamsSn, false); // ok:true й ok:false (busy/queue full) - обидва завершують очікування
+        if (msg.ok && lastEcoflowStatus && Array.isArray(lastEcoflowStatus.devices)) {
+          const device = lastEcoflowStatus.devices.find((d) => d.serialNumber === ecoParamsSn);
+          if (device) {
+            device.params = msg.data.params;
+            device.droppedParams = msg.data.droppedParams;
+            device.captureAll = msg.data.captureAll;
+            renderEcoflowPanel();
+          }
+        }
+        return;
+      }
+
       for (const cmd of COMMANDS) {
         if (topic !== replyTopic(cmd)) continue;
         let msg;

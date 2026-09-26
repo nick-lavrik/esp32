@@ -123,6 +123,13 @@ public:
   static String mqttStatusJson(const WebEcoflowStatus& status,
                                 const std::vector<WebEcoflowDeviceSnapshot>& devices);
 
+  // Форматер MQTT drill-down команди 'ecoflow-params/<sn>' (docs/mqtt-topics.md) -
+  // "params" ОДНОГО пристрою, яких mqttStatusJson() вище свідомо не несе
+  // (розмір payload, розділ "Провайдер ≠ форматер", docs/mqtt-web-handoff.md).
+  // snap - знімок ОДНОГО пристрою з devicesSnapshot() (виклик сам шукає збіг
+  // за серійним номером - main.cpp, registerEcoflowDeviceParamsEntries()).
+  static String mqttDeviceParamsJson(const WebEcoflowDeviceSnapshot& snap);
+
 private:
   // Знімає провайдерські структури. Викликається лише з loop() - див.
   // коментар класу вище (trackedParams/EcoflowGridJournal небезпечні поза

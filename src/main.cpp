@@ -54,6 +54,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <algorithm>
+#include <cstring>
 #include <vector>
 #if defined(ESP32) && __has_include(<soc/rtc_cntl_reg.h>)
 #include <soc/rtc_cntl_reg.h>
@@ -755,6 +756,68 @@ static String jsonApiEcoflowStatusExecute(const uint8_t* /*raw*/) {
 }
 
 static const JsonApiEntry kJsonApiEcoflowStatus = {"ecoflow-status", jsonApiNoArgs, jsonApiEcoflowStatusExecute};
+
+// Drill-down: "params" ОДНОГО пристрою за серійним номером у самому топіку -
+// devices/<client-id>/api/ecoflow-params/<sn> (docs/mqtt-topics.md). Окремий
+// шлях від registerJsonApiEntry() вище: той підписує ОДИН топік на ІМ'Я
+// команди (кінцевий сегмент - стала на етапі компіляції назва), а тут
+// кінцевий сегмент - серійний номер ПРИСТРОЮ (їх кілька,
+// EcoflowDeviceRegistry::deviceTable()) - реєстрація нижче йде по одній
+// точній підписці на пристрій, без жодного wildcard на стороні плати (той
+// самий принцип, що вже застосований до registerJsonApiEntry()). Через
+// CommandQueue::submitJson() - той самий "один виконавець за ітерацію", що
+// й решта JSON-команд (Точка E, docs/mqtt-web-handoff.md), а не прямий
+// виклик із колбека підписки.
+struct EcoflowDeviceParamsArgs {
+  // Вказівник, не копія символів: рядок - літерал з deviceTable() (статичне
+  // сховище, живе всю роботу програми), тому memcpy самого вказівника в
+  // Slot.payload безпечний.
+  const char* serialNumber;
+};
+
+static String jsonApiEcoflowDeviceParamsExecute(const uint8_t* raw) {
+  EcoflowDeviceParamsArgs args;
+  memcpy(&args, raw, sizeof(args));
+  for (const auto& snap : webEcoflowModule.devicesSnapshot()) {
+    if (strcmp(snap.state.info->serialNumber, args.serialNumber) == 0) {
+      return WebEcoflowModule::mqttDeviceParamsJson(snap);
+    }
+  }
+  // Недосяжно за нормальної роботи: серійник завжди береться з того самого
+  // deviceTable(), яким наповнюється й devicesSnapshot() (конструктор
+  // EcoflowDeviceRegistry). Явна відмова, а не порожній об'єкт - якщо
+  // колись розійдеться.
+  return "{\"error\":\"unknown device\"}";
+}
+
+static const JsonApiEntry kJsonApiEcoflowDeviceParams = {
+    "ecoflow-params/<sn>", jsonApiNoArgs, jsonApiEcoflowDeviceParamsExecute};
+
+// Один топік НА ПРИСТРІЙ, зареєстрований один раз при setup() - deviceTable()
+// відомий заздалегідь (той самий аргумент, що й для хардкоду серійників у
+// EcoflowDeviceRegistry: ACL EcoFlow/rpi5 не приймає wildcard, отже і тут
+// зручніше не покладатись на підписку "+"). sn - лямбда-захоплення (не
+// std::function у самому JsonApiEntry - там і далі голі С-функції, лише
+// підписка на MQTT-топік лишається лямбдою, той самий патерн, що
+// registerJsonApiEntry() вище).
+static void registerEcoflowDeviceParamsEntries() {
+  const EcoflowDeviceInfo* table = EcoflowDeviceRegistry::deviceTable();
+  for (size_t i = 0; i < EcoflowDeviceRegistry::deviceCount(); ++i) {
+    const char* sn = table[i].serialNumber;
+    const String reqTopic = String("devices/") + MQTT_CLIENT_ID + "/api/ecoflow-params/" + sn;
+    const String replyTopic = reqTopic + "/reply";
+    mqtt.addJsonListener(reqTopic.c_str(), [sn, replyTopic](const char* topic, JsonDocument& doc) {
+      (void)topic;
+      const uint32_t id = doc["id"] | 0;
+      const EcoflowDeviceParamsArgs args{sn};
+      auto reply = std::make_shared<MqttReplyTarget>(mqtt, std::string(replyTopic.c_str()));
+      if (!commandQueue.submitJson(&kJsonApiEcoflowDeviceParams, id,
+                                    reinterpret_cast<const uint8_t*>(&args), sizeof(args), reply)) {
+        mqtt.publish(replyTopic.c_str(), (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"busy\"}").c_str());
+      }
+    });
+  }
+}
 #endif
 
 // Дзеркало /api/mqtt/status - webMqttModule читає лише свій MqttClient/
@@ -2200,6 +2263,7 @@ void setupMqttClient() {
   registerJsonApiEntry(kJsonApiWifiStatus);
 #if HAS_ECOFLOW_CLIENT
   registerJsonApiEntry(kJsonApiEcoflowStatus);
+  registerEcoflowDeviceParamsEntries();
 #endif
   registerJsonApiEntry(kJsonApiMqttStatus);
 #endif

@@ -944,6 +944,20 @@ ACL для нових плат можна забути додати мовчки
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` (без сирого `params`) | + `HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (той самий, що й `/api/mqtt/status` вище) | — |
 
+**`ecoflow-params/<sn>` — окремий drill-down на "params" ОДНОГО пристрою**
+(`devices/<client-id>/api/ecoflow-params/<sn>`, `WebEcoflowModule::
+mqttDeviceParamsJson()`), не запис таблиці вище: `ecoflow-status` (агрегат)
+свідомо не несе сирі `params` (розмір payload), тому SAPI довантажує їх
+окремим запитом лише для картки, яку користувач розгорнув. Своя назва
+команди (не суфікс на `ecoflow-status`) — повертає інше (сирі `params`, не
+статус), і уникає колізії префіксів між `.../ecoflow-status/reply` і
+`.../ecoflow-status/<sn>/reply`, яка вже траплялась на живому SAPI, поки
+обидві команди ділили один префікс. Кінцевий сегмент топіка тут — серійний
+номер, а не `<cmd>` — реєстрація йде циклом по
+`EcoflowDeviceRegistry::deviceTable()` (`registerEcoflowDeviceParamsEntries()`,
+`src/main.cpp`), одна точна підписка на пристрій, без wildcard на стороні
+плати. Повний реєстр топіка — `docs/mqtt-topics.md`.
+
 Кожна команда перевикористовує вже наявний метод відповідного `IWebModule`
 (жоден MQTT-специфічний форматер не пишеться заново) — той самий принцип,
 що вже описаний у розділах вище для кожного модуля окремо. `WebWifiModule`/
@@ -992,6 +1006,13 @@ Payload — `{"board","revision","features","commands"}`:
 - Memory-картка — бар використання heap (Used/Largest free block/Free
   фрагментоване/маркер Min free ever), якого в самому HTTP-порталі немає —
   новий SAPI-специфічний віджет, не порт.
+- EcoFlow-вкладка: кнопка "Load"/"Refresh" на "Raw parameters" (drill-down,
+  `ecoflow-params/<sn>` вище) показує `.busy` на час очікування MQTT-
+  відповіді — буквальний порт `.busy`/`setBusy()` з HTTP-порталу
+  (напівпрозорий шар + спінер, кнопка всередині `disabled`), з явним
+  timeout'ом (10с), якого немає в порталі (там — `job()`/`finally` навколо
+  проміса HTTP-запиту; тут відповідь асинхронна через окрему MQTT-подію, тож
+  завершення чекає або на неї, або на власний таймер).
 - Log-вкладка — Pause/Resume (лише показу, не самого MQTT-трафіку) і
   Newest first, структурований рядок на подію з кореляцією запит/відповідь
   за `id`.
@@ -1009,6 +1030,15 @@ devices/<client-id>/api/+`, без доступу до `command/<id>` (повн�
 serial-команд) і без доступу до інших пристроїв. Один статичний акаунт на
 пристрій (MVP, ротація вручну) — динамічні токени розглядались і відкладені
 як зайва інфраструктура. TLS/WSS — поза MVP (LAN, `ws://`).
+
+**ACL на rpi5 розширено під `ecoflow-params/<sn>` окремим правилом.**
+`write devices/<client-id>/api/+` — один рівень wildcard, він НЕ покриває
+`devices/<client-id>/api/ecoflow-params/<sn>` (на сегмент більше). `read
+devices/<client-id>/#` уже покриває відповідь (`.../reply`) — застосовано
+додаткове правило `write devices/<client-id>/api/ecoflow-params/+` у
+`sapi_acl` на rpi5 (без нього публікація запиту з браузера мовчки
+відхилялась би — `CLAUDE.md`, «Видимість MQTT-трафіку», той самий клас
+тихої відмови, що вже траплявся з EcoFlow ACL).
 
 **Свідомо поза цим каналом (не борг, архітектурне рішення):** мутації через
 MQTT (WiFi connect, запис NVS, файлові операції) — лишаються на HTTP-порталі

@@ -13,7 +13,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus,
-        ecoflowSystemDevicesHtml, mqttSystemRows, heapBarHtml } = require('../render.js');
+        ecoflowSystemDevicesHtml, ecoTableRow, mqttSystemRows, heapBarHtml, ecoParamsTable } = require('../render.js');
 
 const CHIP_FIXTURE = {
   chip: { model: 'ESP32-C3', revision: 4, cores: 1, cpuFreqMHz: 160, psramFound: false, psramBytes: 0 },
@@ -170,43 +170,72 @@ test('wifi-status: XSS у ssid - HTML екрановано, тег не прол
   assert.match(html, /&lt;img/);
 });
 
-// --- ecoflow-status ---
+// --- ecoflow-status: повна вкладка (renderEcoflowStatus, "1:1 як на
+// порталі" - Connection dl + Overview-таблиця + картки пристроїв) ---
 
 test('ecoflow-status: онлайн-пристрій on-grid (реальні дані DELTA 2)', () => {
   const html = renderEcoflowStatus({
     connected: true, running: true, channel: 'app (private API)', account: 'app-d60c0ab5',
     brokerHost: '192.168.1.22', brokerPort: 1883, viaProxy: true,
     messageCount: 67113, lastTopic: '/app/device/property/R331ZEB4ZEBW0026', lastError: '',
-    heapFreeBytes: 66048,
-    devices: [{
-      serialNumber: 'R331ZEB4ZEBW0026', name: 'DELTA 2', type: 'DELTA 2',
-      presence: 'online', online: true, messageCount: 67113, ageMs: 1200,
-      lastMessageEpoch: 1758649843, socPercent: 100, socPrecise: 99.7,
-      grid: 'on-grid', gridInferred: false, gridForMs: 123456789, gridChangeCount: 3,
-      acInputMilliVolts: 230000, acInputFrequency: 50, inputWatts: 70, outputWatts: 57,
-      remainTimeMinutes: 5938, snapshotAvailable: true, captureAll: false, droppedParams: 0,
-    }],
+    heapFreeBytes: 66048, heapLargestBlockBytes: 45056, netStackHeadroomBytes: 2048,
+    devices: [ECO_DEVICE_FIXTURE],
   });
   assertNoLeakedPlaceholders(html);
+  assert.match(html, /<table class="zebra ecoflow-table">/); // Overview
   assert.match(html, /DELTA 2/);
-  assert.match(html, /badge ok">online/);
-  assert.match(html, /badge ok">on-grid/);
-  assert.match(html, /99\.7 %/);
-  assert.match(html, /70 W \/ 57 W/);
+  assert.match(html, /R331ZEB4ZEBW0026/); // Serial - і в таблиці, і в картці
+  assert.match(html, /192\.168\.1\.22:1883/); // Broker
+  assert.match(html, /proxy \(plain MQTT\)/); // Connection type
+  assert.match(html, /65 KB free · 44 KB largest block/); // Heap: 66048/1024=64.5 -> round(64.5)=65
+  assert.match(html, /color:var\(--ok\)">online/); // ecoPresence (не badge - той самий колір, що портал)
+  assert.match(html, /color:var\(--ok\)">on-grid/);
+  assert.match(html, /99\.7%/); // Charge (картка - ecoCharge, з дробовою частиною)
+  assert.match(html, /in 70 W · out 57 W/);
+  assert.match(html, /class="cards">/); // картки пристроїв
+  assert.match(html, /Raw parameters \(not loaded\)/); // params не приходять цим каналом, окремий drill-down
+  assert.match(html, /Load raw parameters/);
+  assert.doesNotMatch(html, /<details class="eco-params" open/); // openParamsSerials не переданий - згорнуто
 });
 
-test('ecoflow-status: без пристроїв - "no devices", без винятку', () => {
+test('ecoflow-status: params довантажені (drill-down) - таблиця + кнопка "Refresh", details розгорнутий', () => {
+  const html = renderEcoflowStatus({
+    connected: true, running: true, channel: 'app (private API)', account: 'app-d60c0ab5',
+    brokerHost: '192.168.1.22', brokerPort: 1883, viaProxy: true,
+    messageCount: 67113, lastTopic: '/app/device/property/R331ZEB4ZEBW0026', lastError: '',
+    heapFreeBytes: 66048, heapLargestBlockBytes: 45056, netStackHeadroomBytes: 2048,
+    devices: [{ ...ECO_DEVICE_FIXTURE, params: { pd_soc: 99.7, bms_bmsStatus_soc: 100 }, droppedParams: 3 }],
+  }, { openParamsSerials: new Set(['R331ZEB4ZEBW0026']) });
+  assertNoLeakedPlaceholders(html);
+  assert.match(html, /<details class="eco-params" open data-sn="R331ZEB4ZEBW0026">/);
+  assert.match(html, /Raw parameters \(2, 3 dropped \(per-device limit\), capture: important only\)/);
+  assert.match(html, /<td>bms_bmsStatus_soc<\/td><td>100<\/td>/); // ecoParamsTable - ключі відсортовані
+  assert.doesNotMatch(html, /Load raw parameters/); // початковий напис зникає, коли params уже є
+  // Але кнопка ЛИШАЄТЬСЯ (той самий клас .eco-params-btn, той самий делегований
+  // клік у index.html) - інакше params, щойно довантажені, лишались би
+  // застарілими назавжди (пристрій далі оновлює значення, MQTT-агрегат їх не несе).
+  assert.match(html, /<button class="act ghost eco-params-btn"[^>]*data-sn="R331ZEB4ZEBW0026"[^>]*>Refresh<\/button>/);
+});
+
+test('ecoParamsTable: сортує ключі, escape на значеннях/ключах, порожній набір - "not captured yet"', () => {
+  assert.match(ecoParamsTable({ b: 1, a: 2 }), /<td>a<\/td><td>2<\/td>.*<td>b<\/td><td>1<\/td>/s);
+  assert.match(ecoParamsTable({}), /No raw parameters captured yet\./);
+});
+
+test('ecoflow-status: без пристроїв - "No devices configured." у таблиці й картках, без винятку', () => {
   const html = renderEcoflowStatus({
     connected: false, running: false, channel: '', account: '', brokerHost: '', brokerPort: null,
     viaProxy: false, messageCount: 0, lastTopic: '', lastError: 'auth denied', heapFreeBytes: null,
     devices: [],
   });
   assertNoLeakedPlaceholders(html);
-  assert.match(html, /no devices/);
-  assert.match(html, /badge err">auth denied/);
+  assert.match(html, /0 device\(s\)/);
+  assert.match(html, /No devices configured\./); // і в <tr colspan>, і під картками
+  assert.match(html, /Last error<\/dt><dd>auth denied/);
+  assert.match(html, /Heap<\/dt><dd>-/); // heapFreeBytes:null - "-", не "NaN KB"
 });
 
-test('ecoflow-status: невідома presence/grid, null-параметри пристрою', () => {
+test('ecoflow-status: невідома presence/grid, null-параметри пристрою - fallback на serialNumber', () => {
   const html = renderEcoflowStatus({
     connected: true, running: true, channel: 'app', account: 'acc', brokerHost: 'h', brokerPort: 1883,
     viaProxy: false, messageCount: 1, lastTopic: 't', lastError: '', heapFreeBytes: 1024,
@@ -219,9 +248,19 @@ test('ecoflow-status: невідома presence/grid, null-параметри п
     }],
   });
   assertNoLeakedPlaceholders(html);
-  assert.match(html, /SN1/); // без name - fallback на serialNumber
-  assert.match(html, /badge muted">unknown/);
+  assert.match(html, /<b>SN1<\/b>/); // без name - fallback на serialNumber (картка)
+  assert.match(html, /color:var\(--muted\)">unknown/); // presence "unknown" - muted, не badge
   assert.match(html, /inferred/);
+});
+
+test('ecoTableRow: рядок Overview-таблиці несе ті самі колонки, що портал', () => {
+  const html = ecoTableRow(ECO_DEVICE_FIXTURE, 1);
+  assertNoLeakedPlaceholders(html);
+  assert.match(html, /<td class="opt2">1<\/td>/);
+  assert.match(html, /<td class="opt2">R331ZEB4ZEBW0026<\/td>/);
+  assert.match(html, /<td class="num">100%<\/td>/); // ecoChargeRounded - без дробової частини
+  assert.match(html, /class="ecoflow-wide">in 70 W · out 57 W/);
+  assert.match(html, /class="ecoflow-wide num">230\.0 V · 50 Hz/);
 });
 
 // --- mqtt-status ---

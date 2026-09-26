@@ -17,6 +17,24 @@ const char* presenceOf(const EcoflowDeviceState& state) {
   return state.online ? "online" : "offline";
 }
 
+// Сирі "params" ОДНОГО пристрою у вигляді JSON-об'єкта {"ключ":число,...} -
+// спільне ядро для includeParams-гілки deviceJson() нижче (portalStatusJson)
+// і WebEcoflowModule::mqttDeviceParamsJson() (MQTT drill-down, main.cpp) -
+// той самий цикл по trackedParams, не дві копії (DRY, CLAUDE.md).
+String paramsObjectJson(const EcoflowDeviceState& state) {
+  String json = "{";
+  bool first = true;
+  for (const auto& kv : state.trackedParams) {
+    if (!first) json += ',';
+    first = false;
+    json += webjson::quote(kv.first.c_str());
+    json += ':';
+    json += String(kv.second, 3);
+  }
+  json += "}";
+  return json;
+}
+
 // snap - провайдерський знімок (EcoflowDeviceState + похідні поля журналу,
 // уже зняті в _refreshSnapshot()); nowMs/nowEpoch - момент ТОГО САМОГО
 // знімка (WebEcoflowStatus::snapshotMs/snapshotEpoch), не живі millis()/
@@ -69,16 +87,7 @@ String deviceJson(const WebEcoflowDeviceSnapshot& snap, uint32_t nowMs, time_t n
     // іменовані поля вище. Ключі вже нормалізовані
     // (EcoflowDeviceRegistry::normalizeKey), тому валідні як JSON-ключі без
     // екранування.
-    json += ",\"params\":{";
-    bool first = true;
-    for (const auto& kv : state.trackedParams) {
-      if (!first) json += ',';
-      first = false;
-      json += webjson::quote(kv.first.c_str());
-      json += ':';
-      json += String(kv.second, 3);
-    }
-    json += "}";
+    json += ",\"params\":" + paramsObjectJson(state);
   }
   json += "}";
   return json;
@@ -179,6 +188,16 @@ String WebEcoflowModule::portalStatusJson(const WebEcoflowStatus& status,
 String WebEcoflowModule::mqttStatusJson(const WebEcoflowStatus& status,
                                          const std::vector<WebEcoflowDeviceSnapshot>& devices) {
   return buildStatusJson(status, devices, /*includeParams=*/false);
+}
+
+String WebEcoflowModule::mqttDeviceParamsJson(const WebEcoflowDeviceSnapshot& snap) {
+  const EcoflowDeviceState& state = snap.state;
+  String json = "{\"serialNumber\":" + webjson::quote(state.info->serialNumber);
+  json += ",\"captureAll\":" + webjson::boolean(state.captureAll);
+  json += ",\"droppedParams\":" + String(state.droppedParams);
+  json += ",\"params\":" + paramsObjectJson(state);
+  json += "}";
+  return json;
 }
 
 void WebEcoflowModule::loop() {

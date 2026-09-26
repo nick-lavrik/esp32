@@ -26,7 +26,8 @@ python3 -m http.server 8765
 розділ "storage-шар" (п.8): rpi5, окремий WS-listener (`9001`), окремі
 `sapi_passwd`/`sapi_acl`, один статичний акаунт на пристрій
 (`sapi-<client-id>`, read-only на `devices/<client-id>/#`, write лише на
-`.../api/+`).
+`.../api/+` + `.../api/ecoflow-params/+` для per-device drill-down на "Raw
+parameters").
 
 Форма — попап під індикатором стану в правому верхньому куті (клік
 відкриває/закриває, `Escape`/клік поза попапом закриває). Вкладки
@@ -52,6 +53,25 @@ Memory-картка має бар використання heap (Used/Largest fr
 фрагментоване, маркер Min free ever) — новий SAPI-специфічний віджет,
 якого немає на самому HTTP-порталі, з hover-tooltip на кожному сегменті
 окремо (не один загальний на весь бар).
+
+## EcoFlow — "Raw parameters" на вимогу (drill-down)
+
+Агрегат `ecoflow-status` свідомо не несе сирі `params` кожного пристрою
+(розмір payload) — картка пристрою показує кнопку "Load raw parameters"
+(`render.js`: `ecoParamsSection()`), яка публікує окремий запит у
+`devices/<client-id>/api/ecoflow-params/<sn>` (`index.html`:
+`requestEcoflowDeviceParams()`). Після відповіді кнопка стає "Refresh" (той
+самий клас `.eco-params-btn`, той самий делегований клік) — параметри
+пристрою змінюються в часі, тому одноразового завантаження недостатньо.
+
+На час очікування відповіді весь блок `<details class="eco-params">`
+(не лише кнопка) отримує `.busy` — буквальний порт `.busy`/`setBusy()` з
+HTTP-порталу (напівпрозорий шар + спінер, кнопка всередині `disabled`).
+Явний timeout (`ECO_PARAMS_TIMEOUT_MS`, 10с) знімає `.busy` й логує помилку
+в Log-вкладку, якщо пристрій так і не відповів — на відміну від порталу
+(там `job()`/`finally` навколо проміса HTTP-запиту), тут відповідь
+асинхронна через окрему MQTT-подію, тож "завершення" — це або вона, або сам
+таймер.
 
 ## Log — Pause/Resume, Newest first, кореляція запит/відповідь
 

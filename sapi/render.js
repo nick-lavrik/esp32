@@ -209,6 +209,108 @@ function ecoflowSystemDevicesHtml(devices, openSerials) {
   return list.map((d) => ecoSysDeviceRow(d, open.has(d.serialNumber))).join('');
 }
 
+// --- EcoFlow: повна вкладка (renderEcoflow() у порталі, assets/www/
+// index.html) - Connection + Overview-таблиця + картки пристроїв, "1:1 як на
+// порталі" (запит користувача цієї сесії), не kv/badge-переказ, що був тут
+// раніше. Той самий набір/порядок колонок і полів, що й портал.
+
+function ecoBrokerText(data) { return data.brokerHost ? esc(data.brokerHost) + ':' + dash(data.brokerPort) : '-'; }
+function ecoTransportText(data) { return data.viaProxy ? 'proxy (plain MQTT)' : 'direct (TLS)'; }
+// heapLargestBlockBytes - лише в mqttStatusJson()/portalStatusJson()
+// (WebEcoflowModule.cpp), не в кожній тестовій фікстурі - null дає "-", а не
+// "NaN KB" (assertNoLeakedPlaceholders у test/render.test.js).
+function ecoHeapText(data) {
+  if (data.heapFreeBytes == null) return '-';
+  const largest = data.heapLargestBlockBytes != null ? Math.round(data.heapLargestBlockBytes / 1024) + ' KB' : '-';
+  return Math.round(data.heapFreeBytes / 1024) + ' KB free · ' + largest + ' largest block';
+}
+
+// Рядок Overview-таблиці - той самий перелік колонок, що #ecoflow-table
+// порталу: #, Serial, Name, Status, Charge, Grid, Power/AC (лише широкий
+// екран, .ecoflow-wide), Left, Age. .opt/.opt2/.ecoflow-wide - ті самі класи
+// й пороги (560/900/1300px), що в порталі (CSS нижче в index.html).
+function ecoTableRow(d, index) {
+  return `<tr>
+    <td class="opt2">${index}</td>
+    <td class="opt2">${esc(d.serialNumber)}</td>
+    <td>${esc(d.name || d.serialNumber)}</td>
+    <td>${ecoPresence(d.presence)}</td>
+    <td class="num">${ecoChargeRounded(d)}</td>
+    <td>${ecoGrid(d.grid, d.gridInferred)}</td>
+    <td class="ecoflow-wide">${ecoWatts(d.inputWatts, d.outputWatts)}</td>
+    <td class="ecoflow-wide num">${ecoAcText(d)}</td>
+    <td class="opt num">${ecoRemain(d.remainTimeMinutes)}</td>
+    <td class="opt2 num">${d.gridForMs != null ? ecoDuration(d.gridForMs) : '-'}</td>
+  </tr>`;
+}
+
+// Ключі вже нормалізовані на пристрої (EcoflowDeviceRegistry::normalizeKey) -
+// esc() лишається обов'язковим: список формується з того, що прийшло
+// мережею, довіряти йому не можна навіть у власному акаунті (буквальний порт
+// ecoParamsTable(), assets/www/index.html).
+function ecoParamsTable(params) {
+  const keys = Object.keys(params).sort();
+  if (keys.length === 0) return '<p class="muted">No raw parameters captured yet.</p>';
+  const rows = keys.map((k) => `<tr><td>${esc(k)}</td><td>${params[k]}</td></tr>`).join('');
+  return `<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Розділ "Raw parameters" картки - на відміну від порталу (params завжди в
+// /api/ecoflow/status), MQTT-агрегат ecoflow-status (mqttStatusJson(),
+// WebEcoflowModule.cpp) свідомо їх не несе (розмір payload, "Провайдер ≠
+// форматер", docs/mqtt-web-handoff.md). Замість мовчазної відсутності -
+// окремий per-device drill-down топік (docs/mqtt-topics.md,
+// devices/<client-id>/api/ecoflow-params/<sn>): d.params з'являється лише
+// ПІСЛЯ того, як index.html злив відповідь цього топіка в кешований
+// пристрій (mergeEcoflowDeviceParams()) - render.js сам нічого не запитує
+// (без DOM/мережі, той самий принцип, що й решта файлу). open - чи розгорнутий
+// <details> ПЕРЕД цією перемальовкою (index.html сканує DOM, той самий
+// патерн, що ecoSysOpenDetails/ecoflowSystemDevicesHtml вище).
+function ecoParamsSection(d, open) {
+  const sn = esc(d.serialNumber);
+  if (d.params) {
+    const count = Object.keys(d.params).length;
+    const dropped = d.droppedParams > 0 ? `, ${d.droppedParams} dropped (per-device limit)` : '';
+    // Та сама кнопка/клас, що на "не завантажено" нижче (.eco-params-btn) -
+    // index.html делегує клік по класу, тому один слухач обслуговує і перше
+    // завантаження, і повторний рефреш; без цієї кнопки d.params, щойно
+    // з'явившись, лишалось б застарілим НАЗАВЖДИ (params на пристрої
+    // змінюються, а MQTT-агрегат ecoflow-status їх свідомо не оновлює -
+    // розділ вище).
+    return `<details class="eco-params"${open ? ' open' : ''} data-sn="${sn}">
+      <summary>Raw parameters (${count}${dropped}, capture: ${d.captureAll ? 'all' : 'important only'})</summary>
+      <div class="eco-params-body">
+        <button class="act ghost eco-params-btn" type="button" data-sn="${sn}" style="margin-bottom:8px">Refresh</button>
+        ${ecoParamsTable(d.params)}
+      </div>
+    </details>`;
+  }
+  return `<details class="eco-params"${open ? ' open' : ''} data-sn="${sn}">
+    <summary>Raw parameters (not loaded)</summary>
+    <div class="eco-params-body">
+      <p class="muted" style="margin:0 0 8px">Not sent with ecoflow-status (payload size) - fetched on demand.</p>
+      <button class="act ghost eco-params-btn" type="button" data-sn="${sn}">Load raw parameters</button>
+    </div>
+  </details>`;
+}
+
+// Картка пристрою - той самий перелік dt/dd, що ecoSysDeviceRow() (System),
+// той самий ecoDeviceDetailRows() (DRY - CLAUDE.md), лише БЕЗ згорнутого
+// стану верхнього рівня (тут завжди розгорнуто - повна вкладка, не
+// компактний блок System). openParamsSerials - Set серійників із розгорнутим
+// "Raw parameters" (index.html сканує DOM перед перемальовкою) - лише цей
+// розділ картки має власний згорнутий стан.
+function ecoDeviceCard(d, openParamsSerials) {
+  const open = (openParamsSerials || new Set()).has(d.serialNumber);
+  return `<div class="card ecoflow-device" data-sn="${esc(d.serialNumber)}">
+    <div class="row" style="justify-content:space-between">
+      <b>${esc(d.name || d.serialNumber)}</b><span class="muted">${esc(d.serialNumber)} · ${esc(dash(d.type))}</span>
+    </div>
+    <dl>${ecoDeviceDetailRows(d)}</dl>
+    ${ecoParamsSection(d, open)}
+  </div>`;
+}
+
 // --- MQTT: буквальний порт portal (assets/www/index.html: hintIcon/
 // mqttDeniedText/mqttCommandsRejectedText/mqttDroppedText/mqttDroppedRows/
 // mqttLwtRows/mqttHeartbeatText/mqttHeartbeatRows/mqttConnectionRows/
@@ -558,39 +660,45 @@ function renderWifiStatus(data) {
   return html;
 }
 
-function renderEcoflowStatus(data) {
-  let html = kv([
-    ['connected', boolBadge(data.connected)],
-    ['running', boolBadge(data.running)],
-    ['channel', esc(dash(data.channel))],
-    ['account', esc(dash(data.account))],
-    ['broker', esc(dash(data.brokerHost)) + ':' + esc(dash(data.brokerPort)) + (data.viaProxy ? ' (proxy)' : '')],
-    ['messages', dash(data.messageCount)],
-    ['last topic', esc(dash(data.lastTopic))],
-    ['last error', data.lastError ? badge(data.lastError, 'err') : badge('none', 'muted')],
-    ['heap free', fmtBytes(data.heapFreeBytes)],
-  ]);
+// extra.openParamsSerials - Set серійників із розгорнутим "Raw parameters"
+// (index.html сканує DOM ПЕРЕД перемальовкою, той самий патерн, що
+// extra.ecoflowOpenSerials у renderSystemInfo()) - той самий необов'язковий
+// другий аргумент, що вже несуть RENDERERS['system-info']/['wifi-status'].
+function renderEcoflowStatus(data, extra) {
   const devices = Array.isArray(data.devices) ? data.devices : [];
-  if (!devices.length) {
-    html += '<p class="muted" style="margin:10px 0 0">no devices</p>';
-    return html;
-  }
-  html += '<div class="section-group"><h3>Devices</h3>';
-  for (const d of devices) {
-    const presenceCls = d.presence === 'online' ? 'ok' : d.presence === 'offline' ? 'err' : 'muted';
-    const gridCls = d.grid === 'on-grid' ? 'ok' : d.grid === 'off-grid' ? 'warn' : 'muted';
-    html += `<div style="margin-bottom:10px"><strong>${esc(d.name || d.serialNumber)}</strong> `
-      + `<span class="muted">(${esc(dash(d.type))})</span><br>` + kv([
-        ['presence', badge(dash(d.presence), presenceCls)],
-        ['grid', badge(dash(d.grid), gridCls) + (d.gridInferred ? ' <span class="muted">inferred</span>' : '')],
-        ['soc', d.socPrecise != null ? d.socPrecise + ' %' : d.socPercent != null ? d.socPercent + ' %' : '-'],
-        ['input / output', `${dash(d.inputWatts)} W / ${dash(d.outputWatts)} W`],
-        ['remain time', d.remainTimeMinutes != null ? d.remainTimeMinutes + ' min' : '-'],
-        ['last message', fmtEpoch(d.lastMessageEpoch) + (d.ageMs != null ? ` <span class="muted">(${fmtMs(d.ageMs)} ago)</span>` : '')],
-        ['grid for', fmtMs(d.gridForMs)],
-      ]) + '</div>';
-  }
-  html += '</div>';
+  const openParamsSerials = (extra && extra.openParamsSerials) || new Set();
+
+  let html = kv([
+    ['Connected', data.connected ? 'yes' : 'no'],
+    ['MQTT session', data.running ? 'running' : 'stopped'],
+    ['Channel', esc(dash(data.channel))],
+    ['Broker', ecoBrokerText(data)],
+    ['Connection type', ecoTransportText(data)],
+    ['Account', esc(data.account || '-')],
+    ['Messages received', dash(data.messageCount)],
+    ['Last topic', esc(data.lastTopic || '-')],
+    ['Last error', esc(data.lastError || '-')],
+    ['Heap', ecoHeapText(data)],
+    ['Net task stack headroom', dash(data.netStackHeadroomBytes) + ' B'],
+  ]);
+
+  html += '<div class="section-group"><h3>Overview</h3><table class="zebra ecoflow-table"><thead><tr>'
+    + '<th class="opt2">#</th><th class="opt2">Serial</th><th>Name</th><th>Status</th>'
+    + '<th class="num">Charge</th><th>Grid</th>'
+    + '<th class="ecoflow-wide">Power</th><th class="ecoflow-wide num">AC</th>'
+    + '<th class="opt num">Left</th><th class="opt2 num">Age</th>'
+    + '</tr></thead><tbody>'
+    + (devices.length === 0
+        ? '<tr><td colspan="10" class="muted">No devices configured.</td></tr>'
+        : devices.map(ecoTableRow).join(''))
+    + '</tbody></table></div>';
+
+  html += '<div class="section-group"><h3>Devices '
+    + `<span class="muted" style="font-weight:400">${devices.length} device(s)</span></h3>`
+    + (devices.length === 0
+        ? '<p class="muted">No devices configured.</p>'
+        : '<div class="cards">' + devices.map((d) => ecoDeviceCard(d, openParamsSerials)).join('') + '</div>')
+    + '</div>';
   return html;
 }
 
@@ -609,6 +717,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     esc, badge, boolBadge, signal, kv, dlRows, mockDl, dash, fmtBytes, fmtMs, fmtEpoch, fsUnit, fsSizeIn,
     wifiSystemRows, ecoflowSystemRows, ecoflowSystemDevicesHtml, ecoSysDeviceRow, ecoDeviceDetailRows,
+    ecoBrokerText, ecoTransportText, ecoTableRow, ecoDeviceCard, ecoParamsTable,
     mqttSystemRows, mqttConnectionRows, mqttLwtRows, mqttConsoleMirrorRows, heapBarHtml,
     renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus, RENDERERS,
   };
