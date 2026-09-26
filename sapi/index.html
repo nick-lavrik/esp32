@@ -21,6 +21,11 @@
   лишається поруч (<details class="raw">) - для діагностики полів, яких
   рендер ще не показує.
 
+  Вкладка Commands (сесія 2026-09-26) - ПОЗА цим списком/рендерами: там не
+  статус пристрою, а запуск довільної serial-команди через command/<id> +
+  перелік команд через окрему JSON API commands-list, докладно -
+  docs/mqtt-web-handoff.md, розділ "SAPI: вкладка Commands", і sapi/README.md.
+
   render.js винесений окремим файлом (не в цей інлайн-скрипт) свідомо - той
   самий код без змін прогонить test/render.test.js у Node, без браузера/DOM.
 
@@ -422,6 +427,35 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 .muted { color: var(--muted); }
 .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-small); color: var(--muted); }
 .checkbox-row input { width: auto; }
+
+/* Вкладка Commands - той самий словник, що на порталі (assets/www/
+   index.html: .cols/.col/.fill/.chip/#cmd-table), тут раніше не потрібний -
+   перша вкладка SAPI з двоколонковою розкладкою. */
+.fill { flex: 1; min-width: 0; }
+.cols { display: flex; gap: 20px; align-items: flex-start; }
+.cols > .col { flex: 1; min-width: 0; }
+@media (max-width: 900px) { .cols { flex-direction: column; } }
+#cmd-run-out { white-space: pre-wrap; word-break: break-word; min-height: 22vh;
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#cmd-run-input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#cmd-list-filter { width: 100%; }
+#cmd-list-box { max-height: 40vh; overflow-y: auto; margin-top: 8px;
+  border: 1px solid var(--line); border-radius: 6px; }
+#cmd-list-table td { padding: 4px 10px; vertical-align: baseline; }
+#cmd-list-table tr[data-pick] { cursor: pointer; }
+#cmd-list-table tr[data-pick]:hover { background: #ffffff0f; }
+#cmd-list-table td.n { width: 1%; white-space: nowrap; color: var(--accent);
+  font: var(--font-size-small)/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#cmd-list-table td.d { color: var(--muted); font-size: var(--font-size-small); }
+/* Пара "запустити / видалити" виглядає й поводиться як одна кнопка -
+   буквальний порт .chip з порталу. */
+.chip { display: inline-flex; }
+.chip button:first-child { border-radius: 6px 0 0 6px; }
+.chip button:last-child { border-radius: 0 6px 6px 0; border-left: none; padding: 7px 10px; color: var(--muted); }
+.chip[draggable="true"] { cursor: grab; }
+.chip.dragging { opacity: .4; }
+.chip.drag-before { box-shadow: -5px 0 0 0 var(--accent); }
+.chip.drag-after { box-shadow: 5px 0 0 0 var(--accent); }
 </style>
 </head>
 <body>
@@ -464,6 +498,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   <button data-tab="wifi-status">Wi-Fi</button>
   <button data-tab="ecoflow-status">EcoFlow</button>
   <button data-tab="mqtt-status">MQTT</button>
+  <button data-tab="commands">Commands</button>
   <button data-tab="log">Log</button>
 </nav>
 
@@ -501,6 +536,40 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     <div class="out">-</div>
   </section>
 
+  <section data-tab="commands">
+    <div class="cols">
+    <div class="col">
+    <h2 class="hrow">Run <span id="cmd-run-state" class="cmd-status muted"></span></h2>
+    <form class="row" id="cmd-run-form">
+      <input id="cmd-run-input" list="commands-datalist" autocomplete="off" class="fill"
+             placeholder="command with arguments, e.g. net device wifi list">
+      <datalist id="commands-datalist"></datalist>
+      <button class="act" type="submit">Run</button>
+      <button class="act ghost" type="button" id="btn-cmd-save-shortcut">Save as shortcut</button>
+    </form>
+
+    <div id="cmd-shortcuts-block">
+      <h2>Shortcuts</h2>
+      <div class="row" id="cmd-shortcuts"></div>
+    </div>
+
+    <h2>Output</h2>
+    <div id="cmd-run-out" class="out"></div>
+    </div>
+
+    <div class="col">
+    <h2>Available commands <span id="cmd-list-count" class="muted" style="font-size:.75em; font-weight:400"></span></h2>
+    <div class="row">
+      <input id="cmd-list-filter" placeholder="filter…" autocomplete="off" class="fill">
+      <button class="act ghost" type="button" id="btn-cmd-list-refresh">Refresh</button>
+    </div>
+    <div id="cmd-list-box"><table id="cmd-list-table"><tbody>
+      <tr><td class="d">Not loaded yet — connect and open this tab.</td></tr>
+    </tbody></table></div>
+    </div>
+    </div>
+  </section>
+
   <section data-tab="log">
     <h2 class="hrow">Log <span class="muted" style="font-weight:400; font-size:var(--font-size-small)">(останні 500 рядків)</span><span class="spacer"></span>
       <button id="btn-log-pause" class="act ghost">Pause</button>
@@ -527,6 +596,15 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   const AUTO_BACKOFF_MAX = 8; // множник база: 5с -> 40с максимум при busy
   const LOG_MAX_LINES = 500;
   const ECO_PARAMS_TIMEOUT_MS = 10000; // ecoflow-params/<sn> - явний timeout, а не вічний спінер
+  const COMMANDS_LIST_TIMEOUT_MS = 10000; // commands-list - той самий підхід, що ecoflow-params
+  // command/<client-id> (докладна довільна команда, docs/mqtt-topics.md) не несе кореляційного
+  // "id" у відповіді - на відміну від devices/.../api/<cmd>, це текстовий канал, спільний з
+  // serial/cron/іншими MQTT-клієнтами (docs/mqtt-web-handoff.md, "чи command/<id> теж переїжджає
+  // під devices/" - ні, свідомо). Тому "команда завершилась" тут - евристика, не факт: тиша по
+  // reply-топіку довше CMD_RUN_SILENCE_MS - той самий компроміс, що вже прийнятий для
+  // ecoflow-params (ECO_PARAMS_TIMEOUT_MS вище), лише для потоку порцій, а не одної відповіді.
+  const CMD_RUN_SILENCE_MS = 2000;
+  const CMD_RUN_HARD_TIMEOUT_MS = 60000; // страховка - як CAPTURE_TIMEOUT_MS на порталі
 
   const STORAGE_KEY = 'sapi.connection.v1';
 
@@ -552,6 +630,28 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch (e) { /* нічого критичного */ }
+  }
+
+  // Shortcuts вкладки Commands - на відміну від порталу (NVS одним ключем на
+  // ВСІХ клієнтів пристрою), тут нема серверного сховища, до якого пише
+  // браузер: SAPI не має жодного HTTP/flash-запису, лише MQTT-запити з
+  // фіксованого allowlist (command/<id> виконує, але нічого не зберігає).
+  // Тому shortcuts - суто зручність ЦЬОГО браузера, localStorage, як і форма
+  // підключення вище (STORAGE_KEY) - не переживають перехід на інший
+  // комп'ютер, і це прийнятно для того самого пре-альфа духу.
+  const CMD_SHORTCUTS_KEY = 'sapi.commandShortcuts.v1';
+  function loadCmdShortcuts() {
+    try {
+      const list = JSON.parse(localStorage.getItem(CMD_SHORTCUTS_KEY) || '[]');
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function saveCmdShortcuts(list) {
+    try {
+      localStorage.setItem(CMD_SHORTCUTS_KEY, JSON.stringify(list));
+    } catch (e) { /* нічого критичного - список лишається в поточному DOM-стані */ }
   }
 
   // Персист UI-чекбоксів/перемикачів сторінки (ПРАВИЛО НА МАЙБУТНЄ: якщо
@@ -1105,23 +1205,259 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   function reqTopic(cmd) { return `${conn.prefix}/devices/${conn.clientId}/api/${cmd}`; }
   function replyTopic(cmd) { return `${conn.prefix}/devices/${conn.clientId}/api/${cmd}/reply`; }
   function statusTopic() { return `${conn.prefix}/devices/${conn.clientId}/status`; }
+  // command/<client-id> - окремий корінь топіка, НЕ під devices/ (докладна
+  // довільна команда, docs/mqtt-topics.md - "чи command/<id> теж переїжджає
+  // під devices/" - ні, свідомо: це канал ручного виклику, а не структурований
+  // API-запит за allowlist).
+  function cmdReqTopic() { return `${conn.prefix}/command/${conn.clientId}`; }
+  function cmdReplyTopic() { return `${conn.prefix}/command/${conn.clientId}/reply`; }
   // Лог (logEvent) показує топік у кожному рядку - сьогодні всі підписки й
-  // публікації скоуплені на ОДИН пристрій (reqTopic/replyTopic/statusTopic
-  // вище), тому <prefix>/devices/<client-id> - це 99% символів, не
-  // інформація. shortTopic() ховає той самий повторюваний префікс за
-  // "<client-id>" (сам clientId, не слово "device" - той самий
+  // публікації скоуплені на ОДИН пристрій, лише під двома різними коренями
+  // (devices/<client-id>/... і command/<client-id>/...), тому
+  // <prefix>/devices/<client-id> і <prefix>/command/<client-id> - це 99%
+  // символів, не інформація. shortTopic() ховає обидва повторювані префікси
+  // за "<client-id>" (сам clientId, не слово "device" - той самий
   // ідентифікатор, що й у формі підключення/f-client, легше зіставити з
   // кількома пристроями, якби колись знадобилось), лишає лише змінний хвіст
-  // (api/system-info, status тощо) - повний топік і далі доступний через
-  // title (hover) у .log-topic.
+  // (api/system-info, status, command тощо) - повний топік і далі доступний
+  // через title (hover) у .log-topic.
   function shortTopic(topic) {
     if (!conn) return topic;
-    const prefix = `${conn.prefix}/devices/${conn.clientId}`;
     const short = `<${conn.clientId}>`;
-    if (topic === prefix) return short;
-    if (topic.startsWith(prefix + '/')) return short + topic.slice(prefix.length);
+    for (const root of [`${conn.prefix}/devices/${conn.clientId}`, `${conn.prefix}/command/${conn.clientId}`]) {
+      if (topic === root) return short;
+      if (topic.startsWith(root + '/')) return short + topic.slice(root.length);
+    }
     return topic;
   }
+
+  // --- вкладка Commands (docs/mqtt-topics.md: command/<client-id>, JSON API
+  // commands-list) - той самий намір, що lib/WebPortal/WebCommandsModule на
+  // порталі (запустити будь-яку зареєстровану команду, тримати shortcuts), але
+  // інший транспорт: команда виконується через command/<client-id> (текстовий
+  // канал, спільний з serial/cron - без кореляційного "id" у відповіді), а
+  // перелік доступних команд - через ОКРЕМУ JSON API команду commands-list
+  // (devices/<client-id>/api/commands-list), дзеркало /api/commands/list. ---
+
+  // -- перелік зареєстрованих команд (commands-list, одноразовий запит поза
+  // COMMANDS/panels[cmd] - той самий підхід, що ecoflow-params вище). --
+  let availableCommands = [];
+  let commandsListPendingId = null;
+  let commandsListTimeoutTimer = null;
+
+  function renderCommandsList() {
+    const q = $('#cmd-list-filter').value.trim().toLowerCase();
+    const list = q
+      ? availableCommands.filter((c) => (c.name + ' ' + c.description).toLowerCase().includes(q))
+      : availableCommands;
+
+    $('#cmd-list-count').textContent = availableCommands.length
+      ? (q ? `${list.length} of ${availableCommands.length}` : `${availableCommands.length} total`)
+      : '';
+
+    const body = $('#cmd-list-table tbody');
+    body.innerHTML = list.length
+      ? list.map((c) => `
+        <tr data-pick="${esc(c.name)}">
+          <td class="n">${esc(c.name)}</td>
+          <td class="d">${esc(c.description)}</td>
+        </tr>`).join('')
+      : `<tr><td class="d">${availableCommands.length
+          ? 'Nothing matches.' : 'Not loaded yet — connect and open this tab.'}</td></tr>`;
+
+    // Той самий перелік - автодоповненням для поля Run (портал: #cmd-list).
+    $('#commands-datalist').innerHTML = availableCommands
+      .map((c) => `<option value="${esc(c.name)}">${esc(c.description)}</option>`)
+      .join('');
+  }
+
+  function requestCommandsList() {
+    if (!client || !client.connected) return;
+    const id = Math.floor(Math.random() * 1e9);
+    commandsListPendingId = id;
+    clearTimeout(commandsListTimeoutTimer);
+    commandsListTimeoutTimer = setTimeout(() => {
+      commandsListPendingId = null;
+      logEvent('err', reqTopic('commands-list'), null, `timeout ${COMMANDS_LIST_TIMEOUT_MS / 1000}s - no reply`);
+    }, COMMANDS_LIST_TIMEOUT_MS);
+    const topic = reqTopic('commands-list');
+    const payload = JSON.stringify({ id });
+    client.publish(topic, payload);
+    logEvent('out', topic, payload);
+  }
+
+  // -- запуск довільної команди (command/<client-id>) і захоплення виводу --
+  //
+  // На відміну від requestCmd()/requestEcoflowDeviceParams() вище, тут немає
+  // жодного кореляційного "id": command/<id> - текстовий канал, спільний з
+  // serial/cron/іншими MQTT-клієнтами (docs/mqtt-topics.md), і "команда
+  // завершилась" тут - евристика тиші по reply-топіку (CMD_RUN_SILENCE_MS),
+  // а не факт із протоколу. Якщо в цей самий момент команду ввели ще й з
+  // serial - вивід панелі покаже суміш, так само, як показав би /dev/ttyACM0
+  // поруч із веб-консоллю порталу; для пре-альфа-інструмента одного оператора
+  // це прийнятний компроміс, не прихована вада.
+  let cmdRunActive = false;
+  let cmdRunLabel = '';
+  let cmdRunSilenceTimer = null;
+  let cmdRunHardTimer = null;
+
+  function setCmdRunState(text, cls) {
+    const el = $('#cmd-run-state');
+    el.textContent = text;
+    el.className = 'cmd-status' + (cls ? ' ' + cls : '');
+  }
+
+  function endCmdRunCapture(label) {
+    cmdRunActive = false;
+    clearTimeout(cmdRunSilenceTimer);
+    clearTimeout(cmdRunHardTimer);
+    setCmdRunState(label, '');
+  }
+
+  function armCmdRunTimers() {
+    clearTimeout(cmdRunSilenceTimer);
+    cmdRunSilenceTimer = setTimeout(
+      () => endCmdRunCapture(`no more output for ${CMD_RUN_SILENCE_MS / 1000}s: ${cmdRunLabel}`), CMD_RUN_SILENCE_MS);
+  }
+
+  function runCommand(cmd) {
+    if (!client || !client.connected) return;
+    cmd = cmd.trim();
+    if (!cmd) return;
+    clearTimeout(cmdRunSilenceTimer);
+    clearTimeout(cmdRunHardTimer);
+    cmdRunLabel = cmd;
+    cmdRunActive = true;
+    $('#cmd-run-out').textContent = '';
+    setCmdRunState(`running: ${cmd}`, '');
+    cmdRunHardTimer = setTimeout(
+      () => endCmdRunCapture(`stopped: no reply for ${CMD_RUN_HARD_TIMEOUT_MS / 1000}s`), CMD_RUN_HARD_TIMEOUT_MS);
+    armCmdRunTimers();
+    const topic = cmdReqTopic();
+    client.publish(topic, cmd);
+    logEvent('out', topic, cmd);
+  }
+
+  // -- shortcuts (localStorage - CMD_SHORTCUTS_KEY вище, без серверного
+  // сховища: SAPI не пише в NVS пристрою, на відміну від порталу). --
+  function renderCmdShortcuts() {
+    const list = loadCmdShortcuts();
+    const box = $('#cmd-shortcuts');
+    box.innerHTML = list.length
+      ? list.map((s, i) => `
+        <span class="chip" draggable="true" data-index="${i}">
+          <button class="act ghost" data-run-shortcut="${esc(s.command)}"
+                  title="${esc(s.command)}">${esc(s.name)}</button>
+          <button class="act ghost" data-drop-shortcut="${i}" title="Remove shortcut">×</button>
+        </span>`).join('')
+      : '<span class="muted">No shortcuts yet — type a command and press “Save as shortcut”.</span>';
+  }
+
+  // Перетягування міняє порядок ОДРАЗУ в localStorage (на відміну від
+  // /shortcuts-reorder порталу - тут нема сервера, якому це можна доручити,
+  // і чекати на відповідь нема на що).
+  let _dragCmdShortcutIndex = null;
+
+  function _clearCmdShortcutDropMarks() {
+    $$('#cmd-shortcuts .chip.drag-before, #cmd-shortcuts .chip.drag-after')
+      .forEach((el) => el.classList.remove('drag-before', 'drag-after'));
+  }
+  function _cmdShortcutDropSide(chip, clientX) {
+    const rect = chip.getBoundingClientRect();
+    return clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+  }
+
+  $('#cmd-shortcuts').addEventListener('dragstart', (ev) => {
+    const chip = ev.target.closest('.chip');
+    if (!chip) return;
+    _dragCmdShortcutIndex = chip.dataset.index;
+    chip.classList.add('dragging');
+    ev.dataTransfer.effectAllowed = 'move';
+  });
+  $('#cmd-shortcuts').addEventListener('dragover', (ev) => {
+    const chip = ev.target.closest('.chip');
+    if (!chip) return;
+    ev.preventDefault();
+    _clearCmdShortcutDropMarks();
+    chip.classList.add(_cmdShortcutDropSide(chip, ev.clientX) === 'before' ? 'drag-before' : 'drag-after');
+  });
+  $('#cmd-shortcuts').addEventListener('dragleave', (ev) => {
+    if (!ev.currentTarget.contains(ev.relatedTarget)) _clearCmdShortcutDropMarks();
+  });
+  $('#cmd-shortcuts').addEventListener('drop', (ev) => {
+    const chip = ev.target.closest('.chip');
+    ev.preventDefault();
+    _clearCmdShortcutDropMarks();
+    if (!chip || _dragCmdShortcutIndex === null) return;
+
+    const from = Number(_dragCmdShortcutIndex);
+    _dragCmdShortcutIndex = null;
+    // "to" - позиція ПІСЛЯ видалення from, той самий розрахунок, що на
+    // порталі (assets/www/index.html).
+    const target = Number(chip.dataset.index);
+    let to = _cmdShortcutDropSide(chip, ev.clientX) === 'after' ? target + 1 : target;
+    if (from < to) to -= 1;
+    if (to === from) return;
+
+    const list = loadCmdShortcuts();
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    saveCmdShortcuts(list);
+    renderCmdShortcuts();
+  });
+  $('#cmd-shortcuts').addEventListener('dragend', () => {
+    $$('#cmd-shortcuts .chip.dragging').forEach((el) => el.classList.remove('dragging'));
+    _clearCmdShortcutDropMarks();
+    _dragCmdShortcutIndex = null;
+  });
+
+  // Клік по назві команди зі списку ліворуч не запускає її одразу - майже всі
+  // беруть аргументи, тому назва лише потрапляє в поле Run (той самий підхід,
+  // що data-pick на порталі).
+  $('section[data-tab="commands"]').addEventListener('click', (ev) => {
+    const pick = ev.target.closest('[data-pick]');
+    if (pick) {
+      const input = $('#cmd-run-input');
+      input.value = pick.dataset.pick + ' ';
+      input.focus();
+      return;
+    }
+
+    const run = ev.target.closest('[data-run-shortcut]');
+    if (run) { runCommand(run.dataset.runShortcut); return; }
+
+    const drop = ev.target.closest('[data-drop-shortcut]');
+    if (drop && confirm('Remove this shortcut?')) {
+      const list = loadCmdShortcuts();
+      list.splice(Number(drop.dataset.dropShortcut), 1);
+      saveCmdShortcuts(list);
+      renderCmdShortcuts();
+    }
+  });
+
+  $('#cmd-run-form').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const cmd = $('#cmd-run-input').value.trim();
+    if (cmd) runCommand(cmd);
+  });
+
+  $('#btn-cmd-save-shortcut').addEventListener('click', () => {
+    const cmd = $('#cmd-run-input').value.trim();
+    if (!cmd) { alert('Type a command first'); return; }
+    const name = prompt('Shortcut name:', cmd.split(' ')[0]);
+    if (name === null || !name.trim()) return;
+    const list = loadCmdShortcuts();
+    list.push({ name: name.trim(), command: cmd });
+    saveCmdShortcuts(list);
+    renderCmdShortcuts();
+  });
+
+  $('#cmd-list-filter').addEventListener('input', renderCommandsList);
+  $('#btn-cmd-list-refresh').addEventListener('click', requestCommandsList);
+
+  // localStorage не залежить від з'єднання - на відміну від решти вкладок,
+  // shortcuts малюються одразу при завантаженні сторінки, а не при connect().
+  renderCmdShortcuts();
 
   function requestCmd(cmd) {
     if (!client || !client.connected) return;
@@ -1236,6 +1572,9 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     }
     for (const pending of pendingEcoParamsIds.values()) clearTimeout(pending.timeoutTimer);
     pendingEcoParamsIds.clear();
+    clearTimeout(commandsListTimeoutTimer);
+    commandsListPendingId = null;
+    endCmdRunCapture('');
     if (client) {
       client.end(true);
       client = null;
@@ -1273,6 +1612,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       // більше (docs/mqtt-topics.md), окрема підписка на нього.
       client.subscribe(`${conn.prefix}/devices/${conn.clientId}/api/ecoflow-params/+/reply`);
       client.subscribe(statusTopic());
+      client.subscribe(cmdReplyTopic());
       // Відновлення персистентних UI-контролів - ПІСЛЯ підписки, ПЕРЕД
       // безумовним циклом нижче (розділ "Персист UI-чекбоксів" вище):
       // "Auto" без живого client однаково нічого не зробив би, а зроблений
@@ -1284,6 +1624,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       // одного MQTT-повідомлення раз на конект.
       applyPersistedToggles();
       for (const cmd of COMMANDS) requestCmd(cmd);
+      requestCommandsList();
     });
 
     client.on('reconnect', () => setConnState('connecting'));
@@ -1296,6 +1637,41 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 
       if (topic === statusTopic()) {
         $('#device-state').textContent = `device: ${text}`;
+        return;
+      }
+
+      // command/<client-id>/reply - окремий корінь топіка (не devices/...),
+      // тому перевіряємо його тут, до decision-дерева нижче, а не всередині
+      // циклу COMMANDS (той шукає лише replyTopic(cmd) під devices/).
+      if (topic === cmdReplyTopic()) {
+        if (cmdRunActive) {
+          const out = $('#cmd-run-out');
+          out.textContent += text.endsWith('\n') ? text : text + '\n';
+          out.scrollTop = out.scrollHeight;
+          armCmdRunTimers();
+        }
+        return;
+      }
+
+      // commands-list - одноразовий запит поза COMMANDS (як ecoflow-params
+      // нижче): це перелік СЕРІЙНИХ команд для вкладки Commands, не статус
+      // пристрою, і не тягне auto-poll/panels[cmd].
+      if (topic === replyTopic('commands-list')) {
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch (e) {
+          return;
+        }
+        if (commandsListPendingId !== null && msg.id !== commandsListPendingId) return; // застаріла відповідь
+        clearTimeout(commandsListTimeoutTimer);
+        commandsListPendingId = null;
+        if (msg.ok) {
+          availableCommands = Array.isArray(msg.data) ? msg.data : [];
+          renderCommandsList();
+        } else {
+          logEvent('err', topic, null, `commands-list error: ${msg.error || 'unknown'}`);
+        }
         return;
       }
 

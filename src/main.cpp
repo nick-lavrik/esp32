@@ -173,6 +173,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include <WebCommandsModule.hpp>
 #include <WebConsoleModule.hpp>
 #include <WebFilesModule.hpp>
+#include <WebJson.hpp>
 #include <WebNvsModule.hpp>
 #include <WebPortal.hpp>
 #include <WebSystemModule.hpp>
@@ -689,9 +690,10 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 // взагалі не компілюється, тож ні писати, ні читати цей масив нема кому -
 // без цього гейта registerJsonApiCommandName() лишався б "defined but not
 // used" саме на esp8266 (перевірено збіркою).
-static constexpr size_t kMaxJsonApiCommands = 8;  // 4 наявні (system-info/
+static constexpr size_t kMaxJsonApiCommands = 8;  // 5 наявних (system-info/
                                                    // wifi-status/ecoflow-status/
-                                                   // mqtt-status) + запас
+                                                   // mqtt-status/commands-list)
+                                                   // + запас
 static const char* kJsonApiCommandNames[kMaxJsonApiCommands] = {};
 static size_t kJsonApiCommandCount = 0;
 
@@ -830,6 +832,28 @@ static String jsonApiMqttStatusExecute(const uint8_t* /*raw*/) {
 }
 
 static const JsonApiEntry kJsonApiMqttStatus = {"mqtt-status", jsonApiNoArgs, jsonApiMqttStatusExecute};
+
+// Дзеркало /api/commands/list (WebCommandsModule): перелік зареєстрованих
+// serial-команд для сторінки Commands SAPI - той самий "список ліворуч", що
+// на порталі, але порталу браузер тут не бачить, лише MQTT. commandHandler -
+// глобал файлу (стор. вище), реєстр наповнюється setup()'ом до першого
+// запиту цієї команди - виконання йде вже після setup(), тому порядок
+// реєстрації тут не важливий.
+static String jsonApiCommandsListExecute(const uint8_t* /*raw*/) {
+  String json = "[";
+  for (size_t i = 0; i < commandHandler.commandCount(); ++i) {
+    if (i > 0) json += ',';
+    json += "{\"name\":";
+    json += webjson::quote(commandHandler.commandName(i).c_str());
+    json += ",\"description\":";
+    json += webjson::quote(commandHandler.commandDescription(i).c_str());
+    json += "}";
+  }
+  json += "]";
+  return json;
+}
+
+static const JsonApiEntry kJsonApiCommandsList = {"commands-list", jsonApiNoArgs, jsonApiCommandsListExecute};
 
 // Спільна диспетчеризація запиту на будь-яку команду з реєстру вище - три
 // майже ідентичні addJsonListener()-колбеки (system-info/wifi-status/
@@ -2266,6 +2290,7 @@ void setupMqttClient() {
   registerEcoflowDeviceParamsEntries();
 #endif
   registerJsonApiEntry(kJsonApiMqttStatus);
+  registerJsonApiEntry(kJsonApiCommandsList);
 #endif
 
   // LWT_TOPIC "mykola-lavryk:devices/mqtt-${PIOENV}/status"

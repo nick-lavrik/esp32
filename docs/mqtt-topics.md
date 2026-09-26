@@ -53,6 +53,15 @@ Allowlist, не дзеркало всіх serial-команд:
 | `wifi-status` | `WebWifiModule::portalStatusJson()` | — |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | + `HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | — |
+| `commands-list` | перелік зареєстрованих serial-команд (`commandHandler.commandName()`/`commandDescription()`), те саме, що й `/api/commands/list` порталу | — |
+
+**`commands-list` — статичний перелік, не статус.** На відміну від решти
+чотирьох (`system-info`/`wifi-status`/`ecoflow-status`/`mqtt-status`),
+відповідь — `[{"name","description"}, ...]`, не об'єкт стану; дані не
+змінюються між перезавантаженнями плати, тому SAPI запитує їх один раз на
+конект, а не auto-poll. Джерело для сторінки Commands SAPI (список команд
+ліворуч) — див. розділ 5 нижче, де ACL дозволяє SAPI ще й `command/<id>`
+(запуск довільної команди).
 
 **`ecoflow-params/<sn>` — окремий drill-down, не запис цієї таблиці.**
 Своя назва команди (не суфікс на `ecoflow-status`) — навмисно: повертає
@@ -94,8 +103,8 @@ Allowlist, не дзеркало всіх serial-команд:
   рядок — буквальне ім'я макроса (`"BOARD_HAS_DISPLAY"`, не перейменований
   варіант).
 - `commands` — масив імен зареєстрованих JSON API команд (`"system-info"`,
-  `"wifi-status"`, `"ecoflow-status"`, `"mqtt-status"` — залежно від env),
-  джерело —
+  `"wifi-status"`, `"ecoflow-status"`, `"mqtt-status"`, `"commands-list"` —
+  залежно від env), джерело —
   `registerJsonApiEntry()` (`src/main.cpp`): той самий виклик, що підписує
   `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий fixed-size
   масив (`kJsonApiCommandNames`, без heap). На платі без порталу — `[]`
@@ -147,7 +156,7 @@ LWT для EcoFlow-клієнта свідомо не налаштовуєтьс
 | `1883` (LAN) | `user <PIOENV>` (загальний клієнт кожної плати) | `readwrite mykola-lavryk/#` |
 | `1883` (LAN), анонім | — | лише `read $SYS/#` (після ACL-фіксу 2026-09-22) |
 | `1883` (localhost) | локальні інструменти rpi5 | `read $SYS/#`+`mykola-lavryk/#`, `write` у DELTA2-топік |
-| `9001` (WebSockets, `sapi.conf`) | `user sapi-<env>` (браузерний SAPI) | `read devices/<client-id>/#` + `write devices/<client-id>/api/+`, без `command/` |
+| `9001` (WebSockets, `sapi.conf`) | `user sapi-<env>` (браузерний SAPI) | `read devices/<client-id>/#` + `write devices/<client-id>/api/+` + `write command/<client-id>` + `read command/<client-id>/reply` (сторінка Commands, сесія 2026-09-26 — розворот попереднього рішення "без `command/`", `docs/mqtt-web-handoff.md`) |
 | bridge `ecoflow-proxy` | — | `topic /app/device/property/<SN> in` — по одному на серійник з `EcoflowDeviceRegistry` |
 
 ## 6. Секрети/build flags (без значень — самі значення в `secrets.ini`)

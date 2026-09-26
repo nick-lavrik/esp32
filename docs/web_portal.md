@@ -1026,10 +1026,18 @@ Payload — `{"board","revision","features","commands"}`:
 **Безпека.** Окремий MQTT-over-WebSockets listener на rpi5 (`9001`,
 `per_listener_settings`), окремий `sapi_passwd`/`sapi_acl` від тих, якими
 користуються самі плати: `read devices/<client-id>/#` + `write
-devices/<client-id>/api/+`, без доступу до `command/<id>` (повний allowlist
-serial-команд) і без доступу до інших пристроїв. Один статичний акаунт на
-пристрій (MVP, ротація вручну) — динамічні токени розглядались і відкладені
-як зайва інфраструктура. TLS/WSS — поза MVP (LAN, `ws://`).
+devices/<client-id>/api/+`, без доступу до інших пристроїв. Один статичний
+акаунт на пристрій (MVP, ротація вручну) — динамічні токени розглядались і
+відкладені як зайва інфраструктура. TLS/WSS — поза MVP (LAN, `ws://`).
+
+**`command/<id>` (довільна serial-команда) — доступ додано (сесія
+2026-09-26), не за замовчуванням.** Початкове рішення MVP навмисно лишало
+SAPI без цього каналу (лише структурований JSON API allowlist); сторінка
+Commands SAPI (`sapi/index.html`, `docs/mqtt-web-handoff.md`, розділ «SAPI:
+вкладка Commands») зробила розворот свідомим — `write command/<client-id>` +
+`read command/<client-id>/reply` у `sapi_acl`, за проханням користувача.
+Означає: будь-хто з дійсними sapi-кредешами може виконати БУДЬ-ЯКУ
+зареєстровану serial-команду пристрою, не лише 4-5 команд allowlist.
 
 **ACL на rpi5 розширено під `ecoflow-params/<sn>` окремим правилом.**
 `write devices/<client-id>/api/+` — один рівень wildcard, він НЕ покриває

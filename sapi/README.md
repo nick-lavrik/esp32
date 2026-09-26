@@ -25,9 +25,11 @@ python3 -m http.server 8765
 брокера. Кредеші для конкретного пристрою — `docs/mqtt-web-handoff.md`,
 розділ "storage-шар" (п.8): rpi5, окремий WS-listener (`9001`), окремі
 `sapi_passwd`/`sapi_acl`, один статичний акаунт на пристрій
-(`sapi-<client-id>`, read-only на `devices/<client-id>/#`, write лише на
+(`sapi-<client-id>`, read-only на `devices/<client-id>/#`, write на
 `.../api/+` + `.../api/ecoflow-params/+` для per-device drill-down на "Raw
-parameters").
+parameters", і write `command/<client-id>` + read `command/<client-id>/reply`
+для вкладки Commands, сесія 2026-09-26 — розворот попереднього рішення "без
+`command/`", `docs/mqtt-web-handoff.md`).
 
 Форма — попап під індикатором стану в правому верхньому куті (клік
 відкриває/закриває, `Escape`/клік поза попапом закриває). Вкладки
@@ -82,11 +84,38 @@ HTTP-порталу (напівпрозорий шар + спінер, кноп�
 час паузи пропускаються, не буферизуються. **Newest first** (чекбокс) —
 порядок показу, окремий від порядку зберігання.
 
-## Пре-альфа — жорстко зашитий allowlist
+## Commands — довільна команда через `command/<id>`, 1:1 з порталом
+
+Вкладка Commands: список зареєстрованих serial-команд ліворуч (JSON API
+`commands-list`, дзеркало `/api/commands/list` порталу — окремий одноразовий
+запит поза `COMMANDS`, не auto-poll), поле Run + панель Output справа,
+Shortcuts із drag-n-drop сортуванням. На відміну від решти вкладок SAPI,
+запуск команди йде через `command/<client-id>` (текстовий канал, спільний із
+serial/cron), не через структурований `devices/.../api/<cmd>` — свідомий
+розворот раннього рішення "SAPI без `command/`"
+(`docs/mqtt-web-handoff.md`, розділ «SAPI: вкладка Commands»), за проханням
+користувача.
+
+**"Виконано" тут — евристика тиші по reply-топіку, не факт протоколу.**
+`command/<id>` не несе кореляційного `id`, і порожня фінальна порція, якою
+`CommandResponse::finish()` міг би сигналізувати кінець, до MQTT не
+доходить (`MqttReplyTarget::deliver()` відкидає `length == 0`). Панель Output
+показує `running: <cmd>` до 2с тиші на reply-топіку → `no more output for
+2s: <cmd>`, зі страховкою 60с (як `CAPTURE_TIMEOUT_MS` порталу), якщо
+відповіді не було взагалі.
+
+**Shortcuts — `localStorage` (`sapi.commandShortcuts.v1`), не NVS пристрою.**
+SAPI не має шляху писати у flash пристрою (лише MQTT-запити з allowlist),
+тому shortcuts — зручність ЦЬОГО браузера, той самий принцип, що форма
+підключення. Перетягування сортує список одразу в localStorage, без
+мережевого проміжку.
+
+## Пре-альфа — жорстко зашитий allowlist (System/Wi-Fi/EcoFlow/MQTT)
 
 `COMMANDS` у `index.html` — той самий список, що в `src/main.cpp`
 (`kJsonApiSystemInfo`/`kJsonApiWifiStatus`/`kJsonApiEcoflowStatus`/
-`kJsonApiMqttStatus`). Коли
+`kJsonApiMqttStatus`) - керує лише auto-poll вкладками System/Wi-Fi/EcoFlow/
+MQTT, НЕ вкладкою Commands (та своя, поза цим списком - розділ вище). Коли
 з'явиться discovery-маніфест (фаза 2), він замінить цей список UI, що
 будується з даних брокера, а не з коду тут.
 
