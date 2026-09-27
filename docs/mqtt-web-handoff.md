@@ -2654,3 +2654,45 @@ System-вкладка» вище).
 одноразово, до явної вказівки користувача не використовувати цей
 інструмент без крайньої потреби — надалі звірка лишається на
 Node-рендер і специфічність CSS, без браузера).
+
+## `commands-list` перестав залежати від `HAS_WEB_PORTAL` (сесія 2026-09-27)
+
+На `esp32-c3` з `HAS_WEB_PORTAL=0` (`environment.h`, робоча незакомічена
+правка) SAPI JSON API мовчки втратив усі команди, крім discovery й
+текстового `command/<id>` — очікування користувача було, що SAPI (MQTT-
+канал) не має залежати від наявності HTTP-порталу.
+
+**Причина.** Весь блок `#if HAS_MQTT_CLIENT && HAS_WEB_PORTAL`
+(`src/main.cpp`) охоплював не лише `system-info` (яка дійсно бере
+`webPortal.statusJson()`), а й `wifi-status`/`ecoflow-status`/
+`mqtt-status`/`commands-list` — той самий клас копіювання гейта "за
+звичкою", що вже виправляли для discovery (розділ «Фаза 2» вище). З цих
+чотирьох лише три (`wifi-status`/`ecoflow-status`/`mqtt-status`) дійсно
+не можуть без порталу — їхні провайдери (`webWifiModule`/
+`webEcoflowModule`/`webMqttModule`) самі оголошені лише під
+`HAS_WEB_PORTAL` (`src/main.cpp:488-539`, `IWebModule`-класи). Четверта,
+`commands-list`, читає лише `commandHandler` (`SerialCommander`,
+глобал файлу, завжди визначений) — залежність від порталу була суто
+випадковою.
+
+**Зроблено.** `jsonApiNoArgs`/`handleJsonApiRequest`/`registerJsonApiEntry`
+(спільна диспетчеризація, сама не читає portal-об'єктів) і
+`commands-list` винесено в окремий блок `#if HAS_MQTT_CLIENT && !ESP8266`
+(той самий гейт, що вже стояв навколо discovery-акумулятора
+`kJsonApiCommandNames`) — реєстрація в `setupMqttClient()` розділена
+відповідно. Попутно виявлено й виправлено той самий клас помилки для
+`<WebJson.hpp>` (`webjson::quote`/`fail`/`ok`/`error`) — чистий
+header-only helper без залежності на `AsyncWebServer`, а include стояв
+під `HAS_WEB_PORTAL` лише тому, що жив у спільному списку заголовків
+порталу.
+
+**Свідомо не зроблено.** Повне усунення залежності для
+`wifi-status`/`ecoflow-status`/`mqtt-status` вимагає розділити
+«провайдер стану» й «HTML-модуль порталу» в самих класах
+`WebWifiModule`/`WebMqttModule`/`WebEcoflowModule` — архітектурний
+рефакторинг, підтверджено користувачем як відкладений; записано як борг
+у `docs/tech_debt.md`, розділ «Веб-портал через MQTT».
+
+**Перевірено збіркою:** `esp32-c3` (`HAS_WEB_PORTAL=0`), `esp32-c6`
+(`HAS_WEB_PORTAL=1`), `esp8266` (`!ESP8266`-гейти) — усі три успішно.
+Живий MQTT-тест на залізі не проганявся.

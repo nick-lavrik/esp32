@@ -299,6 +299,19 @@ API (SAPI) — доступ до тих самих даних без HTTP».** �
 - **Мутації через MQTT** (WiFi connect, запис NVS, файлові операції) —
   свідомо поза каналом, окреме рішення після підтвердження, що
   read-only SAPI вже корисний сам по собі.
+- **SAPI: `wifi-status`/`ecoflow-status`/`mqtt-status` структурно прив'язані
+  до `HAS_WEB_PORTAL`, хоча самі не форматують HTTP-дані.** Виявлено
+  2026-09-27 (esp32-c3, портал вимкнено в `environment.h`) — увесь JSON SAPI-
+  канал, крім `commands-list`, мовчки зникав з прошивки. `commands-list`
+  винесено з-під гейта (читає лише `commandHandler`, `src/main.cpp`, розділ
+  "MQTT SAPI-канал ... спільна інфраструктура"). Решта три читають
+  `webWifiModule`/`webEcoflowModule`/`webMqttModule` — а ці `IWebModule`-
+  провайдери самі оголошені лише під `#if HAS_WEB_PORTAL` (`main.cpp:488-539`),
+  разом з HTTP-специфічним `registerRoutes()`. Повне усунення залежності
+  вимагає розділити «провайдер стану» (snapshot/`statusJson()`) і «HTML-
+  модуль порталу» (`registerRoutes(AsyncWebServer&, WebPortal&)`) у самих
+  класах `WebWifiModule`/`WebMqttModule`/`WebEcoflowModule` — архітектурний
+  рефакторинг, свідомо відкладений (підтверджено користувачем), не зроблений.
 - **SAPI: `.busy`-спінер drill-down'у `ecoflow-params/<sn>` може згаснути
   раніше за реальну відповідь.** Якщо періодичний авто-полл агрегата
   `ecoflow-status` перемалює вкладку (`renderEcoflowPanel()`, innerHTML=)

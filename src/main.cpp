@@ -169,11 +169,17 @@ using ActiveBulkReader = SdSpiBulkReader;
 #define HAS_WEB_PORTAL 0
 #endif
 
+// webjson:: (WebJson.hpp) - хелпери екранування JSON, чистий header-only
+// (лише Arduino.h), без жодної залежності на AsyncWebServer/портал - на
+// відміну від решти нижче, тому підключений тут, а не під HAS_WEB_PORTAL:
+// commands-list (main.cpp, "MQTT SAPI-канал ... спільна інфраструктура")
+// користується ним незалежно від порталу.
+#include <WebJson.hpp>
+
 #if HAS_WEB_PORTAL
 #include <WebCommandsModule.hpp>
 #include <WebConsoleModule.hpp>
 #include <WebFilesModule.hpp>
-#include <WebJson.hpp>
 #include <WebNvsModule.hpp>
 #include <WebPortal.hpp>
 #include <WebSystemModule.hpp>
@@ -682,14 +688,14 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 #if HAS_MQTT_CLIENT && !ESP8266
 // Реєстр імен зареєстрованих JSON API команд - джерело для discovery.commands
 // (нижче, поза HAS_WEB_PORTAL). Накопичувач лишається видимим НЕЗАЛЕЖНО від
-// HAS_WEB_PORTAL, хоча заповнює його лише registerJsonApiEntry() (HAS_WEB_PORTAL-
-// гейт нижче): сам publishDiscovery() під HAS_WEB_PORTAL не стоїть (той самий
-// принцип, що й для board/revision - коментар нижче), тож масив має бути
-// визначений тут, а не всередині гейтованого блоку. Гейт !ESP8266 - той самий,
-// що й навколо publishDiscovery(): на esp8266 HAS_WEB_PORTAL=0 і discovery
-// взагалі не компілюється, тож ні писати, ні читати цей масив нема кому -
-// без цього гейта registerJsonApiCommandName() лишався б "defined but not
-// used" саме на esp8266 (перевірено збіркою).
+// HAS_WEB_PORTAL, хоча заповнює його лише registerJsonApiEntry() нижче: сам
+// publishDiscovery() під HAS_WEB_PORTAL не стоїть (той самий принцип, що й
+// для board/revision - коментар нижче), тож масив має бути визначений тут, а
+// не всередині гейтованого блоку. Гейт !ESP8266 - той самий, що й навколо
+// publishDiscovery(): на esp8266 HAS_WEB_PORTAL=0 і discovery взагалі не
+// компілюється, тож ні писати, ні читати цей масив нема кому - без цього
+// гейта registerJsonApiCommandName() лишався б "defined but not used" саме на
+// esp8266 (перевірено збіркою).
 static constexpr size_t kMaxJsonApiCommands = 8;  // 5 наявних (system-info/
                                                    // wifi-status/ecoflow-status/
                                                    // mqtt-status/commands-list)
@@ -701,12 +707,87 @@ static void registerJsonApiCommandName(const char* name) {
   if (kJsonApiCommandCount >= kMaxJsonApiCommands) return;
   kJsonApiCommandNames[kJsonApiCommandCount++] = name;
 }
+
+// MQTT SAPI-канал, фаза 1 (docs/mqtt-web-handoff.md): спільна інфраструктура
+// диспетчеризації JSON-команд. jsonApiNoArgs/handleJsonApiRequest/
+// registerJsonApiEntry самі не читають жодних portal-об'єктів (лише
+// JsonApiEntry/CommandQueue/MqttClient), тому лишаються тут, поза
+// HAS_WEB_PORTAL - на відміну від команд, побудованих ПОВЕРХ них
+// (system-info/wifi-status/ecoflow-status/mqtt-status, блок нижче), чиї
+// провайдери (webPortal/webWifiModule/webEcoflowModule/webMqttModule) самі
+// оголошені лише під HAS_WEB_PORTAL (стор. ~488-539).
+//
+// Жодна з команд поки не приймає аргументів (крім ecoflow-params/<sn>, у якої
+// свій, drill-down шлях нижче) - мінімальний статичний набір.
+static bool jsonApiNoArgs(JsonVariantConst /*args*/, uint8_t* /*rawOut*/, size_t /*rawCapacity*/) { return true; }
+
+// Спільна диспетчеризація запиту на будь-яку команду з реєстру нижче - три
+// майже ідентичні addJsonListener()-колбеки (system-info/wifi-status/
+// ecoflow-status) були б тим самим дублюванням, якого уникає CLAUDE.md
+// (DRY): третій користувач того самого коду - уже не "один", а привід
+// узагальнити (KISS, той самий принцип, що й "другий користувач").
+static void handleJsonApiRequest(const JsonApiEntry& entry, const String& replyTopic, JsonDocument& doc) {
+  const uint32_t id = doc["id"] | 0;
+  uint8_t args[CommandQueue::kLineSize];
+  if (!entry.resolve(doc["args"], args, sizeof(args))) {
+    mqtt.publish(replyTopic.c_str(), (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"bad args\"}").c_str());
+    return;
+  }
+  auto reply = std::make_shared<MqttReplyTarget>(mqtt, std::string(replyTopic.c_str()));
+  if (!commandQueue.submitJson(&entry, id, args, sizeof(args), reply)) {
+    // Явна відмова, а не тиша - той самий контракт, що й для command/.
+    mqtt.publish(replyTopic.c_str(), (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"busy\"}").c_str());
+  }
+}
+
+// Топік - devices/<client-id>/api/<cmd> (не <client-id> в одному топіку з
+// cmd у payload): той самий листовий сегмент, що й у devices/<client-id>/
+// status, /ecoflow/.../grid, /light-sensor - зовнішній моніторинг розрізняє
+// призначення без парсингу payload (docs/mqtt-web-handoff.md, «Погоджені
+// рішення фази 1»).
+static void registerJsonApiEntry(const JsonApiEntry& entry) {
+  const String reqTopic = String("devices/") + MQTT_CLIENT_ID + "/api/" + entry.name;
+  const String replyTopic = reqTopic + "/reply";
+  mqtt.addJsonListener(reqTopic.c_str(), [&entry, replyTopic](const char* topic, JsonDocument& doc) {
+    (void)topic;
+    handleJsonApiRequest(entry, replyTopic, doc);
+  });
+  registerJsonApiCommandName(entry.name);
+}
+
+// Дзеркало /api/commands/list (WebCommandsModule): перелік зареєстрованих
+// serial-команд для сторінки Commands SAPI - той самий "список ліворуч", що
+// на порталі, але порталу браузер тут не бачить, лише MQTT. commandHandler -
+// глобал файлу (стор. вище), завжди визначений незалежно від HAS_WEB_PORTAL,
+// тому ця команда - єдина з п'яти, що лишається доступною без порталу: решта
+// чотири (система нижче) читають webPortal/webWifiModule/webEcoflowModule/
+// webMqttModule, а ці provider-об'єкти самі оголошені лише під HAS_WEB_PORTAL
+// (стор. ~488-539) - винести їх звідти без переносу самих класів не можна
+// (докладніше - docs/tech_debt.md).
+static String jsonApiCommandsListExecute(const uint8_t* /*raw*/) {
+  String json = "[";
+  for (size_t i = 0; i < commandHandler.commandCount(); ++i) {
+    if (i > 0) json += ',';
+    json += "{\"name\":";
+    json += webjson::quote(commandHandler.commandName(i).c_str());
+    json += ",\"description\":";
+    json += webjson::quote(commandHandler.commandDescription(i).c_str());
+    json += "}";
+  }
+  json += "]";
+  return json;
+}
+
+static const JsonApiEntry kJsonApiCommandsList = {"commands-list", jsonApiNoArgs, jsonApiCommandsListExecute};
 #endif
 
 #if HAS_MQTT_CLIENT && HAS_WEB_PORTAL
-// MQTT SAPI-канал, фаза 1 (docs/mqtt-web-handoff.md): реєстр JSON-команд.
-// Жодна з трьох поки не приймає аргументів - мінімальний статичний набір.
-static bool jsonApiNoArgs(JsonVariantConst /*args*/, uint8_t* /*rawOut*/, size_t /*rawCapacity*/) { return true; }
+// MQTT SAPI-канал, фаза 1 (docs/mqtt-web-handoff.md): команди, чиї дані йдуть
+// через provider-об'єкти порталу (webPortal/webWifiModule/webEcoflowModule/
+// webMqttModule, оголошені під HAS_WEB_PORTAL, стор. ~488-539) - на платі без
+// порталу ці об'єкти не існують, тож команди нижче структурно не
+// компілюються (jsonApiNoArgs/handleJsonApiRequest/registerJsonApiEntry/
+// commands-list - вище, поза цим гейтом).
 
 // Пре-альфа: без LittleFS/SD (ті прив'язані до інстанс-колбеків
 // WebSystemModule, а не до незалежних static-методів; розширення - окремим
@@ -832,62 +913,6 @@ static String jsonApiMqttStatusExecute(const uint8_t* /*raw*/) {
 }
 
 static const JsonApiEntry kJsonApiMqttStatus = {"mqtt-status", jsonApiNoArgs, jsonApiMqttStatusExecute};
-
-// Дзеркало /api/commands/list (WebCommandsModule): перелік зареєстрованих
-// serial-команд для сторінки Commands SAPI - той самий "список ліворуч", що
-// на порталі, але порталу браузер тут не бачить, лише MQTT. commandHandler -
-// глобал файлу (стор. вище), реєстр наповнюється setup()'ом до першого
-// запиту цієї команди - виконання йде вже після setup(), тому порядок
-// реєстрації тут не важливий.
-static String jsonApiCommandsListExecute(const uint8_t* /*raw*/) {
-  String json = "[";
-  for (size_t i = 0; i < commandHandler.commandCount(); ++i) {
-    if (i > 0) json += ',';
-    json += "{\"name\":";
-    json += webjson::quote(commandHandler.commandName(i).c_str());
-    json += ",\"description\":";
-    json += webjson::quote(commandHandler.commandDescription(i).c_str());
-    json += "}";
-  }
-  json += "]";
-  return json;
-}
-
-static const JsonApiEntry kJsonApiCommandsList = {"commands-list", jsonApiNoArgs, jsonApiCommandsListExecute};
-
-// Спільна диспетчеризація запиту на будь-яку команду з реєстру вище - три
-// майже ідентичні addJsonListener()-колбеки (system-info/wifi-status/
-// ecoflow-status) були б тим самим дублюванням, якого уникає CLAUDE.md
-// (DRY): третій користувач того самого коду - уже не "один", а привід
-// узагальнити (KISS, той самий принцип, що й "другий користувач").
-static void handleJsonApiRequest(const JsonApiEntry& entry, const String& replyTopic, JsonDocument& doc) {
-  const uint32_t id = doc["id"] | 0;
-  uint8_t args[CommandQueue::kLineSize];
-  if (!entry.resolve(doc["args"], args, sizeof(args))) {
-    mqtt.publish(replyTopic.c_str(), (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"bad args\"}").c_str());
-    return;
-  }
-  auto reply = std::make_shared<MqttReplyTarget>(mqtt, std::string(replyTopic.c_str()));
-  if (!commandQueue.submitJson(&entry, id, args, sizeof(args), reply)) {
-    // Явна відмова, а не тиша - той самий контракт, що й для command/.
-    mqtt.publish(replyTopic.c_str(), (String("{\"id\":") + id + ",\"ok\":false,\"error\":\"busy\"}").c_str());
-  }
-}
-
-// Топік - devices/<client-id>/api/<cmd> (не <client-id> в одному топіку з
-// cmd у payload): той самий листовий сегмент, що й у devices/<client-id>/
-// status, /ecoflow/.../grid, /light-sensor - зовнішній моніторинг розрізняє
-// призначення без парсингу payload (docs/mqtt-web-handoff.md, «Погоджені
-// рішення фази 1»).
-static void registerJsonApiEntry(const JsonApiEntry& entry) {
-  const String reqTopic = String("devices/") + MQTT_CLIENT_ID + "/api/" + entry.name;
-  const String replyTopic = reqTopic + "/reply";
-  mqtt.addJsonListener(reqTopic.c_str(), [&entry, replyTopic](const char* topic, JsonDocument& doc) {
-    (void)topic;
-    handleJsonApiRequest(entry, replyTopic, doc);
-  });
-  registerJsonApiCommandName(entry.name);
-}
 #endif
 
 #if HAS_MQTT_CLIENT && !ESP8266
@@ -949,9 +974,11 @@ static String discoveryFeaturesJson() {
 }
 
 // commands - імена зареєстрованих JSON API команд (kJsonApiCommandNames,
-// заповнюється registerJsonApiEntry() вище, HAS_WEB_PORTAL-гейт). На платі
-// без порталу масив лишається порожнім - "[]" в payload, а не відсутнє поле
-// взагалі: SAPI бачить постійну форму discovery на будь-якій платі.
+// заповнюється registerJsonApiEntry() вище). На платі без порталу масив несе
+// лише ті команди, що не залежать від HAS_WEB_PORTAL (сьогодні -
+// "commands-list", розділ "MQTT SAPI-канал ... спільна інфраструктура"), а
+// не порожній список - "[]" був би лише якби взагалі жодної команди не
+// зареєстровано (гіпотетично, HAS_MQTT_CLIENT=0 тут уже недосяжний код).
 static String discoveryCommandsJson() {
   String out = "[";
   for (size_t i = 0; i < kJsonApiCommandCount; ++i) {
@@ -2278,11 +2305,21 @@ void setupMqttClient() {
   });
   #endif
 
+#if !ESP8266
+  // commands-list - не залежить від HAS_WEB_PORTAL (commandHandler завжди
+  // доступний), тому реєструється тут, поза гейтом нижче. registerJsonApiEntry()
+  // визначена лише під !ESP8266 (той самий гейт, що й discovery-акумулятор,
+  // main.cpp:682).
+  registerJsonApiEntry(kJsonApiCommandsList);
+#endif
+
 #if HAS_WEB_PORTAL
   // MQTT SAPI-канал, фаза 1 (docs/mqtt-web-handoff.md): devices/<client-id>/
   // api/<cmd> - той самий листовий сегмент, що й у devices/<client-id>/status,
   // /ecoflow/.../grid, /light-sensor - зовнішній моніторинг розрізняє
-  // призначення без парсингу payload.
+  // призначення без парсингу payload. На відміну від commands-list вище, ці
+  // команди читають provider-об'єкти порталу (webPortal/webWifiModule/
+  // webEcoflowModule/webMqttModule), тому лишаються під цим гейтом.
   registerJsonApiEntry(kJsonApiSystemInfo);
   registerJsonApiEntry(kJsonApiWifiStatus);
 #if HAS_ECOFLOW_CLIENT
@@ -2290,7 +2327,6 @@ void setupMqttClient() {
   registerEcoflowDeviceParamsEntries();
 #endif
   registerJsonApiEntry(kJsonApiMqttStatus);
-  registerJsonApiEntry(kJsonApiCommandsList);
 #endif
 
   // LWT_TOPIC "mykola-lavryk:devices/mqtt-${PIOENV}/status"

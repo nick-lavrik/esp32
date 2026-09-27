@@ -49,11 +49,11 @@ Allowlist, не дзеркало всіх serial-команд:
 
 | `<cmd>` | Джерело даних | Умова збірки |
 |---|---|---|
-| `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
-| `wifi-status` | `WebWifiModule::portalStatusJson()` | — |
-| `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | + `HAS_ECOFLOW_CLIENT` |
-| `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | — |
-| `commands-list` | перелік зареєстрованих serial-команд (`commandHandler.commandName()`/`commandDescription()`), те саме, що й `/api/commands/list` порталу | — |
+| `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebPortal::statusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `wifi-status` | `WebWifiModule::portalStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
+| `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `commands-list` | перелік зареєстрованих serial-команд (`commandHandler.commandName()`/`commandDescription()`), те саме, що й `/api/commands/list` порталу | `HAS_MQTT_CLIENT && !ESP8266` |
 
 **`commands-list` — статичний перелік, не статус.** На відміну від решти
 чотирьох (`system-info`/`wifi-status`/`ecoflow-status`/`mqtt-status`),
@@ -62,6 +62,17 @@ Allowlist, не дзеркало всіх serial-команд:
 конект, а не auto-poll. Джерело для сторінки Commands SAPI (список команд
 ліворуч) — див. розділ 5 нижче, де ACL дозволяє SAPI ще й `command/<id>`
 (запуск довільної команди).
+
+**`commands-list` — єдина з п'яти, що не потребує `HAS_WEB_PORTAL`**
+(виправлено 2026-09-27, `src/main.cpp`, розділ «MQTT SAPI-канал ... спільна
+інфраструктура»): `commandHandler` — глобал файлу, завжди визначений,
+незалежно від порталу. Решта чотири читають `webPortal`/`webWifiModule`/
+`webEcoflowModule`/`webMqttModule` — ці provider-об'єкти самі оголошені
+лише під `HAS_WEB_PORTAL` (`src/main.cpp:488-539`), тож на платі без
+порталу (напр. `esp32-c3` з `HAS_WEB_PORTAL=0`) discovery публікує
+`"commands":["commands-list"]`, а не порожній масив. Повне усунення
+залежності решти чотирьох — відкритий борг, `docs/tech_debt.md`, розділ
+«Веб-портал через MQTT».
 
 **`ecoflow-params/<sn>` — окремий drill-down, не запис цієї таблиці.**
 Своя назва команди (не суфікс на `ecoflow-status`) — навмисно: повертає

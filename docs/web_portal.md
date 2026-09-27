@@ -940,9 +940,10 @@ ACL для нових плат можна забути додати мовчки
 | `<cmd>` | Джерело | Умова збірки |
 |---|---|---|
 | `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebPortal::statusJson()` (поле `"portal"` — env/revision/uptime/auth/pendingJobs/modules) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
-| `wifi-status` | `WebWifiModule::portalStatusJson()` | — |
-| `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` (без сирого `params`) | + `HAS_ECOFLOW_CLIENT` |
-| `mqtt-status` | `WebMqttModule::statusJson()` (той самий, що й `/api/mqtt/status` вище) | — |
+| `wifi-status` | `WebWifiModule::portalStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` (без сирого `params`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
+| `mqtt-status` | `WebMqttModule::statusJson()` (той самий, що й `/api/mqtt/status` вище) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `commands-list` | перелік зареєстрованих serial-команд (`commandHandler`), те саме, що й `/api/commands/list` | `HAS_MQTT_CLIENT && !ESP8266` — **єдина з п'яти, не залежить від `HAS_WEB_PORTAL`** (`commandHandler` завжди доступний; решта чотири читають provider-об'єкти порталу, оголошені лише під `HAS_WEB_PORTAL` — відкритий борг, `docs/tech_debt.md`) |
 
 **`ecoflow-params/<sn>` — окремий drill-down на "params" ОДНОГО пристрою**
 (`devices/<client-id>/api/ecoflow-params/<sn>`, `WebEcoflowModule::
