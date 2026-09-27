@@ -132,6 +132,14 @@ h2 span { text-transform: none; letter-spacing: 0; }
 h2.hrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4px 10px;
   text-transform: none; letter-spacing: 0; }
+/* Заголовок EcoFlow "Devices" - той самий вигляд, що h2 (font-size-large,
+   uppercase, margin 24px 0 10px), плюс cursor/user-select - той самий портал
+   (assets/www/index.html: #ecoflow-devices-wrap > summary): сам заголовок -
+   перемикач розгорнути/згорнути картки (<details>), не звичайний <h2>. */
+#ecoflow-devices-wrap > summary { font-size: var(--font-size-large); text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text); margin: 24px 0 10px; font-weight: 600; cursor: pointer;
+  user-select: none; }
+#ecoflow-devices-wrap > summary span { text-transform: none; letter-spacing: 0; }
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 /* Стековий підпис-над-полем - лише для форми підключення (6 різнорідних
@@ -290,8 +298,13 @@ table.zebra th { color: var(--muted); font-weight: 600; font-size: var(--font-si
   text-transform: uppercase; letter-spacing: .04em; }
 table.zebra thead th { background: #ffffff05; }
 table.zebra tbody tr:nth-child(even) { background: #ffffff05; }
-td.num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
-th.num { text-align: right; }
+table.zebra tbody tr:hover { background: #ffffff0f; }
+/* table.zebra td/th (вище) - той самий клас у селекторі, що й тут (0,1,2)
+   проти (0,1,1) - без "table.zebra td.num" зліва table.zebra перебивав би
+   text-align:right однаковою специфічністю+пізнішим порядком лише випадково;
+   явний дубль-селектор - гарантія, а не збіг порядку правил. */
+table.zebra td.num, td.num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
+table.zebra th.num, th.num { text-align: right; }
 td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 @media (max-width: 560px) { .opt { display: none; } dl { grid-template-columns: 1fr; } }
 /* Стовпчики Overview-таблиці вкладки EcoFlow (render.js: ecoTableRow) - той
@@ -1189,8 +1202,13 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     if (!lastEcoflowStatus) return;
     const openParamsSerials = new Set(
       Array.from(panels['ecoflow-status'].out.querySelectorAll('.eco-params[open]')).map((el) => el.dataset.sn));
+    // "open" на #ecoflow-devices-wrap теж не переживає innerHTML= - той самий
+    // скан ПЕРЕД перемальовкою, що openParamsSerials вище. Немає вузла ще
+    // (перший рендер) - лишається дефолтне "open" з render.js.
+    const devicesWrap = panels['ecoflow-status'].out.querySelector('#ecoflow-devices-wrap');
+    const devicesOpen = devicesWrap ? devicesWrap.open : true;
     panels['ecoflow-status'].out.innerHTML =
-      buildPanelHtml('ecoflow-status', lastEcoflowStatus, { openParamsSerials });
+      buildPanelHtml('ecoflow-status', lastEcoflowStatus, { openParamsSerials, devicesOpen });
   }
 
   // Делегування - картки пристроїв перемальовуються цілком на кожен reply

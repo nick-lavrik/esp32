@@ -678,6 +678,7 @@ function renderWifiStatus(data) {
 function renderEcoflowStatus(data, extra) {
   const devices = Array.isArray(data.devices) ? data.devices : [];
   const openParamsSerials = (extra && extra.openParamsSerials) || new Set();
+  const devicesOpen = !extra || extra.devicesOpen !== false;
 
   let html = kv([
     ['Connected', data.connected ? 'yes' : 'no'],
@@ -693,7 +694,10 @@ function renderEcoflowStatus(data, extra) {
     ['Net task stack headroom', dash(data.netStackHeadroomBytes) + ' B'],
   ]);
 
-  html += '<div class="section-group"><h3>Overview</h3><table class="zebra ecoflow-table"><thead><tr>'
+  // Звичайний <h2>, не .section-group h3 - той самий портал (assets/www/
+  // index.html: <h2>Overview</h2>/<summary>Devices...), не приглушений
+  // дрібний підзаголовок (той самий принцип, що Flash partitions вище).
+  html += '<h2>Overview</h2><table class="zebra ecoflow-table"><thead><tr>'
     + '<th class="opt2">#</th><th class="opt2">Serial</th><th>Name</th><th>Status</th>'
     + '<th class="num">Charge</th><th>Grid</th>'
     + '<th class="ecoflow-wide">Power</th><th class="ecoflow-wide num">AC</th>'
@@ -702,14 +706,20 @@ function renderEcoflowStatus(data, extra) {
     + (devices.length === 0
         ? '<tr><td colspan="10" class="muted">No devices configured.</td></tr>'
         : devices.map(ecoTableRow).join(''))
-    + '</tbody></table></div>';
+    + '</tbody></table>';
 
-  html += '<div class="section-group"><h3>Devices '
-    + `<span class="muted" style="font-weight:400">${devices.length} device(s)</span></h3>`
+  // <details>/<summary> - той самий трикутник розкриття, що портал
+  // (#ecoflow-devices-wrap, assets/www/index.html), не голий <h2>: заголовок
+  // сам є перемикачем згорнути/розгорнути картки. "open" - зі скану DOM
+  // ПЕРЕД цією перемальовкою (index.html: renderEcoflowPanel()), той самий
+  // патерн, що openParamsSerials вище.
+  html += `<details id="ecoflow-devices-wrap"${devicesOpen ? ' open' : ''}>`
+    + '<summary>Devices '
+    + `<span class="muted" style="font-size:.75em; font-weight:400">${devices.length} device(s)</span></summary>`
     + (devices.length === 0
         ? '<p class="muted">No devices configured.</p>'
         : '<div class="cards">' + devices.map((d) => ecoDeviceCard(d, openParamsSerials)).join('') + '</div>')
-    + '</div>';
+    + '</details>';
   return html;
 }
 
