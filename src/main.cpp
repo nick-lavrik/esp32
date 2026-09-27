@@ -5851,7 +5851,7 @@ void setupWiFiIcon() {
     const int p[2] = {display.width() - 16, 0};
   #endif
 
-  Logger::info("================ Display %dx%d", display.width(), display.height());
+  // Logger::info("================ Display %dx%d", display.width(), display.height());
 
   scheduler.addCronTask(0, [p]() {
     // scheduler.loop() крутиться ВСЕРЕДИНІ транзакції кадру, тому цей таск
