@@ -671,6 +671,74 @@ function renderWifiStatus(data) {
   return html;
 }
 
+// Рядок таблиці Journal (окремий запит 'ecoflow-journal', НЕ розширення
+// ecoflow-status - той самий провайдер, що на порталі, EcoflowJournalView.hpp).
+// Finish = Start + Age - похідний момент (сервер рахує лише "скільки
+// тривало", ageSec, не "коли завершилось" - EcoflowJournalView.hpp). Дата
+// збігається зі Start - лише час (дата вже видна в сусідній колонці); не
+// збігається - час плюс "(+XXd)", різниця КАЛЕНДАРНИХ дат (місцева північ,
+// Date.UTC(рік,місяць,день) для обох міток - не ділення різниці секунд на
+// 86400, яке з переходом через північ дало б хибне число). toLocaleTimeString(),
+// не свій формат (портал: ecoFinishText(), assets/www/index.html) - той
+// самий вибір, що вже в fmtEpoch() вище.
+function ecoFinishText(startEpoch, ageSec) {
+  const start = new Date(startEpoch * 1000);
+  const finish = new Date((startEpoch + ageSec) * 1000);
+  const time = finish.toLocaleTimeString();
+  const startDay = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+  const finishDay = Date.UTC(finish.getFullYear(), finish.getMonth(), finish.getDate());
+  if (startDay === finishDay) return time;
+  return `${time} (+${Math.round((finishDay - startDay) / 86400000)}d)`;
+}
+
+// row.mark - '>'/'<'/'' - той самий сенс, що в serial-команді
+// 'ecoflow-journal show': смуга зліва (CSS) замість односимвольної колонки,
+// плюс текстова приписка - колір сам собою непомітний для дальтоніків.
+function ecoJournalRow(row) {
+  const cls = row.mark === '>' ? 'eco-journal-current' : row.mark === '<' ? 'eco-journal-previous' : '';
+  const hint = row.mark === '>' ? '<span class="muted"> (ongoing)</span>'
+    : row.mark === '<' ? '<span class="muted"> (closed)</span>' : '';
+  return `<tr class="${cls}">
+    <td>${esc(fmtEpoch(row.atEpoch))}</td>
+    <td>${esc(ecoFinishText(row.atEpoch, row.ageSec))}</td>
+    <td>${esc(row.device)}</td>
+    <td>${ecoGrid(row.grid, false)}${hint}</td>
+    <td class="num">${ecoDuration(row.ageSec * 1000)}</td>
+  </tr>`;
+}
+
+// devices - для опцій "Device" (той самий знімок ecoflow-status, свого
+// запиту під список не заводимо, DRY). journalData - остання відповідь
+// 'ecoflow-journal' (index.html: lastEcoflowJournal, той самий принцип, що
+// lastEcoflowStatus) - null, поки жодної ще не приходило. target/auto/open -
+// зі сканування DOM ПЕРЕД перемальовкою (index.html: renderEcoflowPanel()),
+// той самий патерн, що openParamsSerials/devicesOpen вище.
+function ecoJournalSection(devices, journalData, target, auto, open) {
+  const options = `<option value="all"${!target || target === 'all' ? ' selected' : ''}>All devices</option>` +
+    devices.map((d) => `<option value="${esc(d.serialNumber)}"${d.serialNumber === target ? ' selected' : ''}>`
+      + `${esc(d.name || d.serialNumber)}</option>`).join('');
+  const rows = journalData && Array.isArray(journalData.rows) ? journalData.rows : null;
+  const tbody = rows === null
+    ? '<tr><td colspan="5" class="muted">Expand to load…</td></tr>'
+    : rows.length === 0
+      ? '<tr><td colspan="5" class="muted">No transitions recorded yet.</td></tr>'
+      : rows.map(ecoJournalRow).join('');
+  const count = rows === null ? '' : rows.length + ' row(s)';
+  return `<details id="eco-journal-wrap"${open ? ' open' : ''}>`
+    + '<summary>Journal '
+    + `<span class="muted" style="font-size:.75em; font-weight:400">${count}</span></summary>`
+    + '<div id="eco-journal-block">'
+    + '<div class="row" style="justify-content:space-between">'
+    + `<label class="row">Device: <select id="eco-journal-target">${options}</select></label>`
+    + '<span class="row">'
+    + `<label class="row"><input type="checkbox" id="eco-journal-auto"${auto ? ' checked' : ''}> auto</label>`
+    + '<button class="act ghost" id="eco-journal-refresh" type="button" title="Refresh journal">Refresh</button>'
+    + '</span></div>'
+    + '<table class="zebra" id="eco-journal-table"><thead><tr>'
+    + '<th>Start</th><th>Finish</th><th>Device</th><th>Grid</th><th class="num">Age</th>'
+    + `</tr></thead><tbody>${tbody}</tbody></table></div></details>`;
+}
+
 // extra.openParamsSerials - Set серійників із розгорнутим "Raw parameters"
 // (index.html сканує DOM ПЕРЕД перемальовкою, той самий патерн, що
 // extra.ecoflowOpenSerials у renderSystemInfo()) - той самий необов'язковий
@@ -679,6 +747,10 @@ function renderEcoflowStatus(data, extra) {
   const devices = Array.isArray(data.devices) ? data.devices : [];
   const openParamsSerials = (extra && extra.openParamsSerials) || new Set();
   const devicesOpen = !extra || extra.devicesOpen !== false;
+  const journalData = (extra && extra.journalData) || null;
+  const journalTarget = (extra && extra.journalTarget) || 'all';
+  const journalAuto = !!(extra && extra.journalAuto);
+  const journalOpen = !!(extra && extra.journalOpen);
 
   let html = kv([
     ['Connected', data.connected ? 'yes' : 'no'],
@@ -720,6 +792,11 @@ function renderEcoflowStatus(data, extra) {
         ? '<p class="muted">No devices configured.</p>'
         : '<div class="cards">' + devices.map((d) => ecoDeviceCard(d, openParamsSerials)).join('') + '</div>')
     + '</details>';
+
+  // Окремий запит (НЕ розширення ecoflow-status) - той самий принцип, що на
+  // порталі: журнал переходів рідше потрібен одразу, тому свій <details>,
+  // згорнутий за замовчуванням.
+  html += ecoJournalSection(devices, journalData, journalTarget, journalAuto, journalOpen);
   return html;
 }
 
@@ -739,6 +816,7 @@ if (typeof module !== 'undefined' && module.exports) {
     esc, badge, boolBadge, signal, kv, dlRows, mockDl, dash, fmtBytes, fmtUptime, fmtEpoch, fsUnit, fsSizeIn,
     wifiSystemRows, ecoflowSystemRows, ecoflowSystemDevicesHtml, ecoSysDeviceRow, ecoDeviceDetailRows,
     ecoBrokerText, ecoTransportText, ecoTableRow, ecoDeviceCard, ecoParamsTable,
+    ecoJournalRow, ecoJournalSection, ecoFinishText,
     mqttSystemRows, mqttConnectionRows, mqttLwtRows, mqttConsoleMirrorRows, heapBarHtml,
     renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus, RENDERERS,
   };

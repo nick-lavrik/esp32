@@ -200,6 +200,28 @@ String WebEcoflowModule::mqttDeviceParamsJson(const WebEcoflowDeviceSnapshot& sn
   return json;
 }
 
+String WebEcoflowModule::journalJson(const String& target, const std::vector<EcoflowJournalRow>& rows) {
+  String json = "{\"target\":" + webjson::quote(target.length() ? target.c_str() : "all");
+  json += ",\"rows\":[";
+  bool first = true;
+  for (const auto& row : rows) {
+    if (!first) json += ',';
+    first = false;
+    // mark - '>'/'<'/' ' (EcoflowJournalView.hpp) - порожній рядок замість
+    // пробілу, чистіше для споживача JSON/JS ("" - falsy, " " - ні).
+    const char markStr[2] = {row.mark, '\0'};
+    json += "{\"atEpoch\":" + String((uint32_t)row.atEpoch);
+    json += ",\"serialNumber\":" + webjson::quote(row.serialNumber);
+    json += ",\"device\":" + webjson::quote(row.deviceName);
+    json += ",\"grid\":" + webjson::quote(ecoflowGridStateName(row.toState));
+    json += ",\"ageSec\":" + String(row.ageSec);
+    json += ",\"mark\":" + webjson::quote(row.mark == ' ' ? "" : markStr);
+    json += "}";
+  }
+  json += "]}";
+  return json;
+}
+
 void WebEcoflowModule::loop() {
   const uint32_t now = millis();
   if (_lastSnapshotMs != 0 && now - _lastSnapshotMs < WEB_ECOFLOW_SNAPSHOT_INTERVAL_MS) return;
@@ -217,5 +239,22 @@ void WebEcoflowModule::registerRoutes(AsyncWebServer& server, WebPortal& portal)
 
   server.on("/api/ecoflow/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
     request->send(200, "application/json", portalStatusJson(statusSnapshot(), devicesSnapshot()));
+  });
+
+  // Окремий запит (НЕ розширення /api/ecoflow/status) - злитий хронологічний
+  // потік Transition-переходів grid, той самий провайдер, що serial-команда
+  // 'ecoflow-journal show' (EcoflowJournalView.hpp, DRY). Пряме читання, без
+  // WebJobQueue - контракт, записаний ще в EcoflowGridJournal.hpp
+  // («hot»-акцесори й loadRecentEvents() з локальним буфером на час одного
+  // HTTP-запиту, без постійного кешу "для вебки").
+  server.on("/api/ecoflow/journal", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    const String target = request->hasParam("target") ? request->getParam("target")->value() : String("all");
+    std::vector<EcoflowJournalRow> rows;
+    String error;
+    if (!ecoflowBuildJournalRows(_registry, target, rows, &error)) {
+      request->send(400, "application/json", "{\"error\":" + webjson::quote(error.c_str()) + "}");
+      return;
+    }
+    request->send(200, "application/json", journalJson(target, rows));
   });
 }

@@ -198,6 +198,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #if HAS_ECOFLOW_CLIENT
 #include "Ecoflow/EcoflowClient.hpp"
 #include "Ecoflow/EcoflowDeviceRegistry.hpp"
+#include "Ecoflow/EcoflowJournalView.hpp"
 #if HAS_WEB_PORTAL
 #include "Ecoflow/WebEcoflowModule.hpp"
 #endif
@@ -696,10 +697,10 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 // компілюється, тож ні писати, ні читати цей масив нема кому - без цього
 // гейта registerJsonApiCommandName() лишався б "defined but not used" саме на
 // esp8266 (перевірено збіркою).
-static constexpr size_t kMaxJsonApiCommands = 8;  // 5 наявних (system-info/
+static constexpr size_t kMaxJsonApiCommands = 8;  // 6 наявних (system-info/
                                                    // wifi-status/ecoflow-status/
-                                                   // mqtt-status/commands-list)
-                                                   // + запас
+                                                   // ecoflow-journal/mqtt-status/
+                                                   // commands-list) + запас
 static const char* kJsonApiCommandNames[kMaxJsonApiCommands] = {};
 static size_t kJsonApiCommandCount = 0;
 
@@ -717,8 +718,10 @@ static void registerJsonApiCommandName(const char* name) {
 // провайдери (webPortal/webWifiModule/webEcoflowModule/webMqttModule) самі
 // оголошені лише під HAS_WEB_PORTAL (стор. ~488-539).
 //
-// Жодна з команд поки не приймає аргументів (крім ecoflow-params/<sn>, у якої
-// свій, drill-down шлях нижче) - мінімальний статичний набір.
+// Команди без аргументів (система/wifi/mqtt-status тощо) використовують цей
+// резолвер - "ecoflow-journal" приймає свій, з реальним "target" у тілі
+// запиту (jsonApiEcoflowJournalResolve() нижче), "ecoflow-params/<sn>" - свій
+// topic-per-device шлях, поза цим резолвером узагалі (drill-down нижче).
 static bool jsonApiNoArgs(JsonVariantConst /*args*/, uint8_t* /*rawOut*/, size_t /*rawCapacity*/) { return true; }
 
 // Спільна диспетчеризація запиту на будь-яку команду з реєстру нижче - три
@@ -839,6 +842,43 @@ static String jsonApiEcoflowStatusExecute(const uint8_t* /*raw*/) {
 }
 
 static const JsonApiEntry kJsonApiEcoflowStatus = {"ecoflow-status", jsonApiNoArgs, jsonApiEcoflowStatusExecute};
+
+// Окремий запит (НЕ розширення ecoflow-status) - дзеркало serial-команди
+// 'ecoflow-journal show [sn|index|all]' (docs/ecoflow.md, «Журнал переходів
+// grid»): злитий хронологічний потік Transition-переходів grid. Перша
+// команда фази 1, що реально приймає JSON "args" у тілі запиту (досі лише
+// шаблон, docs/mqtt-web-handoff.md) - topic-per-device (як
+// ecoflow-params/<sn> нижче) тут невиправданий: запит рідкісний, а не
+// частий per-device polling, статична підписка на кожен пристрій дала б
+// лише зайві топіки.
+struct EcoflowJournalArgs {
+  char target[24] = "";  // "all" або serialNumber (<=16 символів)
+};
+static_assert(sizeof(EcoflowJournalArgs) <= CommandQueue::kLineSize,
+              "EcoflowJournalArgs has to fit into Slot.payload");
+
+static bool jsonApiEcoflowJournalResolve(JsonVariantConst args, uint8_t* rawOut, size_t rawCapacity) {
+  if (rawCapacity < sizeof(EcoflowJournalArgs)) return false;
+  EcoflowJournalArgs a;
+  const char* target = args["target"] | "all";
+  strncpy(a.target, target, sizeof(a.target) - 1);
+  memcpy(rawOut, &a, sizeof(a));
+  return true;
+}
+
+static String jsonApiEcoflowJournalExecute(const uint8_t* raw) {
+  EcoflowJournalArgs args;
+  memcpy(&args, raw, sizeof(args));
+  std::vector<EcoflowJournalRow> rows;
+  String error;
+  if (!ecoflowBuildJournalRows(ecoflowDevices, String(args.target), rows, &error)) {
+    return "{\"error\":" + webjson::quote(error) + "}";
+  }
+  return WebEcoflowModule::journalJson(String(args.target), rows);
+}
+
+static const JsonApiEntry kJsonApiEcoflowJournal = {
+    "ecoflow-journal", jsonApiEcoflowJournalResolve, jsonApiEcoflowJournalExecute};
 
 // Drill-down: "params" ОДНОГО пристрою за серійним номером у самому топіку -
 // devices/<client-id>/api/ecoflow-params/<sn> (docs/mqtt-topics.md). Окремий
@@ -1419,124 +1459,6 @@ void setupLittleFS() {
 // quota кілька разів на секунду і десятками параметрів у кожному повідомленні.
 bool ecoflowVerbose = false;
 
-// Приймає або серійник, або короткий індекс зі списку (0..N) - набирати
-// 16-символьний sn руками в консолі незручно. Порожній рядок = не розпізнано,
-// причина вже в лозі.
-static String ecoflowSerialFromKey(const String& key) {
-  static TLogger _logger{"ecoflow"};
-  String value = key;
-  value.trim();
-  if (value.length() == 0) {
-    return String();
-  }
-
-  bool numeric = true;
-  for (size_t i = 0; i < value.length(); i++) {
-    if (!isdigit((int)value[i])) { numeric = false; break; }
-  }
-
-  if (numeric) {
-    const size_t index = (size_t)value.toInt();
-    if (index >= ecoflowDevices.devices().size()) {
-      _logger.error("index %u out of range (0..%u)", index,
-                    (unsigned)(ecoflowDevices.devices().size() - 1));
-      return String();
-    }
-    return String(ecoflowDevices.devices()[index].info->serialNumber);
-  }
-
-  for (const auto& state : ecoflowDevices.devices()) {
-    if (value == state.info->serialNumber) { return value; }
-  }
-  _logger.error("unknown device: %s", value.c_str());
-  return String();
-}
-
-// 'ecoflow-journal show' - один рядок журналу, вже готовий до друку: реальна
-// зміна grid одного пристрою плюс AGE - скільки він провів у стані, яке ЦЯ
-// подія позначає (та сама назва й той самий сенс "часу в стані", що й AGE у
-// команді 'ecoflow'/веб-порталі, лише для команди 'ecoflow' стан завжди
-// поточний, а тут - будь-який, включно з уже завершеними). Рахується тут
-// (EcoflowGridEvent зберігає лише toState/atEpoch, без duration), а не в
-// EcoflowGridJournal - це подання для виводу, не дані журналу.
-static constexpr size_t kEcoflowJournalShowLimit = 30;  // на пристрій; підсумок після злиття - не більший
-
-// mark - 1-символьна позначка "наскільки остаточний цей AGE", БЕЗ заголовка
-// в таблиці (сама позиція в колонці - вже підказка): '>' - найновіший
-// перехід пристрою, стан ще триває, AGE зростатиме далі ("принаймні
-// стільки"); '<' - передостанній, останній ПОВНІСТЮ завершений інтервал
-// (його верхня межа - фіксована мітка часу наступного переходу, вже не
-// зміниться); ' ' - решта, звичайна історія.
-struct EcoflowJournalRow {
-  time_t atEpoch = 0;
-  const char* deviceName = nullptr;
-  EcoflowGridState toState = EcoflowGridState::Unknown;
-  uint32_t ageSec = 0;
-  char mark = ' ';
-};
-
-// Дописує в out хронологічний список РЕАЛЬНИХ переходів ОДНОГО пристрою
-// (найстаріша - першою, як і loadRecentEvents()).
-//
-// Лише Transition - Boot і LiveCheckpoint у консоль НЕ друкуються: це наша
-// власна сесія, тому "пристрій ще живий" видно вже з того, що команда
-// відповіла, а "живий" (LiveCheckpoint) і "щойно стартувала" (Boot) як
-// окремий рядок лише розбавляють журнал переходів, заради якого команда й
-// існує (реальний приклад із живого заліза: 30 рядків показу, з них 26 -
-// boot після ребут-петлі, жодного реального переходу не видно без
-// гортання). Для СПОЖИВАЧІВ поза цією консоллю (веб-портал, Grafana,
-// будь-який агрегатор, що читає MQTT-дзеркало чи NVS) обидва лишаються
-// важливими - це підтвердження живості й точки відліку "з коли саме
-// відомо", які тут просто зайві. У РОЗРАХУНКУ AGE (нижче) вони НЕ
-// враховуються навіть як межа (див. коментар нижче) - лише не друкуються.
-//
-// AGE рахується ВПЕРЕД, не назад: час від ЦІЄЇ події до НАСТУПНОГО
-// Transition ТОГО САМОГО пристрою - "цей стан протримався стільки" - а не
-// час від попередньої події до цієї. Тому зайвий "контекстний" запис перед
-// вікном показу не потрібен: межа, якої бракує - НОВІША, а не старіша, і
-// саме там найновіший запис і є межею - "стан ще триває, дотепер X".
-static void ecoflowAppendJournalRows(EcoflowGridJournal* journal, const char* deviceName,
-                                      std::vector<EcoflowJournalRow>& out) {
-  if (journal == nullptr) { return; }
-
-  EcoflowGridEvent events[kEcoflowJournalShowLimit];
-  const size_t count = journal->loadRecentEvents(events, kEcoflowJournalShowLimit);
-  const time_t now = time(nullptr);
-  const size_t startSize = out.size();
-
-  for (size_t i = 0; i < count; i++) {
-    if (events[i].kind != EcoflowJournalEntryKind::Transition) { continue; }
-
-    EcoflowJournalRow row;
-    row.atEpoch = events[i].atEpoch;
-    row.deviceName = deviceName;
-    row.toState = events[i].toState;
-    out.push_back(row);
-  }
-
-  // AGE - окремим проходом по вже відфільтрованому out (лише Transition
-  // цього пристрою), а не по сирому events[] вище: межа "until" - atEpoch
-  // НАСТУПНОГО Transition, Boot/LiveCheckpoint як межу НЕ рахуємо. Причина -
-  // дедуп у EcoflowGridJournal::recordTransition(): якщо після ребута стан
-  // лишився той самий, новий запис НЕ пишеться, тобто сам журнал вважає
-  // стан незмінним крізь Boot - AGE має рахуватись так само, інакше мітка
-  // '>' ("AGE зростатиме з кожним show", docs/ecoflow.md) брехала б щоразу,
-  // як пристрій ребутнувся без зміни grid (перевірено на живому esp32-c3:
-  // AGE рядка з '>' застигав рівно на епосі того Boot і більше не рухався).
-  for (size_t i = startSize; i < out.size(); i++) {
-    time_t until = (i + 1 < out.size()) ? out[i + 1].atEpoch : now;
-    if (until <= out[i].atEpoch) until = now;
-    out[i].ageSec = (until > out[i].atEpoch) ? (uint32_t)(until - out[i].atEpoch) : 0;
-  }
-
-  // Позначки в mark - лише позиційні, за цим пристроєм, тому ставляться тут
-  // (усі push_back() вище - саме його рядки), а не пізніше, після
-  // злиття/сортування з іншими пристроями (див. коментар до mark).
-  const size_t pushed = out.size() - startSize;
-  if (pushed >= 1) { out[out.size() - 1].mark = '>'; }
-  if (pushed >= 2) { out[out.size() - 2].mark = '<'; }
-}
-
 void setupEcoflow() {
   static TLogger _logger{"ecoflow"};
 
@@ -1939,8 +1861,12 @@ void setupEcoflow() {
       // Порожній serial у setCaptureAll() означає "усі пристрої".
       String serial;
       if (target.length() > 0 && target != "all") {
-        serial = ecoflowSerialFromKey(target);
-        if (serial.length() == 0) { return; }
+        String error;
+        serial = ecoflowSerialFromKey(ecoflowDevices, target, &error);
+        if (serial.length() == 0) {
+          _logger.error("%s", error.c_str());
+          return;
+        }
       }
       const size_t affected = ecoflowDevices.setCaptureAll(serial, enable);
       _logger.info("capture all = %s for %u device(s)", enable ? "on" : "off",
@@ -1993,21 +1919,13 @@ void setupEcoflow() {
         return;
       }
 
-      // Список пристроїв, чиї журнали злити в один хронологічний потік:
-      // усі (порожній аргумент/'all') чи один, обраний за serial/індексом.
-      // Далі - ОДИН шлях друку для обох випадків (KISS - не два формати
-      // виводу під два режими show).
+      // Побудова списку - спільна з HTTP-роутом /api/ecoflow/journal і SAPI-
+      // командою 'ecoflow-journal' (EcoflowJournalView.hpp, DRY - CLAUDE.md).
       std::vector<EcoflowJournalRow> rows;
-      if (target.length() == 0 || target == "all") {
-        for (const auto& state : ecoflowDevices.devices()) {
-          ecoflowAppendJournalRows(ecoflowDevices.journalAt(state.journalIndex), state.info->name, rows);
-        }
-      } else {
-        const String serial = ecoflowSerialFromKey(target);
-        if (serial.length() == 0) { return; }
-        EcoflowDeviceState* state = ecoflowDevices.find(serial);
-        if (state == nullptr) { return; }
-        ecoflowAppendJournalRows(ecoflowDevices.journalAt(state->journalIndex), state->info->name, rows);
+      String error;
+      if (!ecoflowBuildJournalRows(ecoflowDevices, target, rows, &error)) {
+        _logger.error("%s", error.c_str());
+        return;
       }
 
       if (rows.empty()) {
@@ -2015,19 +1933,11 @@ void setupEcoflow() {
         return;
       }
 
-      std::sort(rows.begin(), rows.end(),
-                [](const EcoflowJournalRow& a, const EcoflowJournalRow& b) { return a.atEpoch < b.atEpoch; });
-      // Кілька пристроїв разом можуть дати більше за ліміт одного - показуємо
-      // лише останні kEcoflowJournalShowLimit подій СУМАРНО, найновіші.
-      if (rows.size() > kEcoflowJournalShowLimit) {
-        rows.erase(rows.begin(), rows.begin() + (rows.size() - kEcoflowJournalShowLimit));
-      }
-
       constexpr int kDeviceNameWidth = 18;  // "DELTA Pro (xama)" (16) + запас
       constexpr int kGridWidth = 9;         // "off-grid" (8) + запас
-      // Колонка перед AGE - без заголовка навмисно (main.cpp,
-      // ecoflowAppendJournalRows(), поле "mark"): сама її наявність у рядку
-      // вже підказка, підпис лише заважав би.
+      // Колонка перед AGE - без заголовка навмисно (Ecoflow/EcoflowJournalView.cpp,
+      // appendJournalRows(), поле "mark"): сама її наявність у рядку вже
+      // підказка, підпис лише заважав би.
       _logger.info("%-19s  %-*s  %-*s    %9s", "DATE/TIME", kDeviceNameWidth, "DEVICE", kGridWidth, "GRID",
                    "AGE");
       for (const auto& row : rows) {
@@ -2074,8 +1984,12 @@ void setupEcoflow() {
         return;
       }
 
-      const String serial = ecoflowSerialFromKey(key);
-      if (serial.length() == 0) { return; }
+      String error;
+      const String serial = ecoflowSerialFromKey(ecoflowDevices, key, &error);
+      if (serial.length() == 0) {
+        _logger.error("%s", error.c_str());
+        return;
+      }
 
       // Друкуємо ЗАХОПЛЕНЕ, а не свіжий REST-запит: так команда миттєва і не
       // рве MQTT-сесію. Щоб підтягти повний стан з хмари - 'ecoflow-sync'.
@@ -2157,8 +2071,12 @@ void setupEcoflow() {
       // самий контракт, що й setCaptureAll() (ecoflow-capture).
       String serial;
       if (value != "all") {
-        serial = ecoflowSerialFromKey(value);
-        if (serial.length() == 0) { return; }
+        String error;
+        serial = ecoflowSerialFromKey(ecoflowDevices, value, &error);
+        if (serial.length() == 0) {
+          _logger.error("%s", error.c_str());
+          return;
+        }
       }
 
       if (!ecoflow.syncSnapshotsAsync(serial)) {
@@ -2324,6 +2242,7 @@ void setupMqttClient() {
   registerJsonApiEntry(kJsonApiWifiStatus);
 #if HAS_ECOFLOW_CLIENT
   registerJsonApiEntry(kJsonApiEcoflowStatus);
+  registerJsonApiEntry(kJsonApiEcoflowJournal);
   registerEcoflowDeviceParamsEntries();
 #endif
   registerJsonApiEntry(kJsonApiMqttStatus);

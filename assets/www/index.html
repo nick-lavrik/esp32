@@ -459,10 +459,11 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
    вигляд, що в h2, плюс рідний трикутник розкриття замість окремої кнопки:
    у h2.hrow "Collapse" не мав куди перенестись на вузькому екрані й наїжджав
    на лічильник "N device(s)" (звідси й скарга "поїхали"). */
-#ecoflow-devices-wrap > summary { font-size: var(--font-size-large); text-transform: uppercase;
-  letter-spacing: .05em; color: var(--text); margin: 24px 0 10px; font-weight: 600; cursor: pointer;
-  user-select: none; }
-#ecoflow-devices-wrap > summary span { text-transform: none; letter-spacing: 0; }
+#ecoflow-devices-wrap > summary, #ecoflow-journal-wrap > summary { font-size: var(--font-size-large);
+  text-transform: uppercase; letter-spacing: .05em; color: var(--text); margin: 24px 0 10px;
+  font-weight: 600; cursor: pointer; user-select: none; }
+#ecoflow-devices-wrap > summary span, #ecoflow-journal-wrap > summary span { text-transform: none;
+  letter-spacing: 0; }
 /* Стовпчики overview-таблиці: .opt (наявний глобальний клас) ховає найменш
    потрібне вже на планшеті (≤900px) - Left лишається, бо в описі задачі це
    був другий за пріоритетом стовпець після Grid/Charge; .opt2 ховає ще
@@ -485,6 +486,15 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
 table.zebra thead th { background: #ffffff05; }
 table.zebra tbody tr:nth-child(even) { background: #ffffff05; }
 table.zebra tbody tr:hover { background: #ffffff0f; }
+/* Журнал переходів EcoFlow (#ecoflow-journal-table) - візуальний аналог
+   міток '>'/'<' серійної команди 'ecoflow-journal show': найновіший перехід
+   пристрою (стан ще триває) і останній повністю завершений інтервал
+   підсвічені смугою зліва, кожен своїм кольором. inset box-shadow, не
+   border-left - не зсуває вміст комірки на 3px. Текстова приписка (JS,
+   ecoJournalRow()) лишається обов'язковою поруч - колір сам собою для
+   людей з дальтонізмом непомітний. */
+#ecoflow-journal-table tbody tr.eco-journal-current { box-shadow: inset 3px 0 0 0 var(--ok); }
+#ecoflow-journal-table tbody tr.eco-journal-previous { box-shadow: inset 3px 0 0 0 var(--muted); }
 /* Клікабельні рядки таблиці розділів (System - Flash): не всі рядки ведуть
    кудись, тому курсор - точковий сигнал поверх загального hover .zebra. */
 #sys-partitions tbody tr[data-sys-nav] { cursor: pointer; }
@@ -994,6 +1004,30 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
   <details id="ecoflow-devices-wrap" open>
     <summary>Devices <span id="ecoflow-count" class="muted" style="font-size:.75em; font-weight:400"></span></summary>
     <div id="ecoflow-devices"><p class="muted">Loading…</p></div>
+  </details>
+
+  <!-- Окремий запит (/api/ecoflow/journal), не розширення Overview/Devices
+       вище - той самий принцип, що на SAPI. Згорнутий за замовчуванням
+       (на відміну від Devices) - історія переходів, а не поточний стан,
+       рідше потрібна одразу. -->
+  <details id="ecoflow-journal-wrap">
+    <summary>Journal <span id="ecoflow-journal-count" class="muted" style="font-size:.75em; font-weight:400"></span></summary>
+    <div id="ecoflow-journal-block">
+      <div class="row" style="justify-content:space-between">
+        <label class="row">Device:
+          <select id="ecoflow-journal-target"><option value="all">All devices</option></select>
+        </label>
+        <span class="row">
+          <label class="row"><input type="checkbox" id="ecoflow-journal-auto"> auto</label>
+          <button class="act ghost" id="ecoflow-journal-refresh" type="button"
+              title="Refresh journal">Refresh</button>
+        </span>
+      </div>
+      <table id="ecoflow-journal-table" class="zebra">
+        <thead><tr><th>Start</th><th>Finish</th><th>Device</th><th>Grid</th><th class="num">Age</th></tr></thead>
+        <tbody><tr><td colspan="5" class="muted">Expand to load…</td></tr></tbody>
+      </table>
+    </div>
   </details>
 </section>
 
@@ -3128,6 +3162,15 @@ function renderEcoflow(data) {
   box.innerHTML = data.devices.length === 0
     ? '<p class="muted">No devices configured.</p>'
     : data.devices.map(ecoDeviceCard).join("");
+
+  // Опції "Device" для Journal (нижче) - той самий тик, що Overview/Devices,
+  // а не власний запит під це (DRY). Обраний target переживає перемальовку -
+  // читаємо select.value ПЕРЕД innerHTML=, як і з "open" деінде на сторінці.
+  const targetSelect = $("#ecoflow-journal-target");
+  const prevTarget = targetSelect.value;
+  targetSelect.innerHTML = '<option value="all">All devices</option>' +
+    data.devices.map((d) => `<option value="${escapeHtml(d.serialNumber)}">${escapeHtml(d.name)}</option>`).join("");
+  if ([...targetSelect.options].some((o) => o.value === prevTarget)) targetSelect.value = prevTarget;
 }
 
 async function refreshEcoflow() {
@@ -3140,6 +3183,83 @@ async function refreshEcoflow() {
     renderEcoflowSystemSummary(data);
   } catch (e) { /* пристрій міг тимчасово не відповісти - наступний тік спробує знову */ }
 }
+
+// Журнал переходів grid (/api/ecoflow/journal) - окремий запит від Overview/
+// Devices вище (не розширення /api/ecoflow/status), тому й окремий рендер/
+// refresh. epoch ще ніде на сторінці не форматувався в дату - toLocaleString()
+// тут навмисно НЕ береться: вигляд лишається однаковим між локалями браузера
+// (той самий стабільний "YYYY-MM-DD HH:MM:SS", що й серійна команда).
+function ecoTimestamp(epochSec) {
+  const d = new Date(epochSec * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const time = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return date + " " + time;
+}
+
+// Finish = Start + Age - похідний момент, сервер рахує лише "скільки тривало"
+// (ageSec), не "коли завершилось" (EcoflowJournalView.hpp). Дата збігається
+// зі Start - лише час (дата вже видна в сусідній колонці); не збігається -
+// час плюс "(+XXd)", різниця КАЛЕНДАРНИХ дат (місцева північ, через
+// Date.UTC(рік,місяць,день) для обох міток - не ділення різниці секунд на
+// 86400, яке з переходом через північ дало б хибне число).
+function ecoFinishText(startEpochSec, ageSec) {
+  const start = new Date(startEpochSec * 1000);
+  const finish = new Date((startEpochSec + ageSec) * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  const time = `${p(finish.getHours())}:${p(finish.getMinutes())}:${p(finish.getSeconds())}`;
+  const startDay = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+  const finishDay = Date.UTC(finish.getFullYear(), finish.getMonth(), finish.getDate());
+  if (startDay === finishDay) return time;
+  return `${time} (+${Math.round((finishDay - startDay) / 86400000)}d)`;
+}
+
+// row.mark - '>'/'<'/''  (EcoflowJournalRow, EcoflowJournalView.hpp): той
+// самий сенс, що в serial-команді 'ecoflow-journal show', лише тут - смуга
+// зліва (CSS вище) ЗАМІСТЬ односимвольної колонки, плюс текстова приписка -
+// колір сам собою непомітний для дальтоніків (той самий принцип, що
+// hintIcon() нижче по файлу).
+function ecoJournalRow(row) {
+  const cls = row.mark === ">" ? "eco-journal-current" : row.mark === "<" ? "eco-journal-previous" : "";
+  const hint = row.mark === ">" ? '<span class="muted"> (ongoing)</span>'
+    : row.mark === "<" ? '<span class="muted"> (closed)</span>' : "";
+  return `<tr class="${cls}">
+    <td>${ecoTimestamp(row.atEpoch)}</td>
+    <td>${ecoFinishText(row.atEpoch, row.ageSec)}</td>
+    <td>${escapeHtml(row.device)}</td>
+    <td>${ecoGrid(row.grid, false)}${hint}</td>
+    <td class="num">${ecoDuration(row.ageSec * 1000)}</td>
+  </tr>`;
+}
+
+function renderEcoflowJournal(data) {
+  $("#ecoflow-journal-count").textContent = data.rows.length + " row(s)";
+  $("#ecoflow-journal-table tbody").innerHTML = data.rows.length === 0
+    ? '<tr><td colspan="5" class="muted">No transitions recorded yet.</td></tr>'
+    : data.rows.map(ecoJournalRow).join("");
+}
+
+// .busy як загальне правило для «оновлення при expand» (не лише мутації) -
+// запит швидкий (пряме читання NVS, без WebJobQueue), але користувач щойно
+// розгорнув блок чи тиснув Refresh, і відгук потрібен так само.
+async function refreshEcoflowJournal() {
+  const target = $("#ecoflow-journal-target").value || "all";
+  const block = $("#ecoflow-journal-block");
+  setBusy(block, true);
+  try {
+    renderEcoflowJournal(await api("/api/ecoflow/journal?target=" + encodeURIComponent(target)));
+  } catch (e) {
+    toast(e.message || "Journal refresh failed", "err");
+  } finally {
+    setBusy(block, false);
+  }
+}
+
+$("#ecoflow-journal-wrap").addEventListener("toggle", (ev) => {
+  if (ev.target.open) refreshEcoflowJournal();
+});
+$("#ecoflow-journal-refresh").onclick = refreshEcoflowJournal;
+$("#ecoflow-journal-target").onchange = refreshEcoflowJournal;
 
 /* ---------------- mqtt ---------------- */
 
@@ -3381,6 +3501,10 @@ poller(pollStatus, 10000);
 // System (renderEcoflowSystemSummary у refreshEcoflow) - тому опитує, поки
 // видима будь-яка з двох.
 poller(refreshEcoflow, 5000, () => onEcoflowTab() || onSystemTab());
+// Journal - лише коли розгорнутий і галочка "auto" увімкнена (низький
+// пріоритет, ручний Refresh/expand лишаються основним шляхом оновлення).
+poller(refreshEcoflowJournal, 5000,
+  () => onEcoflowTab() && $("#ecoflow-journal-wrap").open && $("#ecoflow-journal-auto").checked);
 // Той самий знімок потрібен і повній вкладці MQTT, і компактному блоку на
 // System (renderMqttSystemSummary у refreshMqtt).
 poller(refreshMqtt, 5000, () => onMqttTab() || onSystemTab());

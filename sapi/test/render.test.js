@@ -13,7 +13,8 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus,
-        ecoflowSystemDevicesHtml, ecoTableRow, mqttSystemRows, heapBarHtml, ecoParamsTable } = require('../render.js');
+        ecoflowSystemDevicesHtml, ecoTableRow, mqttSystemRows, heapBarHtml, ecoParamsTable,
+        ecoJournalRow, ecoJournalSection, ecoFinishText } = require('../render.js');
 
 const CHIP_FIXTURE = {
   chip: { model: 'ESP32-C3', revision: 4, cores: 1, cpuFreqMHz: 160, psramFound: false, psramBytes: 0 },
@@ -226,6 +227,79 @@ test('ecoflow-status: params довантажені (drill-down) - таблиц�
   // клік у index.html) - інакше params, щойно довантажені, лишались би
   // застарілими назавжди (пристрій далі оновлює значення, MQTT-агрегат їх не несе).
   assert.match(html, /<button class="act ghost eco-params-btn"[^>]*data-sn="R331ZEB4ZEBW0026"[^>]*>Refresh<\/button>/);
+});
+
+// --- ecoJournalSection/ecoJournalRow: журнал переходів grid, окремий запит
+// 'ecoflow-journal' (не ecoflow-status) - EcoflowJournalView.hpp на боці плати ---
+
+test('ecoJournalRow: mark ">" - смуга "current" + приписка "(ongoing)"', () => {
+  const html = ecoJournalRow({ atEpoch: 1732900000, device: 'DELTA 2 (xama)', grid: 'on-grid', ageSec: 3661, mark: '>' });
+  assert.match(html, /<tr class="eco-journal-current">/);
+  assert.match(html, /\(ongoing\)/);
+  assert.match(html, /DELTA 2 \(xama\)/);
+  assert.match(html, /color:var\(--ok\)">on-grid/); // ecoGrid(grid, false) - без "(inferred)"
+});
+
+test('ecoJournalRow: mark "<" - смуга "previous" + приписка "(closed)"', () => {
+  const html = ecoJournalRow({ atEpoch: 1732900000, device: 'DELTA 2', grid: 'off-grid', ageSec: 90, mark: '<' });
+  assert.match(html, /<tr class="eco-journal-previous">/);
+  assert.match(html, /\(closed\)/);
+});
+
+test('ecoJournalRow: mark "" - звичайний рядок, без смуги й без приписки', () => {
+  const html = ecoJournalRow({ atEpoch: 1732900000, device: 'DELTA 2', grid: 'on-grid', ageSec: 5, mark: '' });
+  assert.match(html, /<tr class="">/);
+  assert.doesNotMatch(html, /\(ongoing\)|\(closed\)/);
+});
+
+test('ecoJournalRow: колонка Finish - другий <td>, одразу після Start', () => {
+  const html = ecoJournalRow({ atEpoch: 1732900000, device: 'DELTA 2', grid: 'on-grid', ageSec: 3600, mark: '' });
+  const cells = html.match(/<td[^>]*>.*?<\/td>/gs);
+  assert.equal(cells.length, 5); // Start, Finish, Device, Grid, Age
+});
+
+test('ecoFinishText: Finish у ту саму календарну дату - лише час, без "(+Xd)"', () => {
+  const startEpoch = Math.floor(Date.UTC(2026, 0, 15, 12, 0, 0) / 1000); // 2026-01-15 12:00 UTC
+  const text = ecoFinishText(startEpoch, 3600); // +1 год - та сама доба практично в будь-якому TZ
+  assert.doesNotMatch(text, /\(\+/);
+  assert.match(text, /:/); // виглядає як час (toLocaleTimeString())
+});
+
+test('ecoFinishText: Finish у іншу календарну дату - час + "(+Nd)"', () => {
+  const startEpoch = Math.floor(Date.UTC(2026, 0, 15, 12, 0, 0) / 1000);
+  const text = ecoFinishText(startEpoch, 2 * 86400); // +2 доби - різниця дат стійка до зсуву TZ
+  assert.match(text, /\(\+2d\)/);
+});
+
+test('ecoJournalSection: journalData=null - "Expand to load…", опції з devices', () => {
+  const html = ecoJournalSection([ECO_DEVICE_FIXTURE], null, 'all', false, false);
+  assertNoLeakedPlaceholders(html);
+  assert.match(html, /<details id="eco-journal-wrap">/); // journalOpen=false - без "open"
+  assert.match(html, /Expand to load…/);
+  assert.match(html, /<option value="all" selected>All devices<\/option>/);
+  assert.match(html, /<option value="R331ZEB4ZEBW0026">DELTA 2<\/option>/);
+  assert.doesNotMatch(html, /checked/); // journalAuto=false
+});
+
+test('ecoJournalSection: rows=[] - "No transitions recorded yet.", open+auto+обраний пристрій', () => {
+  const html = ecoJournalSection([ECO_DEVICE_FIXTURE], { rows: [] }, 'R331ZEB4ZEBW0026', true, true);
+  assert.match(html, /<details id="eco-journal-wrap" open>/);
+  assert.match(html, /No transitions recorded yet\./);
+  assert.match(html, /<option value="R331ZEB4ZEBW0026" selected>DELTA 2<\/option>/);
+  assert.match(html, /id="eco-journal-auto" checked/);
+  assert.match(html, /0 row\(s\)/);
+});
+
+test('ecoJournalSection: рядки журналу рендеряться через ecoJournalRow, лічильник - довжина rows', () => {
+  const rows = [
+    { atEpoch: 1732800000, device: 'DELTA 2', serialNumber: 'R331ZEB4ZEBW0026', grid: 'off-grid', ageSec: 7200, mark: '' },
+    { atEpoch: 1732900000, device: 'DELTA 2', serialNumber: 'R331ZEB4ZEBW0026', grid: 'on-grid', ageSec: 60, mark: '>' },
+  ];
+  const html = ecoJournalSection([ECO_DEVICE_FIXTURE], { rows }, 'all', false, true);
+  assertNoLeakedPlaceholders(html);
+  assert.match(html, /2 row\(s\)/);
+  assert.match(html, /<tr class="eco-journal-current">/);
+  assert.match(html, /<tr class="">/);
 });
 
 test('ecoParamsTable: сортує ключі, escape на значеннях/ключах, порожній набір - "not captured yet"', () => {

@@ -33,7 +33,7 @@
 | `devices/{client-id}/status` | текст: `"offline"`/`"online"`/`"heartbeat"` | LWT — ні (`lwtRetain=false`) | плата публікує (LWT + online-publish + heartbeat кожні 5 хв); плата підписується на `devices/+/status` (чужі LWT) | `secrets.ini` (`mqtt_lwt_topic`/`_msg_offline`/`_msg_online`), `src/main.cpp:342,376-381,2029,2066-2070`, `MqttClient.cpp:206-234,268-294` |
 | `command/{client-id}` | текст: довільна serial-подібна команда | ні | плата підписується; зовнішній клієнт публікує | `src/main.cpp:2040-2050` |
 | `command/{client-id}/reply` | текст: людський лог-вивід порціями (≤512Б×8, з обрізанням) або `"busy: command queue is full"` | ні | плата публікує через `MqttReplyTarget` (`src/main.cpp:665-675`); зовнішній клієнт підписується | `lib/CommandResponse/MqttReplyTarget.hpp`, `lib/CommandResponse/CommandResponse.cpp`, `src/main.cpp:2047-2049` |
-| `devices/{client-id}/api/<cmd>` | JSON: `{"id":<num>}` (+ `"args"` для команд з аргументами — наразі жодна) | ні | плата підписується (`addJsonListener`); зовнішній SAPI-клієнт публікує | `registerJsonApiEntry()`, `src/main.cpp:750-758,2054-2062` |
+| `devices/{client-id}/api/<cmd>` | JSON: `{"id":<num>}` (+ `"args"` для команд з аргументами — `ecoflow-journal`: `{"target":"all"\|"<sn>"}`, дефолт `"all"`) | ні | плата підписується (`addJsonListener`); зовнішній SAPI-клієнт публікує | `registerJsonApiEntry()`, `src/main.cpp:750-758,2054-2062` |
 | `devices/{client-id}/api/<cmd>/reply` | JSON: `{"id","ok":true,"data":{...}}` або `{"id","ok":false,"error":"bad args"\|"busy"}` | ні | плата публікує (через `MqttReplyTarget` або пряму відмову) | `handleJsonApiRequest()`, `src/main.cpp:731-742` |
 | `devices/{client-id}/api/ecoflow-params/<sn>` | JSON: `{"id":<num>}` | ні | плата підписується — ОДНА точна підписка на кожен серійник з `EcoflowDeviceRegistry::deviceTable()` (без wildcard), а не одна на `<cmd>` | `registerEcoflowDeviceParamsEntries()`, `src/main.cpp`, лише `HAS_ECOFLOW_CLIENT` |
 | `devices/{client-id}/api/ecoflow-params/<sn>/reply` | JSON: `{"id","ok":true,"data":{"serialNumber","captureAll","droppedParams","params":{...}}}` або `{"id","ok":false,"error":"busy"}` | ні | плата публікує; drill-down на "params" ОДНОГО пристрою — `ecoflow-status` (агрегат вище) їх свідомо не несе (розмір payload) | `WebEcoflowModule::mqttDeviceParamsJson()`, `src/main.cpp` |
@@ -52,26 +52,27 @@ Allowlist, не дзеркало всіх serial-команд:
 | `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebPortal::statusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `wifi-status` | `WebWifiModule::portalStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
+| `ecoflow-journal` | `WebEcoflowModule::journalJson()` (той самий провайдер, що `/api/ecoflow/journal` порталу, `EcoflowJournalView.hpp`) — окремий запит, не розширення `ecoflow-status` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `commands-list` | перелік зареєстрованих serial-команд (`commandHandler.commandName()`/`commandDescription()`), те саме, що й `/api/commands/list` порталу | `HAS_MQTT_CLIENT && !ESP8266` |
 
 **`commands-list` — статичний перелік, не статус.** На відміну від решти
-чотирьох (`system-info`/`wifi-status`/`ecoflow-status`/`mqtt-status`),
-відповідь — `[{"name","description"}, ...]`, не об'єкт стану; дані не
-змінюються між перезавантаженнями плати, тому SAPI запитує їх один раз на
-конект, а не auto-poll. Джерело для сторінки Commands SAPI (список команд
-ліворуч) — див. розділ 5 нижче, де ACL дозволяє SAPI ще й `command/<id>`
-(запуск довільної команди).
+п'яти (`system-info`/`wifi-status`/`ecoflow-status`/`ecoflow-journal`/
+`mqtt-status`), відповідь — `[{"name","description"}, ...]`, не об'єкт
+стану; дані не змінюються між перезавантаженнями плати, тому SAPI запитує
+їх один раз на конект, а не auto-poll. Джерело для сторінки Commands SAPI
+(список команд ліворуч) — див. розділ 5 нижче, де ACL дозволяє SAPI ще й
+`command/<id>` (запуск довільної команди).
 
-**`commands-list` — єдина з п'яти, що не потребує `HAS_WEB_PORTAL`**
+**`commands-list` — єдина з шести, що не потребує `HAS_WEB_PORTAL`**
 (виправлено 2026-09-27, `src/main.cpp`, розділ «MQTT SAPI-канал ... спільна
 інфраструктура»): `commandHandler` — глобал файлу, завжди визначений,
-незалежно від порталу. Решта чотири читають `webPortal`/`webWifiModule`/
+незалежно від порталу. Решта п'ять читають `webPortal`/`webWifiModule`/
 `webEcoflowModule`/`webMqttModule` — ці provider-об'єкти самі оголошені
 лише під `HAS_WEB_PORTAL` (`src/main.cpp:488-539`), тож на платі без
 порталу (напр. `esp32-c3` з `HAS_WEB_PORTAL=0`) discovery публікує
 `"commands":["commands-list"]`, а не порожній масив. Повне усунення
-залежності решти чотирьох — відкритий борг, `docs/tech_debt.md`, розділ
+залежності решти п'яти — відкритий борг, `docs/tech_debt.md`, розділ
 «Веб-портал через MQTT».
 
 **`ecoflow-params/<sn>` — окремий drill-down, не запис цієї таблиці.**
@@ -84,6 +85,17 @@ Allowlist, не дзеркало всіх serial-команд:
 записах вище), а серійний номер ПРИСТРОЮ — реєструється циклом по
 `EcoflowDeviceRegistry::deviceTable()`, окремо від `registerJsonApiEntry()`
 (розділ 1, рядки `.../ecoflow-params/<sn>` вище).
+
+**`ecoflow-journal` — перша команда фази 1 з реальним `args` у тілі
+запиту.** Досі лише шаблон (`docs/mqtt-web-handoff.md`, «Приклад команди з
+аргументами») — `{"target":"all"}` чи `{"target":"<sn>"}`, той самий
+контракт `sn|index|all`, що серійна команда `ecoflow-journal show`. Не
+topic-per-device (як `ecoflow-params/<sn>` вище): запит рідкісний, не
+частий per-device polling, статична підписка на кожен пристрій дала б лише
+зайві топіки без вигоди. Відповідь — `{"target","rows":[{"atEpoch",
+"serialNumber","device","grid","ageSec","mark"}...]}`, `mark` — `">"`/`"<"`/
+`""` (найновіший/останній завершений/звичайний рядок, той самий сенс, що
+позиційна колонка серійної команди).
 
 **Заплановано, ще не реалізовано:** опційне поле `replyTopic` у запиті
 (відповідь в інший топік замість дефолтного `.../reply`) — обов'язково
@@ -114,8 +126,8 @@ Allowlist, не дзеркало всіх serial-команд:
   рядок — буквальне ім'я макроса (`"BOARD_HAS_DISPLAY"`, не перейменований
   варіант).
 - `commands` — масив імен зареєстрованих JSON API команд (`"system-info"`,
-  `"wifi-status"`, `"ecoflow-status"`, `"mqtt-status"`, `"commands-list"` —
-  залежно від env), джерело —
+  `"wifi-status"`, `"ecoflow-status"`, `"ecoflow-journal"`, `"mqtt-status"`,
+  `"commands-list"` — залежно від env), джерело —
   `registerJsonApiEntry()` (`src/main.cpp`): той самий виклик, що підписує
   `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий fixed-size
   масив (`kJsonApiCommandNames`, без heap). На платі без порталу — `[]`

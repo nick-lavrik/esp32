@@ -15,6 +15,9 @@ sapi/revision.js
 # Персональні налаштування Claude Code (hooks, попапи) - не для команди
 .claude/settings.local.json
 
+# Нотатки дослідницьких агентів Claude Code - особисті чернетки, не для команди
+.claude/research/
+
 # Профілі WiFi для LittleFS: містять psk у відкритому вигляді (формат keyfile
 # NetworkManager, як /etc/NetworkManager/system-connections/). Кладуться в
 # data/network/ і їдуть на плату через 'pio run -t uploadfs'. Приклад файлу -

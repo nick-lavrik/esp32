@@ -136,10 +136,11 @@ h2.hrow .act { margin-left: auto; font-size: var(--font-size-small); padding: 4p
    uppercase, margin 24px 0 10px), плюс cursor/user-select - той самий портал
    (assets/www/index.html: #ecoflow-devices-wrap > summary): сам заголовок -
    перемикач розгорнути/згорнути картки (<details>), не звичайний <h2>. */
-#ecoflow-devices-wrap > summary { font-size: var(--font-size-large); text-transform: uppercase;
-  letter-spacing: .05em; color: var(--text); margin: 24px 0 10px; font-weight: 600; cursor: pointer;
-  user-select: none; }
-#ecoflow-devices-wrap > summary span { text-transform: none; letter-spacing: 0; }
+#ecoflow-devices-wrap > summary, #eco-journal-wrap > summary { font-size: var(--font-size-large);
+  text-transform: uppercase; letter-spacing: .05em; color: var(--text); margin: 24px 0 10px;
+  font-weight: 600; cursor: pointer; user-select: none; }
+#ecoflow-devices-wrap > summary span, #eco-journal-wrap > summary span { text-transform: none;
+  letter-spacing: 0; }
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 /* Стековий підпис-над-полем - лише для форми підключення (6 різнорідних
@@ -299,6 +300,12 @@ table.zebra th { color: var(--muted); font-weight: 600; font-size: var(--font-si
 table.zebra thead th { background: #ffffff05; }
 table.zebra tbody tr:nth-child(even) { background: #ffffff05; }
 table.zebra tbody tr:hover { background: #ffffff0f; }
+/* Журнал переходів grid (#eco-journal-table) - буквальний порт порталу
+   (assets/www/index.html, той самий CSS): смуга зліва замість односимвольної
+   колонки '>'/'<' серійної команди, текстова приписка поруч лишається
+   обов'язковою (колір сам собою непомітний для дальтоніків). */
+#eco-journal-table tbody tr.eco-journal-current { box-shadow: inset 3px 0 0 0 var(--ok); }
+#eco-journal-table tbody tr.eco-journal-previous { box-shadow: inset 3px 0 0 0 var(--muted); }
 /* table.zebra td/th (вище) - той самий клас у селекторі, що й тут (0,1,2)
    проти (0,1,1) - без "table.zebra td.num" зліва table.zebra перебивав би
    text-align:right однаковою специфічністю+пізнішим порядком лише випадково;
@@ -609,6 +616,8 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   const AUTO_BACKOFF_MAX = 8; // множник база: 5с -> 40с максимум при busy
   const LOG_MAX_LINES = 500;
   const ECO_PARAMS_TIMEOUT_MS = 10000; // ecoflow-params/<sn> - явний timeout, а не вічний спінер
+  const ECO_JOURNAL_TIMEOUT_MS = 10000; // ecoflow-journal - той самий підхід, що ecoflow-params
+  const ECO_JOURNAL_AUTO_MS = 5000; // "auto" - та сама периодичність, що на порталі
   const COMMANDS_LIST_TIMEOUT_MS = 10000; // commands-list - той самий підхід, що ecoflow-params
   const CMD_REQUEST_TIMEOUT_MS = 10000; // panels[cmd] - той самий підхід, без нього getInFlightSlot() лишався б зайнятим навічно, якщо пристрій не відповість
 
@@ -1181,6 +1190,53 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     logEvent('out', topic, payload);
   }
 
+  // Журнал переходів grid ('ecoflow-journal') - той самий підхід, що
+  // ecoflow-params вище, але ОДНА активна відповідь за раз (не Map по sn):
+  // на екрані завжди один блок Journal, не по одному на пристрій.
+  let ecoJournalPendingId = null;
+  let ecoJournalTimeoutTimer = null;
+
+  function setEcoJournalBusy(busy) {
+    const block = panels['ecoflow-status'].out.querySelector('#eco-journal-block');
+    if (block) block.classList.toggle('busy', busy);
+  }
+
+  function requestEcoflowJournal(target) {
+    if (!client || !client.connected) return;
+    const id = Math.floor(Math.random() * 1e9);
+    if (ecoJournalTimeoutTimer) clearTimeout(ecoJournalTimeoutTimer);
+    ecoJournalTimeoutTimer = setTimeout(() => {
+      ecoJournalPendingId = null;
+      setEcoJournalBusy(false);
+      logEvent('err', reqTopic('ecoflow-journal'), null, `timeout ${ECO_JOURNAL_TIMEOUT_MS / 1000}s - no reply`);
+    }, ECO_JOURNAL_TIMEOUT_MS);
+    ecoJournalPendingId = id;
+    setEcoJournalBusy(true);
+    const topic = reqTopic('ecoflow-journal');
+    const payload = JSON.stringify({ id, args: { target: target || 'all' } });
+    client.publish(topic, payload);
+    logEvent('out', topic, payload);
+  }
+
+  // "auto" - низький пріоритет: незалежний ланцюжок setTimeout, не завʼязаний
+  // на COMMANDS/backoff-механізм панелей (той для чотирьох агрегатів,
+  // журнал - поодинокий керований запит). Умови перевіряються щотік, а не
+  // раз при вмиканні - той самий принцип, що poller() на порталі.
+  function ecoJournalAutoTick() {
+    const wrap = panels['ecoflow-status'].out.querySelector('#eco-journal-wrap');
+    const auto = panels['ecoflow-status'].out.querySelector('#eco-journal-auto');
+    if (client && client.connected && wrap && wrap.open && auto && auto.checked) {
+      requestEcoflowJournal(panels['ecoflow-status'].out.querySelector('#eco-journal-target')?.value || 'all');
+    }
+    setTimeout(ecoJournalAutoTick, ECO_JOURNAL_AUTO_MS);
+  }
+  // Не викликати одразу (синхронно, тут-таки): `let client` оголошується
+  // нижче за файлом (`connect()`), і функція його читає - синхронний виклик
+  // на цьому місці падав би "Cannot access 'client' before initialization"
+  // (TDZ `let`). setTimeout(...,0) відкладає перший тік на наступний цикл
+  // подій - до того часу `client` уже ініціалізований (в `null`).
+  setTimeout(ecoJournalAutoTick, 0);
+
   // Періодичний ecoflow-status (auto-refresh) присилає СВІЖИЙ агрегат БЕЗ
   // "params" (агрегат їх свідомо не несе, розділ "Провайдер ≠ форматер",
   // docs/mqtt-web-handoff.md) - без цього злиття кожен наступний тик стирав
@@ -1207,17 +1263,48 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     // (перший рендер) - лишається дефолтне "open" з render.js.
     const devicesWrap = panels['ecoflow-status'].out.querySelector('#ecoflow-devices-wrap');
     const devicesOpen = devicesWrap ? devicesWrap.open : true;
-    panels['ecoflow-status'].out.innerHTML =
-      buildPanelHtml('ecoflow-status', lastEcoflowStatus, { openParamsSerials, devicesOpen });
+    // Journal - той самий принцип: <details>/select/checkbox сканується з
+    // DOM ПЕРЕД innerHTML=, інакше кожен ecoflow-status тик (5с, окремий від
+    // самого ecoflow-journal) скидав би обраний пристрій/auto/розгорнутість.
+    const journalWrap = panels['ecoflow-status'].out.querySelector('#eco-journal-wrap');
+    const journalOpen = journalWrap ? journalWrap.open : false;
+    const journalTargetEl = panels['ecoflow-status'].out.querySelector('#eco-journal-target');
+    const journalTarget = journalTargetEl ? journalTargetEl.value : 'all';
+    const journalAutoEl = panels['ecoflow-status'].out.querySelector('#eco-journal-auto');
+    const journalAuto = journalAutoEl ? journalAutoEl.checked : false;
+    panels['ecoflow-status'].out.innerHTML = buildPanelHtml('ecoflow-status', lastEcoflowStatus,
+      { openParamsSerials, devicesOpen, journalData: lastEcoflowJournal, journalTarget, journalAuto, journalOpen });
   }
 
   // Делегування - картки пристроїв перемальовуються цілком на кожен reply
   // (innerHTML=), кнопка ".eco-params-btn" щоразу нова: слухач на статичному
   // .out (переживає перемальовку), не на самій кнопці.
   panels['ecoflow-status'].out.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('.eco-params-btn');
-    if (!btn) return;
-    requestEcoflowDeviceParams(btn.dataset.sn);
+    const paramsBtn = ev.target.closest('.eco-params-btn');
+    if (paramsBtn) { requestEcoflowDeviceParams(paramsBtn.dataset.sn); return; }
+    if (ev.target.closest('#eco-journal-refresh')) {
+      requestEcoflowJournal(panels['ecoflow-status'].out.querySelector('#eco-journal-target')?.value || 'all');
+      return;
+    }
+    // Клік по <summary> - НЕ подія 'toggle': та спрацьовує і на самому
+    // парсингу innerHTML=, коли рядок уже містить "<details open>" (відомий
+    // "фічабаг" Chromium - <details>, щойно вставлений у DOM з готовим
+    // "open", одразу шле toggle, ніби це справжнє розгортання). Since ecoflow-
+    // status/ecoflow-journal перемальовують ЦІЛИЙ панель (innerHTML=)
+    // регулярно, а journalOpen лишається true назавжди після першого
+    // розгортання - 'toggle' сіяв би нескінченну петлю запитів, без жодної
+    // паузи, незалежно від "auto" (саме це й трапилось на живому SAPI).
+    // 'click' по <summary> так не поводиться: dispatch завершується РАНІШЕ,
+    // ніж браузер застосовує власну activation behavior (реальний toggle
+    // атрибута) - .open тут ще ПОПЕРЕДНІЙ стан, "зараз закрито" означає
+    // "цей клік ось-ось розгорне".
+    const summary = ev.target.closest('#eco-journal-wrap > summary');
+    if (summary && !summary.parentElement.open) {
+      requestEcoflowJournal(panels['ecoflow-status'].out.querySelector('#eco-journal-target')?.value || 'all');
+    }
+  });
+  panels['ecoflow-status'].out.addEventListener('change', (ev) => {
+    if (ev.target.id === 'eco-journal-target') requestEcoflowJournal(ev.target.value);
   });
 
   // Рендер-функції (esc/kv/RENDERERS/...) підключені окремим <script
@@ -1235,6 +1322,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   let lastSystemInfo = null;
   let lastWifiStatus = null;
   let lastEcoflowStatus = null;
+  let lastEcoflowJournal = null;
   let lastMqttStatus = null;
 
   function buildPanelHtml(cmd, data, extra) {
@@ -1780,6 +1868,32 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
           renderCommandsList();
         } else {
           logEvent('err', topic, null, `commands-list error: ${msg.error || 'unknown'}`);
+        }
+        return;
+      }
+
+      // 'ecoflow-journal' - одноразовий запит поза COMMANDS (як commands-list
+      // вище), не topic-per-device (на відміну від ecoflow-params нижче):
+      // "target" - у тілі запиту, тому й топік відповіді - звичайний
+      // replyTopic(cmd), той самий шлях, що комбінований '+/reply' вище вже
+      // ловить.
+      if (topic === replyTopic('ecoflow-journal')) {
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch (e) {
+          setEcoJournalBusy(false);
+          return;
+        }
+        if (ecoJournalPendingId !== null && msg.id !== ecoJournalPendingId) return; // застаріла відповідь
+        clearTimeout(ecoJournalTimeoutTimer);
+        ecoJournalPendingId = null;
+        setEcoJournalBusy(false);
+        if (msg.ok) {
+          lastEcoflowJournal = msg.data;
+          renderEcoflowPanel();
+        } else {
+          logEvent('err', topic, null, `ecoflow-journal error: ${msg.error || 'unknown'}`);
         }
         return;
       }

@@ -147,6 +147,7 @@ web auth off                # вимкнути автентифікацію
 | GET | `/api/screen/info` | геометрія екрана: `width`, `height`, `splitCount`, `splitHeight`, порядок байтів |
 | GET | `/api/screen/strip?fmt=332\|565` | одна смуга кадру сирими байтами — **повз чергу**; `204`, якщо ще не знята |
 | GET | `/api/ecoflow/status` | діагностика MQTT-сесії + стан кожного пристрою з `EcoflowDeviceRegistry` (лише на env з `HAS_ECOFLOW_CLIENT`) |
+| GET | `/api/ecoflow/journal?target=all\|<sn>` | журнал переходів grid (`EcoflowGridJournal`) — окремий від `/api/ecoflow/status` запит, пряме читання NVS, без черги |
 
 Тіла запитів — `application/x-www-form-urlencoded`, відповіді — JSON.
 
@@ -748,6 +749,18 @@ TFT_eSPI і Arduino_GFX — рідний little-endian), тому він не п
 NTP; читання в таску AsyncTCP таке саме безпечне, як у `WebScreenModule`, і
 `WebJobQueue` тут не потрібен зовсім.
 
+**Вкладка "Journal" - окремий запит, не частина цього знімка.**
+`GET /api/ecoflow/journal` читає `EcoflowGridJournal` напряму (NVS,
+`loadRecentEvents()` у локальний буфер на час запиту) - той самий контракт,
+що вже був записаний у самому класі задовго до цієї реалізації
+(`EcoflowGridJournal.hpp`), і той самий провайдер, що серійна команда
+`ecoflow-journal show` і SAPI-команда `ecoflow-journal`
+(`src/Ecoflow/EcoflowJournalView.{hpp,cpp}`, `docs/ecoflow.md`). Своя
+таблиця (`<details>` під "Devices", згорнута за замовчуванням) з'являється/
+оновлюється при розгортанні, кліку "Refresh" чи зміні вибраного пристрою -
+`.busy` на весь блок на час запиту, той самий принцип, що для мутацій,
+хоча читання само по собі швидке.
+
 **Вкладка з'являється сама.** `/api/status` уже віддає перелік зареєстрованих
 розділів (`modules`) - сторінка ховає кнопку `EcoFlow` в `nav`, поки
 `"ecoflow"` там немає, і показує її назавжди, щойно з'явилась. Так само, як
@@ -942,8 +955,9 @@ ACL для нових плат можна забути додати мовчки
 | `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebPortal::statusJson()` (поле `"portal"` — env/revision/uptime/auth/pendingJobs/modules) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `wifi-status` | `WebWifiModule::portalStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` (без сирого `params`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
+| `ecoflow-journal` | `WebEcoflowModule::journalJson()` — окремий запит, не розширення `ecoflow-status`; той самий провайдер, що `/api/ecoflow/journal` вище (`EcoflowJournalView.hpp`); перша команда фази 1 з реальним `args` у тілі (`{"target":"all"\|"<sn>"}`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (той самий, що й `/api/mqtt/status` вище) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
-| `commands-list` | перелік зареєстрованих serial-команд (`commandHandler`), те саме, що й `/api/commands/list` | `HAS_MQTT_CLIENT && !ESP8266` — **єдина з п'яти, не залежить від `HAS_WEB_PORTAL`** (`commandHandler` завжди доступний; решта чотири читають provider-об'єкти порталу, оголошені лише під `HAS_WEB_PORTAL` — відкритий борг, `docs/tech_debt.md`) |
+| `commands-list` | перелік зареєстрованих serial-команд (`commandHandler`), те саме, що й `/api/commands/list` | `HAS_MQTT_CLIENT && !ESP8266` — **єдина з шести, не залежить від `HAS_WEB_PORTAL`** (`commandHandler` завжди доступний; решта п'ять читають provider-об'єкти порталу, оголошені лише під `HAS_WEB_PORTAL` — відкритий борг, `docs/tech_debt.md`) |
 
 **`ecoflow-params/<sn>` — окремий drill-down на "params" ОДНОГО пристрою**
 (`devices/<client-id>/api/ecoflow-params/<sn>`, `WebEcoflowModule::

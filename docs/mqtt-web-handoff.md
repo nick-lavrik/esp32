@@ -382,9 +382,10 @@ Journal-капчер. **Уточнення після обговорення а�
     `system-info` чіпає flash/NVS).
   - Приклад команди БЕЗ аргументів: `resolve()` — `return true;`,
     нічого не читає.
-  - Приклад команди З аргументами (майбутня, не фаза 1 — `offset`/`limit`
-    для потенційно великої відповіді, за принципом з розділу «Розмір
-    payload»):
+  - Приклад команди З аргументами (ілюстративний тут — `offset`/`limit` для
+    потенційно великої відповіді, за принципом з розділу «Розмір payload»;
+    реальна перша реалізація — `ecoflow-journal` (`{"target":"all"|"<sn>"}`,
+    `docs/mqtt-topics.md`), не ця пара полів):
     ```cpp
     struct Args { int32_t offset = 0; int32_t limit = 20; };
     static_assert(sizeof(Args) <= COMMAND_QUEUE_LINE, "Args має влізти в Slot.payload");

@@ -45,6 +45,7 @@
 
 #include "EcoflowClient.hpp"
 #include "EcoflowDeviceRegistry.hpp"
+#include "EcoflowJournalView.hpp"
 
 // Як часто перебудовувати знімок - сторінка й так опитує раз на 5 с
 // (poller(refreshEcoflow, 5000, ...), assets/www/index.html), частіше немає
@@ -129,6 +130,13 @@ public:
   // snap - знімок ОДНОГО пристрою з devicesSnapshot() (виклик сам шукає збіг
   // за серійним номером - main.cpp, registerEcoflowDeviceParamsEntries()).
   static String mqttDeviceParamsJson(const WebEcoflowDeviceSnapshot& snap);
+
+  // Форматер журналу переходів grid (GET /api/ecoflow/journal і SAPI-команда
+  // 'ecoflow-journal') - один, не пара portal/mqtt: rows - готовий, уже
+  // обрізаний список (ecoflowBuildJournalRows(), EcoflowJournalView.hpp),
+  // без важкого "сирого" поля, яке варто ховати від MQTT (на відміну від
+  // "params" вище) - другий форматер нічого не виграв би.
+  static String journalJson(const String& target, const std::vector<EcoflowJournalRow>& rows);
 
 private:
   // Знімає провайдерські структури. Викликається лише з loop() - див.
