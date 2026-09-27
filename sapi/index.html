@@ -782,6 +782,14 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   // "Newest first" нижче, лише DOM-вставка (logEvent) на нього зважає.
   const logRows = [];
   const pendingRequests = new Map(); // id -> рядок запиту, що ще чекає на reply
+  // id -> рядок, для якого reply вже прийшов і змапився. Тримаємо його й
+  // ПІСЛЯ merge (доки рядок не витіснеться зі старості, evictOldestRow()
+  // нижче) - повторна доставка того самого reply (трапляється після
+  // reconnect, якщо брокер не чистить стару підписку - той самий id, той
+  // самий вміст) інакше не знаходить збігу в pendingRequests (він уже
+  // видалений) і показувалась би як "невідомий" рядок з дублем даних, які
+  // насправді вже показані змапленими вище.
+  const answeredRows = new Map();
 
   // Дефолт - вгору (checked у розмітці нема, але JS-стан і чекбокс
   // синхронізовані рядком нижче): сторінка сама росте (без внутрішнього
@@ -906,6 +914,9 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     if (old._reqId !== undefined && pendingRequests.get(old._reqId) === old) {
       pendingRequests.delete(old._reqId);
     }
+    if (old._reqId !== undefined && answeredRows.get(old._reqId) === old) {
+      answeredRows.delete(old._reqId);
+    }
     old.remove();
   }
 
@@ -931,6 +942,18 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       prettyLabeled('← reply', replyTime, replyRaw));
   }
 
+  // Повторна доставка id, для якого reply вже змаплено (answeredRows) -
+  // дописується в ТОЙ САМИЙ рядок (лічильник у payload, ще один підписаний
+  // pretty-блок), а не заводить новий "невідомий" рядок з тим самим вмістом.
+  function appendDuplicateReply(row, replyTime, replyRaw, replyParsed) {
+    row._dupCount = (row._dupCount || 1) + 1;
+    const line = $('.log-line', row);
+    const statusText = replyParsed.ok === false ? `error: ${replyParsed.error || '?'}` : 'ok';
+    $('.log-payload', line).textContent = `id ${replyParsed.id} · ${statusText} · ×${row._dupCount} delivered`;
+    const body = $('.log-pretty-body', $('.log-pretty', row));
+    body.appendChild(prettyLabeled(`← reply (duplicate #${row._dupCount})`, replyTime, replyRaw));
+  }
+
   function logEvent(dir, topic, payloadText, note) {
     if (logPaused) return; // показ призупинено - подія не записується (не буферизується на потім)
     const el = $('#log');
@@ -949,6 +972,12 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       const reqRow = pendingRequests.get(parsed.id);
       pendingRequests.delete(parsed.id);
       mergeReply(reqRow, t, raw, parsed);
+      answeredRows.set(parsed.id, reqRow);
+      return;
+    }
+
+    if (dir === 'in' && parsed && parsed.id !== undefined && answeredRows.has(parsed.id)) {
+      appendDuplicateReply(answeredRows.get(parsed.id), t, raw, parsed);
       return;
     }
 
