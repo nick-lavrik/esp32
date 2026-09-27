@@ -597,6 +597,48 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   const LOG_MAX_LINES = 500;
   const ECO_PARAMS_TIMEOUT_MS = 10000; // ecoflow-params/<sn> - явний timeout, а не вічний спінер
   const COMMANDS_LIST_TIMEOUT_MS = 10000; // commands-list - той самий підхід, що ecoflow-params
+  const CMD_REQUEST_TIMEOUT_MS = 10000; // panels[cmd] - той самий підхід, без нього getInFlightSlot() лишався б зайнятим навічно, якщо пристрій не відповість
+
+  // SAPI_MAX_INFLIGHT - скільки запитів панелей COMMANDS може одночасно
+  // чекати відповіді пристрою. Це і є фактичний троттлінг - НЕ дзеркало
+  // COMMAND_QUEUE_SLOTS у environment.h плати: та ємність навмисно більша
+  // за це число там, де вистачає RAM (лишає запас на serial/cron/портал -
+  // докладніше, docs/mqtt-web-handoff.md, "SAPI: обмеження одночасних
+  // запитів"), тому пряме дзеркалення тут було б неправильним. Число тут
+  // захардкоджене, не згенероване build-скриптом (на відміну від
+  // sapi/revision.js): ця сторінка - один статичний файл, під'єднується в
+  // рантаймі до довільної плати, а не збирається per-env, і сама не читає
+  // COMMAND_QUEUE_SLOTS жодної з них.
+  //
+  // Пул навмисно НЕ покриває ecoflow-params/commands-list/command-run:
+  // це поодинокі, керовані користувачем запити (клік по кнопці, Run), а не
+  // джерело сплеску - на відміну від COMMANDS, які всі летять разом на
+  // конекті й на кожному Auto-тіку (докладніше - docs/mqtt-web-handoff.md,
+  // "SAPI: обмеження одночасних запитів"). Обидва вже мають власний
+  // timeout (ECO_PARAMS_TIMEOUT_MS/COMMANDS_LIST_TIMEOUT_MS) і власну
+  // обробку "busy"/переповненої черги - гіршого стану, ніж "рідкісний busy",
+  // це не додає.
+  const SAPI_MAX_INFLIGHT = 2;
+  let sapiInFlightCount = 0;
+  const sapiInFlightQueue = []; // FIFO відкладених публікацій (thunків), понад SAPI_MAX_INFLIGHT
+
+  function withInFlightSlot(publish) {
+    if (sapiInFlightCount < SAPI_MAX_INFLIGHT) {
+      sapiInFlightCount++;
+      publish();
+    } else {
+      sapiInFlightQueue.push(publish);
+    }
+  }
+
+  function releaseInFlightSlot() {
+    if (sapiInFlightCount > 0) sapiInFlightCount--;
+    const next = sapiInFlightQueue.shift();
+    if (next) {
+      sapiInFlightCount++;
+      next();
+    }
+  }
   // command/<client-id> (докладна довільна команда, docs/mqtt-topics.md) не несе кореляційного
   // "id" у відповіді - на відміну від devices/.../api/<cmd>, це текстовий канал, спільний з
   // serial/cron/іншими MQTT-клієнтами (docs/mqtt-web-handoff.md, "чи command/<id> теж переїжджає
@@ -1051,6 +1093,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       pendingId: null,
       backoffFactor: 1,
       timer: null,
+      inFlightTimeoutTimer: null, // CMD_REQUEST_TIMEOUT_MS - звільняє слот withInFlightSlot(), якщо пристрій не відповів
     };
     // data-persist - програмно, не в статичній розмітці: ключ ("auto-<cmd>")
     // іде з того самого COMMANDS, тому 5-та команда в майбутньому підхопить
@@ -1491,12 +1534,29 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   function requestCmd(cmd) {
     if (!client || !client.connected) return;
     const p = panels[cmd];
+    // Уже є запит у польоті на ЦЮ панель (надісланий чи ще в
+    // sapiInFlightQueue) - не дублюємо. Це і є фікс "подвійного
+    // requestCmd() при конекті": Auto-обробник applyPersistedToggles()
+    // і безумовний цикл нижче в client.on('connect', ...) кличуть
+    // requestCmd(cmd) для того самого cmd підряд - другий виклик тепер
+    // просто no-op, а не другий publish з іншим id.
+    if (p.pendingId !== null) return;
     const id = Math.floor(Math.random() * 1e9);
     p.pendingId = id;
-    setPanelStatus(cmd, 'loading...', '');
-    const payload = JSON.stringify({ id });
-    client.publish(reqTopic(cmd), payload);
-    logEvent('out', reqTopic(cmd), payload);
+    setPanelStatus(cmd, 'queued...', '');
+    withInFlightSlot(() => {
+      setPanelStatus(cmd, 'loading...', '');
+      clearTimeout(p.inFlightTimeoutTimer);
+      p.inFlightTimeoutTimer = setTimeout(() => {
+        p.pendingId = null;
+        setPanelStatus(cmd, `error: timeout ${CMD_REQUEST_TIMEOUT_MS / 1000}s - no reply`, 'err');
+        p.backoffFactor = Math.min(p.backoffFactor * 2, AUTO_BACKOFF_MAX);
+        releaseInFlightSlot();
+      }, CMD_REQUEST_TIMEOUT_MS);
+      const payload = JSON.stringify({ id });
+      client.publish(reqTopic(cmd), payload);
+      logEvent('out', reqTopic(cmd), payload);
+    });
   }
 
   function scheduleAuto(cmd) {
@@ -1646,11 +1706,13 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       // безумовним циклом нижче (розділ "Персист UI-чекбоксів" вище):
       // "Auto" без живого client однаково нічого не зробив би, а зроблений
       // ДО subscribe() ризикував би загубити відповідь на власний запит
-      // (publish раніше за subscribe на топік reply). Може дати один зайвий
-      // дублікат requestCmd() для команд з увімкненим Auto (change-обробник
-      // усередині сам робить один запит, а безумовний цикл нижче - ще
-      // один) - прийнятно, не вартий спеціального обходу заради економії
-      // одного MQTT-повідомлення раз на конект.
+      // (publish раніше за subscribe на топік reply). Раніше це давало
+      // зайвий дублікат requestCmd() для команд з увімкненим Auto
+      // (change-обробник усередині сам робить один запит, а безумовний
+      // цикл нижче - ще один) - requestCmd() тепер сам ігнорує повторний
+      // виклик, поки попередній запит цієї ж панелі в польоті (див.
+      // коментар усередині requestCmd()), тож другий виклик тут - no-op,
+      // а не другий publish.
       applyPersistedToggles();
       for (const cmd of COMMANDS) requestCmd(cmd);
       requestCommandsList();
@@ -1751,11 +1813,17 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
           return;
         }
         const p = panels[cmd];
-        // Ехо id - ігноруємо застарілу відповідь (напр. після ручного
-        // Refresh поки чекали авто-тік), а не показуємо, що прийде першим.
-        if (p.pendingId !== null && msg.id !== p.pendingId) return;
+        // Ехо id - ігноруємо як застарілу відповідь (requestCmd() тепер не
+        // дублює запит на ту саму панель, тому це трапляється лише при
+        // повторній доставці того самого id брокером), так і будь-яку
+        // відповідь, коли слот уже звільнено таймаутом (p.pendingId===null) -
+        // в обох випадках releaseInFlightSlot() тут викликати не можна:
+        // слот або чужий, або вже звільнений раніше.
+        if (p.pendingId === null || msg.id !== p.pendingId) return;
+        clearTimeout(p.inFlightTimeoutTimer);
         p.pendingId = null;
         renderReply(cmd, msg);
+        releaseInFlightSlot();
         return;
       }
     });

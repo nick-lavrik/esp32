@@ -56,6 +56,16 @@
 #define JOURNAL_RING 32
 #define CORE_DEBUG_LEVEL 2
 
+// Черга команд (lib/CommandQueue) - спільний ліміт "скільки команд у
+// польоті" для serial/MQTT SAPI/порталу/cron разом. Фактичний троттлінг
+// SAPI - на боці браузера (sapi/index.html, SAPI_MAX_INFLIGHT=2), не тут;
+// це число тримають БІЛЬШИМ за нього там, де вистачає RAM (з запасом на
+// решту джерел - інакше SAPI сам вичерпував би всю чергу), а на
+// найтісніших платах - рівним йому, свідомо. Повне пояснення й таблиця
+// по всіх платах - docs/mqtt-web-handoff.md, "SAPI: обмеження одночасних
+// запитів".
+#define COMMAND_QUEUE_SLOTS 2
+
 #define ARDUINO_USB_MODE 1
 #define ARDUINO_USB_CDC_ON_BOOT 1
 

@@ -5685,7 +5685,7 @@ constexpr BlinkSegment kPatternApMode[] = {
 
 // Робочий стан: один короткий спалах щосекунди.
 constexpr BlinkSegment kPatternWorking[] = {
-    {80, true}, {920, false},
+    {20, true}, {980, false},
 };
 
 struct BlinkPatternDef {

@@ -60,6 +60,16 @@
 #define JOURNAL_RING 48
 #define CONFIG_HEAP_POISONING_COMPREHENSIVE 1
 
+// Черга команд (lib/CommandQueue) - спільний ліміт "скільки команд у
+// польоті" для serial/MQTT SAPI/порталу/cron разом. Фактичний троттлінг
+// SAPI - на боці браузера (sapi/index.html, SAPI_MAX_INFLIGHT=2), не тут;
+// це число тримають БІЛЬШИМ за нього там, де вистачає RAM (з запасом на
+// решту джерел - інакше SAPI сам вичерпував би всю чергу), а на
+// найтісніших платах - рівним йому, свідомо. Повне пояснення й таблиця
+// по всіх платах - docs/mqtt-web-handoff.md, "SAPI: обмеження одночасних
+// запитів".
+#define COMMAND_QUEUE_SLOTS 4
+
 // ARDUINO_USB_MODE=0 (OTG/TinyUSB, потрібен для USB MSC) задається в
 // platformio.ini через build_flags, не тут: цей заголовок підключається
 // через -include РАНІШЕ, ніж board-манфест esp32-s3-devkitc-1 підставляє
