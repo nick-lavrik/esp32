@@ -701,13 +701,20 @@ function ecoFinishText(startEpoch, ageSec) {
 // плюс текстова приписка - колір сам собою непомітний для дальтоніків.
 // Колір смуги йде за row.grid (ecoGridColorVar) - поточний стан на grid
 // зелений, поза grid жовтий; попередній - той самий колір приглушений.
-function ecoJournalRow(row) {
+//
+// selectedDevice - обраний кліком пристрій (index.html: scan #eco-journal-
+// -wrap ПЕРЕД перемальовкою, той самий патерн, що journalTarget/journalOpen
+// нижче) - на відміну від порталу (там клас .selected/.muted додає DOM-
+// -мутація після рендеру), тут увесь панель будується заново з data щоразу,
+// тому клас одразу в розмітці рядка, а не окремим проходом по DOM.
+function ecoJournalRow(row, selectedDevice) {
   const stripe = row.mark === '>' ? ecoGridColorVar(row.grid, false)
     : row.mark === '<' ? ecoGridColorVar(row.grid, true) : '';
   const hint = row.mark === '>' ? '<span class="muted"> (ongoing)</span>'
     : row.mark === '<' ? '<span class="muted"> (closed)</span>' : '';
   const style = stripe ? ` style="--eco-stripe:${stripe}"` : '';
-  return `<tr${style}>
+  const cls = !selectedDevice ? '' : row.device === selectedDevice ? ' class="selected"' : ' class="muted"';
+  return `<tr${style}${cls} data-eco-device="${esc(row.device)}">
     <td>${esc(fmtEpoch(row.atEpoch))}</td>
     <td>${esc(ecoFinishText(row.atEpoch, row.ageSec))}</td>
     <td>${esc(row.device)}</td>
@@ -726,7 +733,7 @@ function ecoJournalRow(row) {
 // EcoflowJournalView.cpp) - newest лише реверсить копію масиву перед map():
 // row.mark лишається властивістю самого рядка (не позиції), reverse() тут
 // нічого не ламає.
-function ecoJournalSection(devices, journalData, target, auto, open, newest) {
+function ecoJournalSection(devices, journalData, target, auto, open, newest, selectedDevice) {
   const options = `<option value="all"${!target || target === 'all' ? ' selected' : ''}>All devices</option>` +
     devices.map((d) => `<option value="${esc(d.serialNumber)}"${d.serialNumber === target ? ' selected' : ''}>`
       + `${esc(d.name || d.serialNumber)}</option>`).join('');
@@ -737,9 +744,15 @@ function ecoJournalSection(devices, journalData, target, auto, open, newest) {
     ? '<tr><td colspan="5" class="muted">Expand to load…</td></tr>'
     : rows.length === 0
       ? '<tr><td colspan="5" class="muted">No transitions recorded yet.</td></tr>'
-      : rows.map(ecoJournalRow).join('');
+      : rows.map((row) => ecoJournalRow(row, selectedDevice)).join('');
   const count = rows === null ? '' : rows.length + ' row(s)';
-  return `<details id="eco-journal-wrap"${open ? ' open' : ''}>`
+  // data-eco-selected - той самий атрибут, що читає index.html (renderEcoflowPanel():
+  // скан DOM ПЕРЕД innerHTML=) ПЕРЕД записом сюди: без цього рядка кожна
+  // перемальовка (ecoflow-status/ecoflow-journal тик, auto чи ручний) повертала
+  // б wrap БЕЗ атрибута, і наступний скан бачив би "нічого не обрано" -
+  // виділення губилось би вже на другому рендері після кліку.
+  const selectedAttr = selectedDevice ? ` data-eco-selected="${esc(selectedDevice)}"` : '';
+  return `<details id="eco-journal-wrap"${open ? ' open' : ''}${selectedAttr}>`
     + '<summary>Journal '
     + `<span class="muted" style="font-size:.75em; font-weight:400">${count}</span></summary>`
     + '<div id="eco-journal-block">'
@@ -770,6 +783,7 @@ function renderEcoflowStatus(data, extra) {
   // Дефолт - true (як і log-newest-first): щойно розгорнутий блок одразу
   // показує найновіший перехід зверху, без гортання вниз по історії.
   const journalNewest = !extra || extra.journalNewest !== false;
+  const journalSelectedDevice = (extra && extra.journalSelectedDevice) || null;
 
   let html = kv([
     ['Connected', data.connected ? 'yes' : 'no'],
@@ -815,7 +829,8 @@ function renderEcoflowStatus(data, extra) {
   // Окремий запит (НЕ розширення ecoflow-status) - той самий принцип, що на
   // порталі: журнал переходів рідше потрібен одразу, тому свій <details>,
   // згорнутий за замовчуванням.
-  html += ecoJournalSection(devices, journalData, journalTarget, journalAuto, journalOpen, journalNewest);
+  html += ecoJournalSection(devices, journalData, journalTarget, journalAuto, journalOpen, journalNewest,
+    journalSelectedDevice);
   return html;
 }
 

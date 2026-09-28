@@ -505,6 +505,15 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
    прозорим. Текстова приписка (JS) лишається обов'язковою поруч - колір
    сам собою для людей з дальтонізмом непомітний. */
 #ecoflow-journal-table tbody tr { box-shadow: inset 3px 0 0 0 var(--eco-stripe, transparent); }
+/* Клік по рядку журналу підсвічує один пристрій (click на tbody нижче) -
+   .muted через opacity, не .muted-клас сторінки (color: var(--muted)):
+   inset box-shadow смуги вище має лишитись видимим і приглушеним разом з
+   текстом, а не з'їхати в сірий на кольоровому тлі. .selected підкреслює
+   першу комірку тим самим прийомом, що tr.active у профілях WiFi (рядок
+   вище), лише кольором --accent, бо тут це не "поточний", а "обраний". */
+#ecoflow-journal-table tbody tr[data-eco-device] { cursor: pointer; }
+#ecoflow-journal-table tbody tr.muted { opacity: .35; }
+#ecoflow-journal-table tbody tr.selected > td:first-child { box-shadow: inset 2px 0 0 var(--accent); font-weight: 600; }
 /* Клікабельні рядки таблиці розділів (System - Flash): не всі рядки ведуть
    кудись, тому курсор - точковий сигнал поверх загального hover .zebra. */
 #sys-partitions tbody tr[data-sys-nav] { cursor: pointer; }
@@ -3247,7 +3256,7 @@ function ecoJournalRow(row) {
   const hint = row.mark === ">" ? '<span class="muted"> (ongoing)</span>'
     : row.mark === "<" ? '<span class="muted"> (closed)</span>' : "";
   const style = stripe ? ` style="--eco-stripe:${stripe}"` : "";
-  return `<tr${style}>
+  return `<tr${style} data-eco-device="${escapeHtml(row.device)}">
     <td>${ecoTimestamp(row.atEpoch)}</td>
     <td>${ecoFinishText(row.atEpoch, row.ageSec)}</td>
     <td>${escapeHtml(row.device)}</td>
@@ -3265,7 +3274,30 @@ function renderEcoflowJournal(data) {
   $("#ecoflow-journal-table tbody").innerHTML = rows.length === 0
     ? '<tr><td colspan="5" class="muted">No transitions recorded yet.</td></tr>'
     : rows.map(ecoJournalRow).join("");
+  applyEcoJournalSelection();
 }
+
+// Обраний пристрій переживає refresh (auto-poll кожні 5с перемальовує tbody
+// цілком) - без цього виділення злітало б саме тоді, коли за ним стежать.
+let ecoJournalSelectedDevice = null;
+
+function applyEcoJournalSelection() {
+  $("#ecoflow-journal-table tbody").querySelectorAll("tr[data-eco-device]").forEach((tr) => {
+    const selected = ecoJournalSelectedDevice !== null && tr.dataset.ecoDevice === ecoJournalSelectedDevice;
+    tr.classList.toggle("selected", selected);
+    tr.classList.toggle("muted", ecoJournalSelectedDevice !== null && !selected);
+  });
+}
+
+// Повторний клік по вже обраному пристрою знімає виділення - інакше єдиний
+// спосіб побачити всі пристрої знову - Refresh.
+$("#ecoflow-journal-table tbody").addEventListener("click", (ev) => {
+  const tr = ev.target.closest("tr[data-eco-device]");
+  if (!tr) return;
+  const device = tr.dataset.ecoDevice;
+  ecoJournalSelectedDevice = ecoJournalSelectedDevice === device ? null : device;
+  applyEcoJournalSelection();
+});
 
 // .busy як загальне правило для «оновлення при expand» (не лише мутації) -
 // запит швидкий (пряме читання NVS, без WebJobQueue), але користувач щойно
