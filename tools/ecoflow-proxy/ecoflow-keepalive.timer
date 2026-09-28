@@ -3,7 +3,7 @@ Description=Periodic EcoFlow keep-alive (get/latestQuotas) for quiet devices
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=3h
+OnUnitActiveSec=1h
 Unit=ecoflow-keepalive.service
 
 [Install]

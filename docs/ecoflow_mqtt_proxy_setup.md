@@ -241,7 +241,7 @@ curl -s http://<IP плати>/api/ecoflow/status | python3 -m json.tool
 рідко без активного запиту (у продакшні цього репозиторію - DELTA 2). Не
 обов'язковий крок для базового проксі - без нього все з кроків 1-9 працює
 як є. Навіщо взагалі потрібен цей keep-alive і як обрано поточний
-інтервал (`OnUnitActiveSec`, зараз 3 год) -
+інтервал (`OnUnitActiveSec`, зараз 1 год) -
 `docs/tech_debt.md`, "DELTA 2: план інтеграції keep-alive (`ecoflow-keepalive`)".
 
 ### Крок 10.1 — увімкнути health-notification бриджа
@@ -338,7 +338,7 @@ journalctl -u ecoflow-keepalive.service -n 20 --no-pager
   ```
   Перший прогін — за `OnBootSec`/`OnUnitActiveSec` з
   `/etc/systemd/system/ecoflow-keepalive.timer` (типово до 2 хв після
-  старту, далі за поточним `OnUnitActiveSec`, зараз 3 год). Точний час
+  старту, далі за поточним `OnUnitActiveSec`, зараз 1 год). Точний час
   наступного прогону:
   ```sh
   systemctl list-timers ecoflow-keepalive.timer
