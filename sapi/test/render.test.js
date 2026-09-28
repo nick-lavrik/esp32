@@ -232,23 +232,28 @@ test('ecoflow-status: params довантажені (drill-down) - таблиц�
 // --- ecoJournalSection/ecoJournalRow: журнал переходів grid, окремий запит
 // 'ecoflow-journal' (не ecoflow-status) - EcoflowJournalView.hpp на боці плати ---
 
-test('ecoJournalRow: mark ">" - смуга "current" + приписка "(ongoing)"', () => {
+test('ecoJournalRow: mark ">" + on-grid - смуга повного --ok + приписка "(ongoing)"', () => {
   const html = ecoJournalRow({ atEpoch: 1732900000, device: 'DELTA 2 (xama)', grid: 'on-grid', ageSec: 3661, mark: '>' });
-  assert.match(html, /<tr class="eco-journal-current">/);
+  assert.match(html, /<tr style="--eco-stripe:var\(--ok\)">/);
   assert.match(html, /\(ongoing\)/);
   assert.match(html, /DELTA 2 \(xama\)/);
   assert.match(html, /color:var\(--ok\)">on-grid/); // ecoGrid(grid, false) - без "(inferred)"
 });
 
-test('ecoJournalRow: mark "<" - смуга "previous" + приписка "(closed)"', () => {
+test('ecoJournalRow: mark ">" + off-grid - смуга повного --warn (не зелена)', () => {
+  const html = ecoJournalRow({ atEpoch: 1732900000, device: 'DELTA 2', grid: 'off-grid', ageSec: 60, mark: '>' });
+  assert.match(html, /<tr style="--eco-stripe:var\(--warn\)">/);
+});
+
+test('ecoJournalRow: mark "<" - той самий колір, що й grid, але приглушений (--*-dim)', () => {
   const html = ecoJournalRow({ atEpoch: 1732900000, device: 'DELTA 2', grid: 'off-grid', ageSec: 90, mark: '<' });
-  assert.match(html, /<tr class="eco-journal-previous">/);
+  assert.match(html, /<tr style="--eco-stripe:var\(--warn-dim\)">/);
   assert.match(html, /\(closed\)/);
 });
 
 test('ecoJournalRow: mark "" - звичайний рядок, без смуги й без приписки', () => {
   const html = ecoJournalRow({ atEpoch: 1732900000, device: 'DELTA 2', grid: 'on-grid', ageSec: 5, mark: '' });
-  assert.match(html, /<tr class="">/);
+  assert.match(html, /<tr>/);
   assert.doesNotMatch(html, /\(ongoing\)|\(closed\)/);
 });
 
@@ -298,8 +303,31 @@ test('ecoJournalSection: рядки журналу рендеряться чер
   const html = ecoJournalSection([ECO_DEVICE_FIXTURE], { rows }, 'all', false, true);
   assertNoLeakedPlaceholders(html);
   assert.match(html, /2 row\(s\)/);
-  assert.match(html, /<tr class="eco-journal-current">/);
-  assert.match(html, /<tr class="">/);
+  assert.match(html, /<tr style="--eco-stripe:var\(--ok\)">/);
+  assert.match(html, /<tr>/);
+});
+
+test('ecoJournalSection: newest=true - рядки в зворотному порядку (найновіший перший), чекбокс checked', () => {
+  const rows = [
+    { atEpoch: 1732800000, device: 'DELTA 2', serialNumber: 'R331ZEB4ZEBW0026', grid: 'off-grid', ageSec: 7200, mark: '<' },
+    { atEpoch: 1732900000, device: 'DELTA 2', serialNumber: 'R331ZEB4ZEBW0026', grid: 'on-grid', ageSec: 60, mark: '>' },
+  ];
+  const html = ecoJournalSection([ECO_DEVICE_FIXTURE], { rows }, 'all', false, true, true);
+  const tbody = html.match(/<tbody>(.*?)<\/tbody>/s)[1];
+  // Найновіший (mark '>', --ok) - перший рядок tbody, а не другий.
+  assert.match(tbody, /^<tr style="--eco-stripe:var\(--ok\)">/);
+  assert.match(html, /id="eco-journal-newest-first" checked/);
+});
+
+test('ecoJournalSection: newest не передано - хронологічний порядок (як прийшов з сервера), чекбокс без checked', () => {
+  const rows = [
+    { atEpoch: 1732800000, device: 'DELTA 2', serialNumber: 'R331ZEB4ZEBW0026', grid: 'off-grid', ageSec: 7200, mark: '<' },
+    { atEpoch: 1732900000, device: 'DELTA 2', serialNumber: 'R331ZEB4ZEBW0026', grid: 'on-grid', ageSec: 60, mark: '>' },
+  ];
+  const html = ecoJournalSection([ECO_DEVICE_FIXTURE], { rows }, 'all', false, true);
+  const tbody = html.match(/<tbody>(.*?)<\/tbody>/s)[1];
+  assert.match(tbody, /^<tr style="--eco-stripe:var\(--warn-dim\)">/);
+  assert.doesNotMatch(html, /id="eco-journal-newest-first" checked/);
 });
 
 test('ecoParamsTable: сортує ключі, escape на значеннях/ключах, порожній набір - "not captured yet"', () => {

@@ -145,9 +145,14 @@ function ecoPresence(presence) {
   const color = presence === 'online' ? 'var(--ok)' : presence === 'offline' ? 'var(--err)' : 'var(--muted)';
   return `<span style="color:${color}">${esc(dash(presence))}</span>`;
 }
+// Одна таблиця grid -> колір замість двох копій тернарника (текст ecoGrid()
+// + смуга journal-рядка, ecoJournalRow() нижче) - DRY (CLAUDE.md).
+function ecoGridColorVar(grid, dim) {
+  const key = grid === 'on-grid' ? 'ok' : grid === 'off-grid' ? 'warn' : 'muted';
+  return dim ? `var(--${key}-dim)` : `var(--${key})`;
+}
 function ecoGrid(grid, inferred) {
-  const color = grid === 'on-grid' ? 'var(--ok)' : grid === 'off-grid' ? 'var(--warn)' : 'var(--muted)';
-  return `<span style="color:${color}">${esc(dash(grid))}</span>` + (inferred ? '<span class="muted"> (inferred)</span>' : '');
+  return `<span style="color:${ecoGridColorVar(grid, false)}">${esc(dash(grid))}</span>` + (inferred ? '<span class="muted"> (inferred)</span>' : '');
 }
 function ecoWatts(inputWatts, outputWatts) {
   if (inputWatts == null && outputWatts == null) return '-';
@@ -694,11 +699,15 @@ function ecoFinishText(startEpoch, ageSec) {
 // row.mark - '>'/'<'/'' - той самий сенс, що в serial-команді
 // 'ecoflow-journal show': смуга зліва (CSS) замість односимвольної колонки,
 // плюс текстова приписка - колір сам собою непомітний для дальтоніків.
+// Колір смуги йде за row.grid (ecoGridColorVar) - поточний стан на grid
+// зелений, поза grid жовтий; попередній - той самий колір приглушений.
 function ecoJournalRow(row) {
-  const cls = row.mark === '>' ? 'eco-journal-current' : row.mark === '<' ? 'eco-journal-previous' : '';
+  const stripe = row.mark === '>' ? ecoGridColorVar(row.grid, false)
+    : row.mark === '<' ? ecoGridColorVar(row.grid, true) : '';
   const hint = row.mark === '>' ? '<span class="muted"> (ongoing)</span>'
     : row.mark === '<' ? '<span class="muted"> (closed)</span>' : '';
-  return `<tr class="${cls}">
+  const style = stripe ? ` style="--eco-stripe:${stripe}"` : '';
+  return `<tr${style}>
     <td>${esc(fmtEpoch(row.atEpoch))}</td>
     <td>${esc(ecoFinishText(row.atEpoch, row.ageSec))}</td>
     <td>${esc(row.device)}</td>
@@ -710,14 +719,20 @@ function ecoJournalRow(row) {
 // devices - для опцій "Device" (той самий знімок ecoflow-status, свого
 // запиту під список не заводимо, DRY). journalData - остання відповідь
 // 'ecoflow-journal' (index.html: lastEcoflowJournal, той самий принцип, що
-// lastEcoflowStatus) - null, поки жодної ще не приходило. target/auto/open -
-// зі сканування DOM ПЕРЕД перемальовкою (index.html: renderEcoflowPanel()),
-// той самий патерн, що openParamsSerials/devicesOpen вище.
-function ecoJournalSection(devices, journalData, target, auto, open) {
+// lastEcoflowStatus) - null, поки жодної ще не приходило. target/auto/open/
+// newest - зі сканування DOM ПЕРЕД перемальовкою (index.html:
+// renderEcoflowPanel()), той самий патерн, що openParamsSerials/devicesOpen
+// вище. Сервер віддає rows хронологічно (найстаріший спочатку,
+// EcoflowJournalView.cpp) - newest лише реверсить копію масиву перед map():
+// row.mark лишається властивістю самого рядка (не позиції), reverse() тут
+// нічого не ламає.
+function ecoJournalSection(devices, journalData, target, auto, open, newest) {
   const options = `<option value="all"${!target || target === 'all' ? ' selected' : ''}>All devices</option>` +
     devices.map((d) => `<option value="${esc(d.serialNumber)}"${d.serialNumber === target ? ' selected' : ''}>`
       + `${esc(d.name || d.serialNumber)}</option>`).join('');
-  const rows = journalData && Array.isArray(journalData.rows) ? journalData.rows : null;
+  const rows = journalData && Array.isArray(journalData.rows)
+    ? (newest ? [...journalData.rows].reverse() : journalData.rows)
+    : null;
   const tbody = rows === null
     ? '<tr><td colspan="5" class="muted">Expand to load…</td></tr>'
     : rows.length === 0
@@ -732,6 +747,7 @@ function ecoJournalSection(devices, journalData, target, auto, open) {
     + `<label class="row">Device: <select id="eco-journal-target">${options}</select></label>`
     + '<span class="row">'
     + `<label class="row"><input type="checkbox" id="eco-journal-auto"${auto ? ' checked' : ''}> auto</label>`
+    + `<label class="row"><input type="checkbox" id="eco-journal-newest-first"${newest ? ' checked' : ''}> newest first</label>`
     + '<button class="act ghost" id="eco-journal-refresh" type="button" title="Refresh journal">Refresh</button>'
     + '</span></div>'
     + '<table class="zebra" id="eco-journal-table"><thead><tr>'
@@ -751,6 +767,9 @@ function renderEcoflowStatus(data, extra) {
   const journalTarget = (extra && extra.journalTarget) || 'all';
   const journalAuto = !!(extra && extra.journalAuto);
   const journalOpen = !!(extra && extra.journalOpen);
+  // Дефолт - true (як і log-newest-first): щойно розгорнутий блок одразу
+  // показує найновіший перехід зверху, без гортання вниз по історії.
+  const journalNewest = !extra || extra.journalNewest !== false;
 
   let html = kv([
     ['Connected', data.connected ? 'yes' : 'no'],
@@ -796,7 +815,7 @@ function renderEcoflowStatus(data, extra) {
   // Окремий запит (НЕ розширення ecoflow-status) - той самий принцип, що на
   // порталі: журнал переходів рідше потрібен одразу, тому свій <details>,
   // згорнутий за замовчуванням.
-  html += ecoJournalSection(devices, journalData, journalTarget, journalAuto, journalOpen);
+  html += ecoJournalSection(devices, journalData, journalTarget, journalAuto, journalOpen, journalNewest);
   return html;
 }
 

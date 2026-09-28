@@ -42,6 +42,11 @@
 :root {
   --bg: #14171c; --panel: #1c2027; --line: #2b313b; --text: #e6e9ef;
   --muted: #8b94a3; --accent: #4da3ff; --ok: #4cc38a; --warn: #e0a33e; --err: #e5534b;
+  /* Приглушені двійники --ok/--warn/--muted (40% альфа) - той самий
+     механізм, що на порталі (assets/www/index.html), для journal-рядків
+     "попередній стан" (render.js: ecoJournalRow()). Міняти --ok - міняти
+     й цей рядок. */
+  --ok-dim: rgba(76,195,138,.4); --warn-dim: rgba(224,163,62,.4); --muted-dim: rgba(139,148,163,.4);
   --sig-bar: 8px; --sig-bar-gap: 3px;
   --font-size-base: 14px;
   --font-scale: 1.125;
@@ -303,9 +308,11 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
 /* Журнал переходів grid (#eco-journal-table) - буквальний порт порталу
    (assets/www/index.html, той самий CSS): смуга зліва замість односимвольної
    колонки '>'/'<' серійної команди, текстова приписка поруч лишається
-   обов'язковою (колір сам собою непомітний для дальтоніків). */
-#eco-journal-table tbody tr.eco-journal-current { box-shadow: inset 3px 0 0 0 var(--ok); }
-#eco-journal-table tbody tr.eco-journal-previous { box-shadow: inset 3px 0 0 0 var(--muted); }
+   обов'язковою (колір сам собою непомітний для дальтоніків). Колір - за
+   grid-статусом рядка (ecoGridColorVar(), render.js), не фіксований;
+   попередній стан - той самий колір приглушений (--*-dim). JS передає його
+   через --eco-stripe (custom property на tr) - без неї box-shadow прозорий. */
+#eco-journal-table tbody tr { box-shadow: inset 3px 0 0 0 var(--eco-stripe, transparent); }
 /* table.zebra td/th (вище) - той самий клас у селекторі, що й тут (0,1,2)
    проти (0,1,1) - без "table.zebra td.num" зліва table.zebra перебивав би
    text-align:right однаковою специфічністю+пізнішим порядком лише випадково;
@@ -1272,8 +1279,10 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     const journalTarget = journalTargetEl ? journalTargetEl.value : 'all';
     const journalAutoEl = panels['ecoflow-status'].out.querySelector('#eco-journal-auto');
     const journalAuto = journalAutoEl ? journalAutoEl.checked : false;
+    const journalNewestEl = panels['ecoflow-status'].out.querySelector('#eco-journal-newest-first');
+    const journalNewest = journalNewestEl ? journalNewestEl.checked : true;
     panels['ecoflow-status'].out.innerHTML = buildPanelHtml('ecoflow-status', lastEcoflowStatus,
-      { openParamsSerials, devicesOpen, journalData: lastEcoflowJournal, journalTarget, journalAuto, journalOpen });
+      { openParamsSerials, devicesOpen, journalData: lastEcoflowJournal, journalTarget, journalAuto, journalOpen, journalNewest });
   }
 
   // Делегування - картки пристроїв перемальовуються цілком на кожен reply
@@ -1305,6 +1314,10 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   });
   panels['ecoflow-status'].out.addEventListener('change', (ev) => {
     if (ev.target.id === 'eco-journal-target') requestEcoflowJournal(ev.target.value);
+    // Порядок рядків - лише як показати вже наявні дані (lastEcoflowJournal),
+    // не новий запит: renderEcoflowPanel() сама зчитує checked зі сканування
+    // DOM (вище, journalNewestEl) і перемальовує тим самим journalData.
+    if (ev.target.id === 'eco-journal-newest-first') renderEcoflowPanel();
   });
 
   // Рендер-функції (esc/kv/RENDERERS/...) підключені окремим <script

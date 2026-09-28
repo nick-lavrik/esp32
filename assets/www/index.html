@@ -8,6 +8,12 @@
 :root {
   --bg: #14171c; --panel: #1c2027; --line: #2b313b; --text: #e6e9ef;
   --muted: #8b94a3; --accent: #4da3ff; --ok: #4cc38a; --warn: #e0a33e; --err: #e5534b;
+  /* Приглушені двійники --ok/--warn/--muted (40% альфа) - для journal-рядків
+     "попередній стан" (ecoJournalRow() нижче): той самий колір, що й у
+     поточного стану, але напівпрозорий, щоб було видно "було ТАКЕ, вже
+     позаду", а не перефарбовувати в нейтральний сірий. Права колонка -
+     той самий hex, що зліва, просто rgba(); міняти --ok - міняти й цей. */
+  --ok-dim: rgba(76,195,138,.4); --warn-dim: rgba(224,163,62,.4); --muted-dim: rgba(139,148,163,.4);
   /* Розмір стовпчика шкали сигналу. Змінною - бо підбирається очима: 4px
      виглядали як пунктир, який на екрані телефона не читається взагалі. */
   --sig-bar: 8px; --sig-bar-gap: 3px;
@@ -489,12 +495,16 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
 /* Журнал переходів EcoFlow (#ecoflow-journal-table) - візуальний аналог
    міток '>'/'<' серійної команди 'ecoflow-journal show': найновіший перехід
    пристрою (стан ще триває) і останній повністю завершений інтервал
-   підсвічені смугою зліва, кожен своїм кольором. inset box-shadow, не
-   border-left - не зсуває вміст комірки на 3px. Текстова приписка (JS,
-   ecoJournalRow()) лишається обов'язковою поруч - колір сам собою для
-   людей з дальтонізмом непомітний. */
-#ecoflow-journal-table tbody tr.eco-journal-current { box-shadow: inset 3px 0 0 0 var(--ok); }
-#ecoflow-journal-table tbody tr.eco-journal-previous { box-shadow: inset 3px 0 0 0 var(--muted); }
+   підсвічені смугою зліва. inset box-shadow, не border-left - не зсуває
+   вміст комірки на 3px. Колір смуги - той самий, що в ecoGrid() (on-grid
+   --ok/off-grid --warn/невідомо --muted), не фіксований зелений: інакше
+   "поточний стан" виглядав би однаково зеленим і на grid, і поза ним.
+   Попередній стан - той самий колір, приглушений (--*-dim). JS передає
+   колір через --eco-stripe (custom property на tr, ecoJournalRow()) -
+   звичайний рядок історії (mark=='') його не задає, box-shadow лишається
+   прозорим. Текстова приписка (JS) лишається обов'язковою поруч - колір
+   сам собою для людей з дальтонізмом непомітний. */
+#ecoflow-journal-table tbody tr { box-shadow: inset 3px 0 0 0 var(--eco-stripe, transparent); }
 /* Клікабельні рядки таблиці розділів (System - Flash): не всі рядки ведуть
    кудись, тому курсор - точковий сигнал поверх загального hover .zebra. */
 #sys-partitions tbody tr[data-sys-nav] { cursor: pointer; }
@@ -1019,6 +1029,7 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
         </label>
         <span class="row">
           <label class="row"><input type="checkbox" id="ecoflow-journal-auto"> auto</label>
+          <label class="row"><input type="checkbox" id="ecoflow-journal-newest-first" checked> newest first</label>
           <button class="act ghost" id="ecoflow-journal-refresh" type="button"
               title="Refresh journal">Refresh</button>
         </span>
@@ -2942,9 +2953,18 @@ function ecoPresence(presence) {
   return `<span style="color:${color}">${presence}</span>`;
 }
 
+// Одна таблиця grid -> колір замість трьох копій тернарника (текст ecoGrid()
+// + смуга поточного/попереднього стану ecoJournalRow() нижче): розійдуться -
+// "поточний" і "текст статусу" знову покажуть різний колір для того самого
+// grid, як миналось із WiFi_getAuthTypeName()/encryptionName() (CLAUDE.md, DRY).
+function ecoGridColorVar(grid, dim) {
+  const key = grid === "on-grid" ? "ok" : grid === "off-grid" ? "warn" : "muted";
+  return dim ? `var(--${key}-dim)` : `var(--${key})`;
+}
+
 function ecoGrid(grid, inferred) {
-  const color = grid === "on-grid" ? "var(--ok)" : grid === "off-grid" ? "var(--warn)" : "var(--muted)";
-  return `<span style="color:${color}">${grid}</span>` + (inferred ? '<span class="muted"> (inferred)</span>' : "");
+  const hint = inferred ? '<span class="muted"> (inferred)</span>' : "";
+  return `<span style="color:${ecoGridColorVar(grid, false)}">${grid}</span>` + hint;
 }
 
 function ecoWatts(inputWatts, outputWatts) {
@@ -3218,12 +3238,16 @@ function ecoFinishText(startEpochSec, ageSec) {
 // самий сенс, що в serial-команді 'ecoflow-journal show', лише тут - смуга
 // зліва (CSS вище) ЗАМІСТЬ односимвольної колонки, плюс текстова приписка -
 // колір сам собою непомітний для дальтоніків (той самий принцип, що
-// hintIcon() нижче по файлу).
+// hintIcon() нижче по файлу). Колір смуги йде за row.grid (ecoGridColorVar) -
+// поточний стан на grid зелений, поза grid жовтий; попередній - той самий
+// колір приглушений, не завжди сірий.
 function ecoJournalRow(row) {
-  const cls = row.mark === ">" ? "eco-journal-current" : row.mark === "<" ? "eco-journal-previous" : "";
+  const stripe = row.mark === ">" ? ecoGridColorVar(row.grid, false)
+    : row.mark === "<" ? ecoGridColorVar(row.grid, true) : "";
   const hint = row.mark === ">" ? '<span class="muted"> (ongoing)</span>'
     : row.mark === "<" ? '<span class="muted"> (closed)</span>' : "";
-  return `<tr class="${cls}">
+  const style = stripe ? ` style="--eco-stripe:${stripe}"` : "";
+  return `<tr${style}>
     <td>${ecoTimestamp(row.atEpoch)}</td>
     <td>${ecoFinishText(row.atEpoch, row.ageSec)}</td>
     <td>${escapeHtml(row.device)}</td>
@@ -3232,11 +3256,15 @@ function ecoJournalRow(row) {
   </tr>`;
 }
 
+// Сервер віддає rows хронологічно (найстаріший спочатку, EcoflowJournalView.cpp) -
+// row.mark лишається властивістю самого рядка (не позиції в масиві), тому
+// .reverse() тут безпечний і нічого в mark/смузі не ламає.
 function renderEcoflowJournal(data) {
+  const rows = $("#ecoflow-journal-newest-first").checked ? [...data.rows].reverse() : data.rows;
   $("#ecoflow-journal-count").textContent = data.rows.length + " row(s)";
-  $("#ecoflow-journal-table tbody").innerHTML = data.rows.length === 0
+  $("#ecoflow-journal-table tbody").innerHTML = rows.length === 0
     ? '<tr><td colspan="5" class="muted">No transitions recorded yet.</td></tr>'
-    : data.rows.map(ecoJournalRow).join("");
+    : rows.map(ecoJournalRow).join("");
 }
 
 // .busy як загальне правило для «оновлення при expand» (не лише мутації) -
@@ -3260,6 +3288,7 @@ $("#ecoflow-journal-wrap").addEventListener("toggle", (ev) => {
 });
 $("#ecoflow-journal-refresh").onclick = refreshEcoflowJournal;
 $("#ecoflow-journal-target").onchange = refreshEcoflowJournal;
+$("#ecoflow-journal-newest-first").onchange = refreshEcoflowJournal;
 
 /* ---------------- mqtt ---------------- */
 
