@@ -56,6 +56,31 @@ Memory-картка має бар використання heap (Used/Largest fr
 якого немає на самому HTTP-порталі, з hover-tooltip на кожному сегменті
 окремо (не один загальний на весь бар).
 
+## Wi-Fi — Status + Saved profiles, 1:1 з порталом
+
+`renderWifiStatus()` (`render.js`) — двоколонковий каркас `.cols`/`.col`
+(той самий, що вкладка Commands — DRY, не другий CSS-словник під ту саму
+розкладку): Status зліва, Saved profiles справа. Таблиця Saved profiles —
+буквальний порт `renderProfiles()` з HTTP-порталу (SSID + бейджі
+open/static/connected, Priority, Signal, State), з останньою колонкою —
+кнопкою "Connect", але **заблокованою** (`disabled`, з `title`, чому): SAPI
+поки не має жодної команди, що міняє стан пристрою (розділ "Пре-альфа"
+нижче). Порожню колонку без цього якоря таблиця виглядала б "стисло" —
+Signal/State без фіксованої ширини (на відміну від Priority, `num`) вільно
+розповзаються по всій ширині `.col`, і саме кнопка праворуч дає рядку край,
+до якого є сенс тягнутись. Коли з'явиться мутуючий канал на MQTT — кнопка
+розблокується (не інша розмітка). Немає й "Networks in range"/Actions
+(Scan/Reconnect/Hotspot) — ці блоки порталу наповнює лише сама мутуюча дія,
+якої тут іще немає.
+
+Saved profiles — окрема команда `wifi-connections` (не поле `wifi-status`):
+список профілів у NVS міняється рідко (лише мутацією), тому не варто ганяти
+його в кожній відповіді `wifi-status`. Запит поза `COMMANDS`/`panels[cmd]`
+(той самий підхід, що `ecoflow-journal` нижче) — `requestWifiConnections()`
+викликається разом із кожним запитом `wifi-status` (Refresh, auto-тик,
+перший запит при конекті), а не власним контролом: портал теж підвантажує
+`/api/wifi/connections` разом зі статусом Wi-Fi-вкладки, не окремою кнопкою.
+
 ## EcoFlow — "Raw parameters" на вимогу (drill-down)
 
 Агрегат `ecoflow-status` свідомо не несе сирі `params` кожного пристрою
@@ -189,9 +214,18 @@ SAPI не має шляху писати у flash пристрою (лише MQT
 `COMMANDS` у `index.html` — той самий список, що в `src/main.cpp`
 (`kJsonApiSystemInfo`/`kJsonApiWifiStatus`/`kJsonApiEcoflowStatus`/
 `kJsonApiMqttStatus`) - керує лише auto-poll вкладками System/Wi-Fi/EcoFlow/
-MQTT, НЕ вкладкою Commands (та своя, поза цим списком - розділ вище). Коли
-з'явиться discovery-маніфест (фаза 2), він замінить цей список UI, що
-будується з даних брокера, а не з коду тут.
+MQTT, НЕ вкладкою Commands (та своя, поза цим списком - розділ вище).
+`kJsonApiWifiConnections`/`kJsonApiEcoflowJournal`/`kJsonApiCommandsList` теж
+поза `COMMANDS` — той самий принцип, що весь цей розділ: одноразові/рідкісні
+запити всередині вже наявної вкладки (Wi-Fi/EcoFlow/Commands), не власна
+панель. Коли з'явиться discovery-маніфест (фаза 2), він замінить цей список
+UI, що будується з даних брокера, а не з коду тут.
+
+**Read-only — жодна з команд не міняє стан пристрою.** Ні `COMMANDS`, ні
+одноразові запити вище не мутують NVS/WiFi/EcoFlow: SAPI показує Wi-Fi (разом
+зі Saved profiles) так само, як портал, але без Actions (Scan/Connect/
+Reconnect/Hotspot) і без форми профілю — рішення сесії, коли ставилась ця
+вкладка (додавання мутуючих JSON API команд — окремий крок, не цей).
 
 ## Рендер і тест
 

@@ -14,7 +14,7 @@
 const assert = require('node:assert/strict');
 const { renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus,
         ecoflowSystemDevicesHtml, ecoTableRow, mqttSystemRows, heapBarHtml, ecoParamsTable,
-        ecoJournalRow, ecoJournalSection, ecoFinishText } = require('../render.js');
+        ecoJournalRow, ecoJournalSection, ecoFinishText, ssidLabel, wifiProfilesTable } = require('../render.js');
 
 const CHIP_FIXTURE = {
   chip: { model: 'ESP32-C3', revision: 4, cores: 1, cpuFreqMHz: 160, psramFound: false, psramBytes: 0 },
@@ -145,40 +145,87 @@ test('ecoflowSystemDevicesHtml: openSerials позначає лише свій �
   assert.match(html, /class="sys-eco-device" open data-sn="SN2"/); // open
 });
 
-// --- wifi-status ---
+// --- wifi-status: повна вкладка (renderWifiStatus, "1:1 як на порталі" -
+// Status dl (wifiSystemRows(), той самий, що System > Network) + Saved
+// profiles table (wifiProfilesTable()), БЕЗ Actions/Networks in range/форми
+// профілю - ці мутують стан пристрою, а SAPI поки лише читає) ---
 
-test('wifi-status: підключено, AP вимкнений', () => {
-  const html = renderWifiStatus({
-    state: 'connected', connected: true, ssid: 'STARLINK', ip: '192.168.1.25', gateway: '192.168.1.1',
-    rssi: -68, quality: 64, phyMode: '802.11n (HT20)', mac: '9C:CC:01:7C:FD:90', autoReconnect: true,
-    ap: { active: false, ssid: 'ESP-esp32-c3', ip: '192.168.4.1', clients: 0, security: 'open' },
-  });
+const WIFI_STATUS_FIXTURE = {
+  state: 'connected', connected: true, ssid: 'STARLINK', ip: '192.168.1.25', gateway: '192.168.1.1',
+  rssi: -68, quality: 64, phyMode: '802.11n (HT20)', mac: '9C:CC:01:7C:FD:90', autoReconnect: true,
+  ap: { active: false, ssid: 'ESP-esp32-c3', ip: '192.168.4.1', clients: 0, security: 'open' },
+};
+
+test('wifi-status: підключено, extra.connections ще не приходили - "Not loaded yet."', () => {
+  const html = renderWifiStatus(WIFI_STATUS_FIXTURE);
   assertNoLeakedPlaceholders(html);
   assert.match(html, /STARLINK/);
-  assert.match(html, /badge ok">connected/);
   assert.match(html, /class="sig">/); // Signal - смужки (signal()), connected=true
-  assert.match(html, /Access point/);
+  assert.match(html, /Saved profiles/);
+  assert.match(html, /Not loaded yet\./);
+  // Двоколонковий каркас (.cols/.col) - Status зліва, Saved profiles справа
+  // (буквальний порт .cols/.col порталу, CSS sapi/index.html) - без нього
+  // таблиця профілів лягає на всю ширину .out і виглядає "розтягнутою".
+  assert.match(html, /^<div class="cols"><div class="col"><h2>Status<\/h2>/);
+  assert.match(html, /<div class="col"><h2>Saved profiles<\/h2>/);
 });
 
-test('wifi-status: не підключено, без блоку AP взагалі', () => {
+test('wifi-status: extra.connections=[] - "No saved profiles." (не "Not loaded yet.")', () => {
+  const html = renderWifiStatus(WIFI_STATUS_FIXTURE, { connections: [] });
+  assertNoLeakedPlaceholders(html);
+  assert.match(html, /No saved profiles\./);
+  assert.doesNotMatch(html, /Not loaded yet\./);
+});
+
+test('wifi-status: не підключено, ap відсутній - Hotspot "off", без смужок сигналу', () => {
   const html = renderWifiStatus({
     state: 'idle', connected: false, ssid: '', ip: '', gateway: '',
     rssi: null, quality: null, phyMode: '', mac: '9C:CC:01:7C:FD:90', autoReconnect: false,
     ap: null,
   });
   assertNoLeakedPlaceholders(html);
-  assert.match(html, /badge err">idle/);
+  assert.match(html, /Hotspot<\/dt><dd>off/);
   assert.doesNotMatch(html, /class="sig">/); // connected=false - прочерк, не смужки
-  assert.doesNotMatch(html, /Access point/);
 });
 
-test('wifi-status: XSS у ssid - HTML екрановано, тег не пролазить', () => {
-  const html = renderWifiStatus({
-    state: 'connected', connected: true, ssid: '<img src=x onerror=alert(1)>', ip: '1.2.3.4',
-    gateway: '', rssi: -50, quality: 80, phyMode: '', mac: '', autoReconnect: true, ap: null,
+test('wifi-status: extra.connections - профіль active/open/static у таблиці, буквальний рядок порталу', () => {
+  const html = renderWifiStatus(WIFI_STATUS_FIXTURE, {
+    connections: [
+      { id: 1, ssid: 'STARLINK', hasPassword: true, priority: 10, enabled: true, maxRetries: -1,
+        rssi: -74, quality: 52, active: true, staticIp: false },
+      { id: 2, ssid: 'Guest', hasPassword: false, priority: 0, enabled: false, maxRetries: 3,
+        rssi: 0, quality: 0, active: false, staticIp: true },
+    ],
+  });
+  assertNoLeakedPlaceholders(html);
+  assert.match(html, /class="active"/); // рядок підключеного профілю
+  assert.match(html, /color:var\(--ok\)">connected/);
+  assert.match(html, /muted">\(open\)/); // Guest - без пароля
+  assert.match(html, /muted">static/); // Guest - staticIp=true
+  assert.match(html, /muted">disabled/); // Guest - enabled=false
+  assert.match(html, /muted">not in range/); // Guest - rssi=0
+  // Заблокована кнопка "Connect" - не порожня остання колонка (розділ
+  // "Пре-альфа": SAPI поки не мутує стан пристрою) і не активна кнопка.
+  assert.match(html, /<button class="act ghost" disabled title="[^"]+">Connect<\/button>/);
+});
+
+test('wifi-status: XSS у ssid профілю - HTML екрановано, тег не пролазить', () => {
+  const html = renderWifiStatus(WIFI_STATUS_FIXTURE, {
+    connections: [{ id: 1, ssid: '<img src=x onerror=alert(1)>', hasPassword: true, priority: 0,
+      enabled: true, maxRetries: -1, rssi: -60, quality: 70, active: false, staticIp: false }],
   });
   assert.doesNotMatch(html, /<img/);
   assert.match(html, /&lt;img/);
+});
+
+test('ssidLabel: пробіли на краю - позначка .ws на кожен, не trim', () => {
+  assert.equal(ssidLabel(' Asus '), '<span class="ws" title="space"></span>Asus<span class="ws" title="space"></span>');
+  assert.equal(ssidLabel('Asus'), 'Asus');
+});
+
+test('wifiProfilesTable: null/undefined -> "Not loaded yet.", не порожня таблиця', () => {
+  assert.match(wifiProfilesTable(null), /Not loaded yet\./);
+  assert.match(wifiProfilesTable(undefined), /Not loaded yet\./);
 });
 
 // --- ecoflow-status: повна вкладка (renderEcoflowStatus, "1:1 як на

@@ -697,10 +697,10 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 // компілюється, тож ні писати, ні читати цей масив нема кому - без цього
 // гейта registerJsonApiCommandName() лишався б "defined but not used" саме на
 // esp8266 (перевірено збіркою).
-static constexpr size_t kMaxJsonApiCommands = 8;  // 6 наявних (system-info/
-                                                   // wifi-status/ecoflow-status/
-                                                   // ecoflow-journal/mqtt-status/
-                                                   // commands-list) + запас
+static constexpr size_t kMaxJsonApiCommands = 8;  // 7 наявних (system-info/
+                                                   // wifi-status/wifi-connections/
+                                                   // ecoflow-status/ecoflow-journal/
+                                                   // mqtt-status/commands-list) + запас
 static const char* kJsonApiCommandNames[kMaxJsonApiCommands] = {};
 static size_t kJsonApiCommandCount = 0;
 
@@ -832,6 +832,19 @@ static String jsonApiWifiStatusExecute(const uint8_t* /*raw*/) {
 }
 
 static const JsonApiEntry kJsonApiWifiStatus = {"wifi-status", jsonApiNoArgs, jsonApiWifiStatusExecute};
+
+// Дзеркало /api/wifi/connections - збережені профілі (SAPI Wi-Fi, "Saved
+// profiles", запит користувача цієї сесії: сторінка 1:1 з порталом). Той
+// самий форматер, той самий знімок статусу (для поля "active" - до якого
+// профілю підключені ЗАРАЗ), окрема команда, а не поле в wifi-status: список
+// профілів міняється рідко (лише мутацією, якої SAPI поки не робить), тому
+// не має сенсу ганяти його в кожній відповіді wifi-status.
+static String jsonApiWifiConnectionsExecute(const uint8_t* /*raw*/) {
+  return WebWifiModule::portalConnectionsJson(webWifiModule.connectionsSnapshot(), webWifiModule.statusSnapshot());
+}
+
+static const JsonApiEntry kJsonApiWifiConnections = {
+    "wifi-connections", jsonApiNoArgs, jsonApiWifiConnectionsExecute};
 
 #if HAS_ECOFLOW_CLIENT
 // Дзеркало /api/ecoflow/status - тут форматер уже інший
@@ -2240,6 +2253,7 @@ void setupMqttClient() {
   // webEcoflowModule/webMqttModule), тому лишаються під цим гейтом.
   registerJsonApiEntry(kJsonApiSystemInfo);
   registerJsonApiEntry(kJsonApiWifiStatus);
+  registerJsonApiEntry(kJsonApiWifiConnections);
 #if HAS_ECOFLOW_CLIENT
   registerJsonApiEntry(kJsonApiEcoflowStatus);
   registerJsonApiEntry(kJsonApiEcoflowJournal);

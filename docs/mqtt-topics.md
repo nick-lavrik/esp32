@@ -51,28 +51,29 @@ Allowlist, не дзеркало всіх serial-команд:
 |---|---|---|
 | `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebPortal::statusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `wifi-status` | `WebWifiModule::portalStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `wifi-connections` | `WebWifiModule::portalConnectionsJson()` (той самий, що `/api/wifi/connections` порталу) — збережені профілі, окремо від `wifi-status` (список міняється рідко, не на кожен статус-тик) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `ecoflow-journal` | `WebEcoflowModule::journalJson()` (той самий провайдер, що `/api/ecoflow/journal` порталу, `EcoflowJournalView.hpp`) — окремий запит, не розширення `ecoflow-status` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `commands-list` | перелік зареєстрованих serial-команд (`commandHandler.commandName()`/`commandDescription()`), те саме, що й `/api/commands/list` порталу | `HAS_MQTT_CLIENT && !ESP8266` |
 
 **`commands-list` — статичний перелік, не статус.** На відміну від решти
-п'яти (`system-info`/`wifi-status`/`ecoflow-status`/`ecoflow-journal`/
-`mqtt-status`), відповідь — `[{"name","description"}, ...]`, не об'єкт
+шести (`system-info`/`wifi-status`/`wifi-connections`/`ecoflow-status`/
+`ecoflow-journal`/`mqtt-status`), відповідь — `[{"name","description"}, ...]`, не об'єкт
 стану; дані не змінюються між перезавантаженнями плати, тому SAPI запитує
 їх один раз на конект, а не auto-poll. Джерело для сторінки Commands SAPI
 (список команд ліворуч) — див. розділ 5 нижче, де ACL дозволяє SAPI ще й
 `command/<id>` (запуск довільної команди).
 
-**`commands-list` — єдина з шести, що не потребує `HAS_WEB_PORTAL`**
+**`commands-list` — єдина з семи, що не потребує `HAS_WEB_PORTAL`**
 (виправлено 2026-09-27, `src/main.cpp`, розділ «MQTT SAPI-канал ... спільна
 інфраструктура»): `commandHandler` — глобал файлу, завжди визначений,
-незалежно від порталу. Решта п'ять читають `webPortal`/`webWifiModule`/
+незалежно від порталу. Решта шість читають `webPortal`/`webWifiModule`/
 `webEcoflowModule`/`webMqttModule` — ці provider-об'єкти самі оголошені
 лише під `HAS_WEB_PORTAL` (`src/main.cpp:488-539`), тож на платі без
 порталу (напр. `esp32-c3` з `HAS_WEB_PORTAL=0`) discovery публікує
 `"commands":["commands-list"]`, а не порожній масив. Повне усунення
-залежності решти п'яти — відкритий борг, `docs/tech_debt.md`, розділ
+залежності решти шести — відкритий борг, `docs/tech_debt.md`, розділ
 «Веб-портал через MQTT».
 
 **`ecoflow-params/<sn>` — окремий drill-down, не запис цієї таблиці.**
@@ -126,8 +127,8 @@ topic-per-device (як `ecoflow-params/<sn>` вище): запит рідкіс�
   рядок — буквальне ім'я макроса (`"BOARD_HAS_DISPLAY"`, не перейменований
   варіант).
 - `commands` — масив імен зареєстрованих JSON API команд (`"system-info"`,
-  `"wifi-status"`, `"ecoflow-status"`, `"ecoflow-journal"`, `"mqtt-status"`,
-  `"commands-list"` — залежно від env), джерело —
+  `"wifi-status"`, `"wifi-connections"`, `"ecoflow-status"`, `"ecoflow-journal"`,
+  `"mqtt-status"`, `"commands-list"` — залежно від env), джерело —
   `registerJsonApiEntry()` (`src/main.cpp`): той самий виклик, що підписує
   `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий fixed-size
   масив (`kJsonApiCommandNames`, без heap). На платі без порталу — `[]`

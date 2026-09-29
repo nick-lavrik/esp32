@@ -47,6 +47,14 @@ function dlRows(pairs) {
 function mockDl(labels) {
   return labels.map((k) => `<dt>${esc(k)}</dt><dd class="muted">***</dd>`).join('');
 }
+// Пробіли на краю SSID - видимою міткою (буквальний порт ssidLabel() з
+// порталу, assets/www/index.html): без неї "Asus " і "Asus" у таблиці
+// збережених профілів виглядають однаково, і другий рядок здається дублем
+// першого. CSS .ws/.ws::before - sapi/index.html, той самий словник, що в
+// порталі. Повертає розмітку: екранування вже всередині (esc()).
+function ssidLabel(ssid) {
+  return esc(ssid).replace(/^\s+|\s+$/g, (run) => '<span class="ws" title="space"></span>'.repeat(run.length));
+}
 function dash(v) { return v === null || v === undefined ? '-' : v; }
 function fmtBytes(n) {
   if (n === null || n === undefined) return '-';
@@ -651,29 +659,74 @@ function renderSystemInfo(data, extra) {
   return html;
 }
 
-function renderWifiStatus(data) {
-  const stateCls = data.connected ? 'ok'
-    : ['connecting', 'reconnecting', 'scanning', 'wps'].includes(data.state) ? 'warn' : 'err';
-  let html = kv([
-    ['state', badge(dash(data.state), stateCls)],
-    ['ssid', esc(dash(data.ssid))],
-    ['ip', esc(dash(data.ip))],
-    ['gateway', esc(dash(data.gateway))],
-    ['signal', data.connected ? signal(data.rssi, data.quality) : '<span class="muted">-</span>'],
-    ['phy mode', esc(dash(data.phyMode))],
-    ['mac', esc(dash(data.mac))],
-    ['auto-reconnect', boolBadge(data.autoReconnect)],
-  ]);
-  if (data.ap) {
-    html += '<div class="section-group"><h3>Access point</h3>' + kv([
-      ['active', boolBadge(data.ap.active)],
-      ['ssid', esc(dash(data.ap.ssid))],
-      ['ip', esc(dash(data.ap.ip))],
-      ['clients', dash(data.ap.clients)],
-      ['security', esc(dash(data.ap.security))],
-    ]) + '</div>';
+// Рядок таблиці "Saved profiles" - буквальний порт renderProfiles() з
+// порталу (assets/www/index.html): та сама таблиця, ті самі
+// badge/бейджі-текст (open/static/connected), лише БЕЗ останньої колонки
+// (Connect + ▾-меню Edit/Forget), лише сама кнопка "Connect" - і та
+// заблокована (disabled): SAPI поки не має жодної команди, що міняє стан
+// пристрою (докладніше - sapi/README.md, розділ "Пре-альфа"). Без хоч якоїсь
+// кнопки остання колонка лишалась би геть порожньою, і без цього "якоря"
+// праворуч таблиця (без .num на Signal/State) розповзається на всю ширину
+// .col порожніми проміжками - саме те, що user описав як "стисла" таблиця.
+// title - та сама причина, що показана в тексті: коли з'явиться мутуючий
+// канал на MQTT, кнопка й розблокується (не інша розмітка).
+const kWifiConnectDisabledHint = 'Not implemented yet - SAPI is read-only (mutations over MQTT are planned)';
+function wifiProfileRow(c) {
+  return `<tr class="${c.active ? 'active' : ''}">
+    <td>${ssidLabel(c.ssid)}${c.hasPassword ? '' : ' <span class="muted">(open)</span>'}
+        ${c.staticIp ? ' <span class="muted">static</span>' : ''}
+        ${c.active ? ' <span style="color:var(--ok)">connected</span>' : ''}</td>
+    <td class="num opt">${dash(c.priority)}</td>
+    <td class="opt">${c.rssi ? signal(c.rssi, c.quality) : '<span class="muted">not in range</span>'}</td>
+    <td>${c.enabled ? 'enabled' : '<span class="muted">disabled</span>'}</td>
+    <td class="num"><button class="act ghost" disabled title="${esc(kWifiConnectDisabledHint)}">Connect</button></td>
+  </tr>`;
+}
+
+// connections === null/undefined - відповідь 'wifi-connections' ще не
+// приходила цієї сесії (той самий "форма готова, дані ще не приїхали", що
+// mockDl() в renderSystemInfo), а не порожній масив (= пристрій справді без
+// збережених профілів, "No saved profiles." порталу).
+function wifiProfilesTable(connections) {
+  const header = '<thead><tr><th>SSID</th><th class="opt">Priority</th>'
+    + '<th class="opt">Signal</th><th>State</th><th></th></tr></thead>';
+  if (!Array.isArray(connections)) {
+    return `<table>${header}<tbody><tr><td colspan="5" class="muted">Not loaded yet.</td></tr></tbody></table>`;
   }
-  return html;
+  if (connections.length === 0) {
+    return `<table>${header}<tbody><tr><td colspan="5" class="muted">No saved profiles.</td></tr></tbody></table>`;
+  }
+  return `<table>${header}<tbody>${connections.map(wifiProfileRow).join('')}</tbody></table>`;
+}
+
+// Повна вкладка Wi-Fi (renderStatus()+renderProfiles() у порталі) - "1:1 як
+// на порталі" (запит користувача цієї сесії), лише контент-частина: без
+// Actions (Scan/Reconnect/Hotspot) і без форми нового профілю - усе це
+// мутації, яких SAPI поки не робить (sapi/README.md, "Пре-альфа"), тому й
+// "Networks in range" тут немає - той список наповнює лише сама дія Scan.
+// STATUS - той самий wifiSystemRows(), що вже малює System-картку Network
+// (DRY, CLAUDE.md): портал теж малює обидва місця з ОДНОГО /api/wifi/status
+// (коментар statusRows() у порталі), тому другий словник рядків тут не
+// заводимо.
+//
+// extra.connections - остання відома відповідь 'wifi-connections' (окремий
+// запит, той самий принцип, що extra.journalData в renderEcoflowStatus) -
+// index.html передає її сюди після кожної відповіді wifi-connections;
+// undefined, поки жодної ще не було в цій сесії.
+//
+// .cols/.col - буквальний порт двоколонкового каркасу вкладки Wi-Fi з
+// порталу (assets/www/index.html: Status зліва, Saved profiles справа, CSS -
+// sapi/index.html): без цього таблиця профілів розтягувалась на всю ширину
+// .out (портал показує її лише в правій половині) - звідси й "стисла" на
+// вигляд таблиця з величезними проміжками між Priority/Signal/State
+// (жодна з колонок, крім Priority, не має width:1%, і порожньому місцю
+// нема на чому зупинитись).
+function renderWifiStatus(data, extra) {
+  extra = extra || {};
+  const statusHtml = '<h2>Status</h2><dl>' + dlRows(wifiSystemRows(data)) + '</dl>';
+  const profilesHtml = '<h2>Saved profiles</h2>' + wifiProfilesTable(extra.connections);
+  return '<div class="cols"><div class="col">' + statusHtml + '</div>'
+    + '<div class="col">' + profilesHtml + '</div></div>';
 }
 
 // Рядок таблиці Journal (окремий запит 'ecoflow-journal', НЕ розширення
@@ -848,7 +901,8 @@ const RENDERERS = {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     esc, badge, boolBadge, signal, kv, dlRows, mockDl, dash, fmtBytes, fmtUptime, fmtEpoch, fsUnit, fsSizeIn,
-    wifiSystemRows, ecoflowSystemRows, ecoflowSystemDevicesHtml, ecoSysDeviceRow, ecoDeviceDetailRows,
+    ssidLabel, wifiSystemRows, wifiProfileRow, wifiProfilesTable,
+    ecoflowSystemRows, ecoflowSystemDevicesHtml, ecoSysDeviceRow, ecoDeviceDetailRows,
     ecoBrokerText, ecoTransportText, ecoTableRow, ecoDeviceCard, ecoParamsTable,
     ecoJournalRow, ecoJournalSection, ecoFinishText,
     mqttSystemRows, mqttConnectionRows, mqttLwtRows, mqttConsoleMirrorRows, heapBarHtml,

@@ -130,7 +130,7 @@ section.active { display: block; }
    лишаються звичайним display:block (їхня верстка карток/kv не потребує
    full-height розтягування, займають рівно стільки, скільки треба). */
 section[data-tab="log"].active { display: flex; flex-direction: column; flex: 1 0 auto; }
-section > h2:first-child, .card > h2:first-child { margin-top: 0; }
+section > h2:first-child, .card > h2:first-child, .out > h2:first-child, .col > h2:first-child { margin-top: 0; }
 h2 { font-size: var(--font-size-large); text-transform: uppercase; letter-spacing: .05em;
   color: var(--text); margin: 24px 0 10px; font-weight: 600; }
 h2 span { text-transform: none; letter-spacing: 0; }
@@ -210,17 +210,19 @@ button.act.ghost.paused { border-color: var(--warn); color: var(--warn); }
    й відрізняла SAPI від порталу найбільше. :has() ловить БУДЬ-ЯКОГО нащадка
    з .cards (не лише прямий), тому й ecoflow-status (.cards лежить у
    вкладеному .section-group, не прямим дитям .out) підпадає під те саме
-   правило автоматично. wifi-status - єдина команда, що поки лишається
-   звичайним kv/badge-виводом у консольній рамці (наступний крок, не цей). */
-.out:has(.cards) { background: none; border: none; padding: 0; max-height: none; overflow: visible; }
+   правило автоматично. wifi-status - той самий "без коробки" вигляд, але за
+   ОКРЕМИМ селектором (не .cards): вкладка Wi-Fi 1:1 з порталом - голий
+   dl+table, портал теж не кладе жоден зі своїх блоків Wi-Fi у власну рамку. */
+.out:has(.cards), .cmd-section[data-cmd="wifi-status"] .out {
+  background: none; border: none; padding: 0; max-height: none; overflow: visible;
+}
 /* dl/dt/dd - той самий глобальний вигляд, що в assets/www/index.html
-   (портал), не власний клас .kv: System-вкладка (render.js,
-   renderSystemInfo) тепер емітить голий <dl>, як і портал. wifi-status
-   поки лишається на .kv/badge - наступний крок, не цей. ecoflow-status/
-   mqtt-status використовують .kv для верхнього блоку (Connection) свідомо
-   (не голий dl) - та сама візуальна форма, простіше перевикористання
-   наявного класу, не нова стилізація під голий dl заради буквальної
-   відповідності розмітці порталу. */
+   (портал), не власний клас .kv: System/Wi-Fi-вкладки (render.js,
+   renderSystemInfo/renderWifiStatus) емітять голий <dl>, як і портал.
+   ecoflow-status/mqtt-status використовують .kv для верхнього блоку
+   (Connection) свідомо (не голий dl) - та сама візуальна форма, простіше
+   перевикористання наявного класу, не нова стилізація під голий dl заради
+   буквальної відповідності розмітці порталу. */
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
 dt { color: var(--muted); }
 dd { margin: 0; }
@@ -270,12 +272,26 @@ dd { margin: 0; }
 }
 .sys-eco-device dl { margin-top: 8px; }
 /* Базовий вигляд БУДЬ-якого <table> без .zebra - той самий портал
-   (assets/www/index.html: `table { width:100%; border-collapse:collapse; }`).
+   (assets/www/index.html: `table { width:100%; border-collapse:collapse; }`
+   + невідокремлюваний від нього `th, td { padding:6px 8px; ... }` рядком
+   нижче, обидва - без прив'язки до .zebra взагалі). Раніше padding/
+   border-bottom тут стояв лише під `table.zebra th, table.zebra td` - будь-
+   який плоский <table> (ecoParamsTable() - "Raw parameters" EcoFlow, тепер
+   і wifiProfilesTable() - Saved profiles Wi-Fi) лишався БЕЗ жодного відступу
+   між комірками, і сусідні колонки (Priority/Signal) візуально зліплювались.
    Потрібен ecoParamsTable() (render.js) - "Raw parameters" картки EcoFlow
    лишається буквальним, неприкрашеним <table>, як на порталі, а не .zebra
    (той стиль тут навмисно НЕ застосовано - "1:1 як на порталі", не "як решта
    SAPI"). */
 table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+/* th БІЛЬШОГО кегля за td, не меншого - той самий портал (assets/www/
+   index.html): "заголовок стовпчика дрібнішим за власний вміст" - це саме
+   те, що там свідомо виправили (CLAUDE.md-стиль коментаря на місці). Портал
+   лишає це БЕЗ прив'язки до .zebra - той самий вигляд заголовка й у плоских
+   таблиць (ecoParamsTable/wifiProfilesTable вище). */
+th { color: var(--muted); font-weight: 600; font-size: var(--font-size-medium);
+  text-transform: uppercase; letter-spacing: .04em; }
 /* Розділ "Raw parameters" картки пристрою - той самий портал
    (.ecoflow-device summary/table, assets/www/index.html): приглушений
    клікабельний summary, невеликий відступ над таблицею/кнопкою. */
@@ -295,13 +311,10 @@ table { width: 100%; border-collapse: collapse; }
 .ecoflow-device[data-model="delta2"]::before { background-image: url("img/delta2.webp"); }
 .ecoflow-device[data-model="delta-mini"]::before { background-image: url("img/delta-mini.webp"); }
 .ecoflow-device[data-model="delta-pro"]::before { background-image: url("img/delta-pro.webp"); }
+/* padding/border-bottom (td/th) і приглушений uppercase-заголовок (th) -
+   тепер глобальні (вище, поруч із `table {}`) - .zebra додає лише смугастість
+   (thead-фон/парні рядки/hover), не базовий вигляд комірки. */
 table.zebra { width: 100%; border-collapse: collapse; margin-top: 6px; }
-table.zebra th, table.zebra td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-/* th БІЛЬШОГО кегля за td, не меншого - той самий портал (assets/www/
-   index.html): "заголовок стовпчика дрібнішим за власний вміст" - це саме
-   те, що там свідомо виправили (CLAUDE.md-стиль коментаря на місці). */
-table.zebra th { color: var(--muted); font-weight: 600; font-size: var(--font-size-medium);
-  text-transform: uppercase; letter-spacing: .04em; }
 table.zebra thead th { background: #ffffff05; }
 table.zebra tbody tr:nth-child(even) { background: #ffffff05; }
 table.zebra tbody tr:hover { background: #ffffff0f; }
@@ -343,6 +356,16 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 .badge.err { background: rgba(229,83,75,.18); color: var(--err); }
 .badge.warn { background: rgba(224,163,62,.18); color: var(--warn); }
 .badge.muted { background: rgba(139,148,163,.18); color: var(--muted); }
+/* Пробіл на краю SSID (Wi-Fi - Saved profiles, render.js: ssidLabel()) -
+   буквальний порт .ws/.ws::before з порталу (assets/www/index.html): без
+   цього "Asus " і "Asus" у таблиці профілів виглядають однаково. */
+.ws { display: inline-block; width: 1ch; height: 1em; position: relative; vertical-align: baseline; }
+.ws::before { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px;
+  margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--muted); }
+/* Профіль, до якого підключені зараз (Wi-Fi - Saved profiles) - буквальний
+   порт tr.active з порталу: підсвічуємо рядок цілком, а не одну комірку. */
+tr.active > td { background: #4cc38a14; }
+tr.active > td:first-child { box-shadow: inset 2px 0 0 var(--ok); font-weight: 600; }
 /* Позначка "це значення несе title-хінт" - той самий портал (CLAUDE.md,
    "Видимість..."): курсор "help" непомітний сам по собі, тому кожен такий
    рядок (mqttDroppedText/mqttHeartbeatText, render.js) супроводжує hintIcon(). */
@@ -463,9 +486,14 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-small); color: var(--muted); }
 .checkbox-row input { width: auto; }
 
-/* Вкладка Commands - той самий словник, що на порталі (assets/www/
-   index.html: .cols/.col/.fill/.chip/#cmd-table), тут раніше не потрібний -
-   перша вкладка SAPI з двоколонковою розкладкою. */
+/* .cols/.col - той самий словник, що на порталі (assets/www/index.html):
+   двоколонкова розкладка, спільна для вкладки Commands (.fill/.chip/
+   #cmd-table нижче - лише її власні деталі) і вкладки Wi-Fi (render.js:
+   renderWifiStatus() - Status зліва, Saved profiles справа, DRY - не другий
+   .cols/.col під ту саму розкладку). Без цього таблиця профілів лягала б на
+   всю ширину .out (де вона на порталі - лише в правій половині), і колонки,
+   крім Priority (num, width:1%), розтягувались би на всю зайву ширину
+   порожнім проміжком. */
 .fill { flex: 1; min-width: 0; }
 .cols { display: flex; gap: 20px; align-items: flex-start; }
 .cols > .col { flex: 1; min-width: 0; }
@@ -1238,6 +1266,31 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     logEvent('out', topic, payload);
   }
 
+  // Saved Wi-Fi profiles ('wifi-connections') - той самий "одноразовий запит
+  // поза panels[cmd]" підхід, що ecoflow-journal вище: показується всередині
+  // вкладки Wi-Fi разом з wifi-status (renderWifiPanel()), а не власною
+  // вкладкою COMMANDS - список профілів рідко міняється (NVS міняє лише
+  // мутація, якої SAPI поки не робить), тому й без "auto"-чекбокса чи
+  // busy-спінера (renderWifiPanel() просто перемальовує таблицю, коли
+  // відповідь приходить - непомітно на відміну від журналу з десятками рядків).
+  let wifiConnectionsPendingId = null;
+  let wifiConnectionsTimeoutTimer = null;
+
+  function requestWifiConnections() {
+    if (!client || !client.connected) return;
+    const id = Math.floor(Math.random() * 1e9);
+    if (wifiConnectionsTimeoutTimer) clearTimeout(wifiConnectionsTimeoutTimer);
+    wifiConnectionsTimeoutTimer = setTimeout(() => {
+      wifiConnectionsPendingId = null;
+      logEvent('err', reqTopic('wifi-connections'), null, `timeout ${CMD_REQUEST_TIMEOUT_MS / 1000}s - no reply`);
+    }, CMD_REQUEST_TIMEOUT_MS);
+    wifiConnectionsPendingId = id;
+    const topic = reqTopic('wifi-connections');
+    const payload = JSON.stringify({ id });
+    client.publish(topic, payload);
+    logEvent('out', topic, payload);
+  }
+
   // "auto" - низький пріоритет: незалежний ланцюжок setTimeout, не завʼязаний
   // на COMMANDS/backoff-механізм панелей (той для чотирьох агрегатів,
   // журнал - поодинокий керований запит). Умови перевіряються щотік, а не
@@ -1366,6 +1419,11 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   // system-info (renderSystemPanel() нічого не малює, поки нема бодай одного).
   let lastSystemInfo = null;
   let lastWifiStatus = null;
+  // Остання відома відповідь 'wifi-connections' (окремий запит поза
+  // panels[cmd], той самий принцип, що lastEcoflowJournal нижче) - null,
+  // поки жодної ще не було в цій сесії; renderWifiStatus() (render.js) тоді
+  // показує "Not loaded yet." замість таблиці, а не порожній список.
+  let lastWifiConnections = null;
   let lastEcoflowStatus = null;
   let lastEcoflowJournal = null;
   let lastMqttStatus = null;
@@ -1393,6 +1451,17 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       { wifi: lastWifiStatus, ecoflow: lastEcoflowStatus, ecoflowOpenSerials: openSerials, mqtt: lastMqttStatus });
   }
 
+  // Вкладка Wi-Fi - Status (lastWifiStatus) + Saved profiles (lastWifiConnections,
+  // окремий запит, requestWifiConnections() нижче) - той самий патерн, що
+  // renderSystemPanel()/renderEcoflowPanel(): перемальовує ОБИДВА джерела разом,
+  // а не лише те, чия відповідь щойно прийшла (інакше таблиця профілів
+  // лишалась би зі старим extra.connections до наступного wifi-status).
+  function renderWifiPanel() {
+    if (!lastWifiStatus) return; // ще жодної відповіді wifi-status - нема що перемальовувати
+    panels['wifi-status'].out.innerHTML = buildPanelHtml('wifi-status', lastWifiStatus,
+      { connections: lastWifiConnections });
+  }
+
   function renderReply(cmd, msg) {
     const p = panels[cmd];
     if (msg.ok) {
@@ -1406,13 +1475,16 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 
       if (cmd === 'system-info') {
         renderSystemPanel();
+      } else if (cmd === 'wifi-status') {
+        renderWifiPanel();
+        renderSystemPanel();
       } else if (cmd === 'ecoflow-status') {
         renderEcoflowPanel(); // openParamsSerials-скан DOM, не голий buildPanelHtml (як решта команд нижче)
         renderSystemPanel();
       } else {
         p.out.innerHTML = buildPanelHtml(cmd, msg.data);
-        // wifi-status/mqtt-status теж тримають відповідні System-картки
-        // свіжими - без чекання наступного system-info-поллу.
+        // mqtt-status теж тримає System-картку свіжою - без чекання
+        // наступного system-info-поллу.
         renderSystemPanel();
       }
       setPanelStatus(cmd, `ok (id ${msg.id})`, 'ok');
@@ -1717,15 +1789,23 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     const wait = AUTO_BASE_MS * p.backoffFactor;
     p.timer = setTimeout(() => {
       requestCmd(cmd);
+      if (cmd === 'wifi-status') requestWifiConnections();
       scheduleAuto(cmd);
     }, wait);
   }
 
   for (const cmd of COMMANDS) {
-    panels[cmd].refreshBtn.addEventListener('click', () => requestCmd(cmd));
+    panels[cmd].refreshBtn.addEventListener('click', () => {
+      requestCmd(cmd);
+      // Saved profiles - той самий Refresh, що й wifi-status (нема окремої
+      // кнопки під профілі): портал теж підвантажує /api/wifi/connections
+      // разом зі статусом, не окремим контролом.
+      if (cmd === 'wifi-status') requestWifiConnections();
+    });
     panels[cmd].autoToggle.addEventListener('change', () => {
       if (panels[cmd].autoToggle.checked) {
         requestCmd(cmd);
+        if (cmd === 'wifi-status') requestWifiConnections();
       }
       scheduleAuto(cmd);
     });
@@ -1866,6 +1946,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       // а не другий publish.
       applyPersistedToggles();
       for (const cmd of COMMANDS) requestCmd(cmd);
+      requestWifiConnections(); // saved profiles - поза COMMANDS, той самий безумовний перший запит
       requestCommandsList();
     });
 
@@ -1939,6 +2020,27 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
           renderEcoflowPanel();
         } else {
           logEvent('err', topic, null, `ecoflow-journal error: ${msg.error || 'unknown'}`);
+        }
+        return;
+      }
+
+      // 'wifi-connections' - той самий одноразовий запит поза COMMANDS, що
+      // ecoflow-journal вище (requestWifiConnections()).
+      if (topic === replyTopic('wifi-connections')) {
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch (e) {
+          return;
+        }
+        if (wifiConnectionsPendingId !== null && msg.id !== wifiConnectionsPendingId) return; // застаріла відповідь
+        clearTimeout(wifiConnectionsTimeoutTimer);
+        wifiConnectionsPendingId = null;
+        if (msg.ok) {
+          lastWifiConnections = msg.data;
+          renderWifiPanel();
+        } else {
+          logEvent('err', topic, null, `wifi-connections error: ${msg.error || 'unknown'}`);
         }
         return;
       }
