@@ -81,6 +81,17 @@ Saved profiles — окрема команда `wifi-connections` (не поле
 перший запит при конекті), а не власним контролом: портал теж підвантажує
 `/api/wifi/connections` разом зі статусом Wi-Fi-вкладки, не окремою кнопкою.
 
+## MQTT — Connection + Console mirror + legend, 1:1 з порталом
+
+`renderMqttStatus()` (`render.js`) — той самий каркас вкладки MQTT HTTP-порталу
+(`assets/www/index.html` `#tab-mqtt`): **Connection** (dl зі статусом брокера,
+dropped out/in, LWT трьома рядками, Heartbeat двома), **Console mirror**
+(окремий h2 + той самий `p.muted` про `console-mqtt`), і `dl.legend` унизу
+(Dropped / Subscribe denied / Commands rejected). Без темної коробки `.out`
+навколо вмісту — як Wi-Fi. AUTO/Refresh лишаються в шапці секції (SAPI
+опитує MQTT-командою; портал ходить на `/api/mqtt/status` сам). Компактна
+System-картка MQTT не змінюється (`mqttSystemRows()`).
+
 ## EcoFlow — "Raw parameters" на вимогу (drill-down)
 
 Агрегат `ecoflow-status` свідомо не несе сирі `params` кожного пристрою

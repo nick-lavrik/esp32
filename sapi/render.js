@@ -435,13 +435,35 @@ function mqttConsoleMirrorRows(cm) {
   ];
 }
 
-// Повна вкладка MQTT (renderMqtt() у порталі) - Connection/.../Commands
-// rejected + LWT (3 рядки) + Heartbeat (2 рядки, розгорнутий) окремим блоком,
-// Console mirror окремим блоком нижче.
+// Повна вкладка MQTT - буквальний порт розмітки порталу (assets/www/index.html
+// #tab-mqtt / renderMqtt()): h2 Connection + dl, h2 Console mirror + p.muted
+// + dl, dl.legend унизу. Не .kv і не h3 у .section-group: той каркас лишав
+// усе одним блоком у темній коробці .out і без глосарія - саме те, що
+// відрізняло вкладку SAPI від порталу. AUTO/Refresh лишаються в шапці секції
+// (SAPI-полл, портал опитує сам) - як на Wi-Fi.
+const kMqttLegendHtml = '<dl class="legend muted">'
+  + '<dt>Dropped</dt>'
+  + '<dd>out/in above, and rate-limit dropped for the console mirror - a message could not be sent or'
+  + ' received: either the device ran out of memory (heap) for it, or its internal queue was already'
+  + ' full.</dd>'
+  + '<dt>Subscribe denied</dt>'
+  + '<dd>the broker itself rejected a subscription (ACL) - the connection still looks "connected", it'
+  + ' just stays silent.</dd>'
+  + '<dt>Commands rejected</dt>'
+  + '<dd>commands that could not be queued from ANY source (serial, this web portal, MQTT, cron) because'
+  + ' the shared command queue was full - not specific to MQTT, shown here alongside the rest of the'
+  + ' "silent failure" counters.</dd>'
+  + '</dl>';
+
 function renderMqttStatus(data) {
   const droppedRows = mqttDroppedRows(data.droppedOutgoingCount, data.droppedIncomingCount);
   const rows = mqttConnectionRows(data, droppedRows).concat(mqttLwtRows(data.lwt), mqttHeartbeatRows(data.heartbeat));
-  return kv(rows) + '<div class="section-group"><h3>Console mirror</h3>' + kv(mqttConsoleMirrorRows(data.consoleMirror)) + '</div>';
+  return '<h2>Connection</h2><dl>' + dlRows(rows) + '</dl>'
+    + '<h2>Console mirror</h2>'
+    + '<p class="muted">Same on/off state and rules as the <code>console-mqtt</code> serial command - this'
+    + ' is a read-only view, change it from Commands or the serial console.</p>'
+    + '<dl>' + dlRows(mqttConsoleMirrorRows(data.consoleMirror)) + '</dl>'
+    + kMqttLegendHtml;
 }
 
 // System-картка (renderMqttSystemSummary() у порталі) - той самий перелік,

@@ -213,19 +213,25 @@ button.act.ghost.paused { border-color: var(--warn); color: var(--warn); }
    правило автоматично. wifi-status - той самий "без коробки" вигляд, але за
    ОКРЕМИМ селектором (не .cards): вкладка Wi-Fi 1:1 з порталом - голий
    dl+table, портал теж не кладе жоден зі своїх блоків Wi-Fi у власну рамку. */
-.out:has(.cards), .cmd-section[data-cmd="wifi-status"] .out {
+.out:has(.cards),
+.cmd-section[data-cmd="wifi-status"] .out,
+.cmd-section[data-cmd="mqtt-status"] .out {
   background: none; border: none; padding: 0; max-height: none; overflow: visible;
 }
 /* dl/dt/dd - той самий глобальний вигляд, що в assets/www/index.html
-   (портал), не власний клас .kv: System/Wi-Fi-вкладки (render.js,
-   renderSystemInfo/renderWifiStatus) емітять голий <dl>, як і портал.
-   ecoflow-status/mqtt-status використовують .kv для верхнього блоку
-   (Connection) свідомо (не голий dl) - та сама візуальна форма, простіше
-   перевикористання наявного класу, не нова стилізація під голий dl заради
-   буквальної відповідності розмітці порталу. */
+   (портал), не власний клас .kv: System/Wi-Fi/MQTT-вкладки (render.js)
+   емітять голий <dl>, як і портал. ecoflow-status ще використовує .kv
+   для верхнього блоку свідомо (не голий dl). */
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
 dt { color: var(--muted); }
 dd { margin: 0; }
+/* Глосарій термінів (#mqtt-legend / renderMqttStatus) - той самий dl/dt/dd,
+   що й для даних вище, але dt тут сам термін: пунктирне підкреслення
+   відрізняє його від звичайних приглушених заголовків рядків (портал,
+   assets/www/index.html). */
+dl.legend { margin-top: 1em; }
+dl.legend dt { color: var(--muted); text-decoration: underline;
+  text-decoration-style: dotted; text-underline-offset: 0.25em; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; margin: 0; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }

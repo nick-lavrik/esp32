@@ -481,13 +481,19 @@ const MQTT_FIXTURE = {
 test('mqtt-status: щасливий шлях - повна вкладка (renderMqttStatus)', () => {
   const html = renderMqttStatus(MQTT_FIXTURE);
   assertNoLeakedPlaceholders(html);
+  assert.match(html, /<h2>Connection<\/h2>/);
   assert.match(html, /connected/);
   assert.match(html, /192\.168\.1\.22:1883/);
   assert.match(html, /esp32-c3/); // login
   assert.match(html, /devices\/mqtt-esp32-c3\/status/); // LWT topic
   assert.match(html, /Heartbeat message/); // розгорнутий (2 рядки), не компактний
-  assert.match(html, /Console mirror/);
+  assert.match(html, /<h2>Console mirror<\/h2>/);
+  assert.match(html, /console-mqtt/); // той самий p.muted, що на порталі
   assert.match(html, /on<\/dd>/); // Mirror: on
+  assert.match(html, /class="legend muted"/);
+  assert.match(html, /<dt>Subscribe denied<\/dt>/);
+  assert.doesNotMatch(html, /class="kv"/); // голий dl, як портал, не .kv
+  assert.doesNotMatch(html, /<h3>Console mirror<\/h3>/);
 });
 
 test('mqtt-status: анонімний логін, LWT не налаштовано, dropped/denied>0 - колір і хінт', () => {
