@@ -92,6 +92,28 @@ dropped out/in, LWT трьома рядками, Heartbeat двома), **Consol
 опитує MQTT-командою; портал ходить на `/api/mqtt/status` сам). Компактна
 System-картка MQTT не змінюється (`mqttSystemRows()`).
 
+## LittleFS — картка System + вкладка Files
+
+Картка LittleFS у System тепер реальна: `system-info` несе `littlefs`
+(`WebSystemModule::littleFsJson()` — той самий форматер, що `/api/system/info`
+порталу) → Total/Used/Free + бар «використано / вільно» (`usageBarHtml()`,
+ті самі `.heap-bar*` стилі, що Memory). Той самий бар (heap-версія і
+LittleFS-версія) додано й на вкладку System веб-порталу.
+
+Вкладка **Files** — окремий запит `fs-list` з аргументом `path` (поза
+`COMMANDS`, як `wifi-connections`): порт лівої колонки Files порталу — крихти,
+лічильник з місткістю, таблиця Name/Size, клік по каталогу відкриває його.
+**Preview** — порт переглядача порталу: View (або клік по рядку файла) тягне
+вміст командою `fs-read` шматками по 3 КБ (base64; перший шматок послідовно, решта по 2 запити одночасно — межа
+`SAPI_MAX_INFLIGHT`; відповідь `busy` повторюється), після чого та сама логіка, що на порталі: текст → UTF-8, бінарник
+→ hex-дамп, зображення → `<img>` (blob URL). Стеля для тексту/hex — 256 КБ (`FS_PREVIEW_MAX`,
+решта позначається «first X of Y»); зображення тягнуться цілком (обрізаний
+JPEG — сіра смуга), запобіжник `FS_IMAGE_MAX` = 1 МБ; понад 64 КБ питає `confirm()`. Стан
+Preview лежить поза DOM — переживає перемальовку списку.
+Редактор, New file/folder, Download/Rename/Delete — мутації, яких SAPI не
+робить: заблоковані з `title` (як Connect у Wi-Fi). Refresh перечитує
+поточний каталог.
+
 ## EcoFlow — "Raw parameters" на вимогу (drill-down)
 
 Агрегат `ecoflow-status` свідомо не несе сирі `params` кожного пристрою

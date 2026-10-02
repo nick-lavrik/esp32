@@ -135,6 +135,33 @@ String WebSystemModule::partitionsJson() {
   return json;
 }
 
+String WebSystemModule::littleFsJson() const {
+  size_t used = 0, total = 0;
+  if (!_littleFsUsage || !_littleFsUsage(used, total)) return "{\"available\":false}";
+  String json = "{\"available\":true,\"usedBytes\":";
+  json += (uint32_t)used;
+  json += ",\"totalBytes\":";
+  json += (uint32_t)total;
+  json += "}";
+  return json;
+}
+
+String WebSystemModule::sdJson() const {
+  WebSystemSdInfo sd;
+  if (!_sdInfo || !_sdInfo(sd)) return "{\"available\":false}";
+  String json = "{\"available\":true,\"present\":";
+  json += webjson::boolean(sd.present);
+  json += ",\"type\":";
+  json += webjson::quote(sd.cardType);
+  // 64-біт: SD-картки регулярно за межами uint32_t (>4 ГБ).
+  json += ",\"sizeBytes\":";
+  json += (unsigned long long)sd.sizeBytes;
+  json += ",\"usedBytes\":";
+  json += (unsigned long long)sd.usedBytes;
+  json += "}";
+  return json;
+}
+
 void WebSystemModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
   server.on("/api/system/info", HTTP_GET, [this, &portal](AsyncWebServerRequest* request) {
     const uint32_t jobId = portal.jobs().submit([this]() { return _infoJob(); });
@@ -157,33 +184,9 @@ String WebSystemModule::_infoJob() {
   json += nvsStatsJson();
 
   json += ",\"littlefs\":";
-  size_t used = 0, total = 0;
-  if (_littleFsUsage && _littleFsUsage(used, total)) {
-    json += "{\"available\":true,\"usedBytes\":";
-    json += (uint32_t)used;
-    json += ",\"totalBytes\":";
-    json += (uint32_t)total;
-    json += "}";
-  } else {
-    json += "{\"available\":false}";
-  }
-
+  json += littleFsJson();
   json += ",\"sd\":";
-  WebSystemSdInfo sd;
-  if (_sdInfo && _sdInfo(sd)) {
-    json += "{\"available\":true,\"present\":";
-    json += webjson::boolean(sd.present);
-    json += ",\"type\":";
-    json += webjson::quote(sd.cardType);
-    // 64-біт: SD-картки регулярно за межами uint32_t (>4 ГБ).
-    json += ",\"sizeBytes\":";
-    json += (unsigned long long)sd.sizeBytes;
-    json += ",\"usedBytes\":";
-    json += (unsigned long long)sd.usedBytes;
-    json += "}";
-  } else {
-    json += "{\"available\":false}";
-  }
+  json += sdJson();
 
   json += ",\"partitions\":";
   json += partitionsJson();

@@ -245,6 +245,9 @@ dl.legend dt { color: var(--muted); text-decoration: underline;
 .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
 .card { border: 1px solid var(--line); border-radius: 6px; padding: 12px; flex: 1 1 330px; min-width: 260px; }
 .card dl { grid-template-columns: max-content 1fr; }
+/* dl над баром (Memory/LittleFS/SD/NVS): мінімум 6 рядків заввишки, щоб бари сусідніх
+   карток стояли на одній лінії; більше рядків - dl росте, бар опускається нижче. */
+.card dl.dl-bar { grid-template-rows: repeat(6, minmax(1lh, auto)); }
 /* Другорядне уточнення в значенні (кількість переходів, Гц, "(inferred)") -
    власним рядком під основним, не впритул через " · " (та сама причина, що
    в порталі: переносилось би посередині слова на вузькій картці). */
@@ -375,6 +378,28 @@ tr.active > td:first-child { box-shadow: inset 2px 0 0 var(--ok); font-weight: 6
 /* Позначка "це значення несе title-хінт" - той самий портал (CLAUDE.md,
    "Видимість..."): курсор "help" непомітний сам по собі, тому кожен такий
    рядок (mqttDroppedText/mqttHeartbeatText, render.js) супроводжує hintIcon(). */
+/* Files - порт #fs-crumbs/#fs-table порталу: крихти шляху і підсвітка рядка каталогу. */
+.fs-crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }
+.fs-crumbs button { background: none; border: none; color: var(--accent); font: inherit;
+  cursor: pointer; padding: 2px 3px; border-radius: 4px; overflow-wrap: anywhere; }
+.fs-crumbs button:hover { background: #ffffff12; }
+.fs-crumbs .sep { color: var(--muted); }
+#fs-table td.n { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+textarea { background: var(--bg); border: 1px solid var(--line); color: var(--text);
+  padding: 7px 10px; border-radius: 6px; width: 100%; resize: vertical;
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+textarea:disabled, input:disabled { opacity: .5; }
+#fs-content { margin-top: 10px; flex: 1 1 100%; }
+#fs-actions { display: inline-flex; gap: 8px; }
+#fs-view { background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+  margin-top: 8px; white-space: pre; font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+#fs-table tbody tr[data-fs-open], #fs-table tbody tr[data-fs-view] { cursor: pointer; }
+#fs-table tbody tr[data-fs-open]:hover > td, #fs-table tbody tr[data-fs-view]:hover > td { background: #ffffff0a; }
+#fs-view { max-height: 50vh; overflow: auto; }
+#fs-view img { display: block; max-width: 100%; height: auto;
+  background: repeating-conic-gradient(#2a2f37 0% 25%, #1c2027 0% 50%) 50% / 16px 16px; }
+#fs-out .row { margin-bottom: 4px; }
 .hint-mark { color: var(--muted); font-size: .75em; margin-left: .3em; position: relative; top: -0.3em; }
 /* Бар heap (System - Memory, render.js: heapBarHtml()) - НЕ з порталу, новий
    віджет цієї сесії. Під dl, не над ним - над dl рвало звичний вигляд
@@ -567,6 +592,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   <button data-tab="wifi-status">Wi-Fi</button>
   <button data-tab="ecoflow-status">EcoFlow</button>
   <button data-tab="mqtt-status">MQTT</button>
+  <button data-tab="files">Files</button>
   <button data-tab="commands">Commands</button>
   <button data-tab="log">Log</button>
 </nav>
@@ -603,6 +629,13 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       <button class="btn-refresh act ghost" disabled>Refresh</button>
     </h2>
     <div class="out">-</div>
+  </section>
+
+  <section data-tab="files">
+    <h2 class="hrow">fs-list <span class="spacer"></span>
+      <button id="btn-fs-refresh" class="act ghost" disabled>Refresh</button>
+    </h2>
+    <div id="fs-out"><p class="muted">-</p></div>
   </section>
 
   <section data-tab="commands">
@@ -1297,6 +1330,153 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     logEvent('out', topic, payload);
   }
 
+  // Files ('fs-list') - той самий одноразовий запит поза COMMANDS, що
+  // wifi-connections вище, але з аргументом: каталог, який відкрито зараз
+  // (fsPath). Без auto: вміст файлової системи міняє лише сама прошивка.
+  let fsPath = '/';
+  let lastFsList = null;
+  let fsPendingId = null;
+  let fsTimeoutTimer = null;
+
+  function requestFsList(path) {
+    if (!client || !client.connected) return;
+    fsPath = path || fsPath;
+    const id = Math.floor(Math.random() * 1e9);
+    if (fsTimeoutTimer) clearTimeout(fsTimeoutTimer);
+    fsTimeoutTimer = setTimeout(() => {
+      fsPendingId = null;
+      logEvent('err', reqTopic('fs-list'), null, `timeout ${CMD_REQUEST_TIMEOUT_MS / 1000}s - no reply`);
+    }, CMD_REQUEST_TIMEOUT_MS);
+    fsPendingId = id;
+    const topic = reqTopic('fs-list');
+    const payload = JSON.stringify({ id, args: { path: fsPath } });
+    client.publish(topic, payload);
+    logEvent('out', topic, payload);
+  }
+
+  $('#btn-fs-refresh').addEventListener('click', () => requestFsList());
+  $('#fs-out').addEventListener('click', (ev) => {
+    const el = ev.target.closest('[data-fs-cd], [data-fs-open], [data-fs-view]');
+    if (!el) return;
+    if (el.dataset.fsView) viewFsFile(el.dataset.fsView);
+    else requestFsList(el.dataset.fsCd || el.dataset.fsOpen);
+  });
+
+  // Preview файла ('fs-read'): байти приходять шматками base64, по одному
+  // запиту на шматок (послідовно - наступний лише після відповіді на попередній).
+  // Стан Preview (fsPreview) лежить поза DOM: renderFsList() перемальовує всю
+  // вкладку, і без цього перегляд зникав би разом зі списком.
+  let fsPreview = null; // { meta, text } | { meta, imageUrl }
+  let fsViewing = false;
+  const FS_READ_WINDOW = 2; // = SAPI_MAX_INFLIGHT: стільки запитів 'fs-read' одночасно
+
+  function paintFsPreview() {
+    const box = $('#fs-view');
+    if (!box) return;
+    box.textContent = '';
+    $('#fs-view-meta').textContent = fsPreview ? fsPreview.meta : '';
+    if (!fsPreview) { box.textContent = 'Nothing to preview.'; return; }
+    if (fsPreview.imageUrl) {
+      const img = document.createElement('img');
+      img.onerror = () => { box.textContent = 'Cannot display this image'; };
+      img.src = fsPreview.imageUrl;
+      box.appendChild(img);
+    } else {
+      box.textContent = fsPreview.text;
+    }
+  }
+
+  // Відповіді розрізняються по id: запитів у польоті може бути кілька
+  // (FS_READ_WINDOW), тож Map, а не одна змінна.
+  const fsReadPending = new Map(); // id -> { resolve, reject, timer }
+
+  function requestFsRead(path, offset) {
+    return new Promise((resolve, reject) => {
+      if (!client || !client.connected) { reject(new Error('Not connected')); return; }
+      const id = Math.floor(Math.random() * 1e9);
+      const timer = setTimeout(() => {
+        fsReadPending.delete(id);
+        reject(new Error(`timeout ${CMD_REQUEST_TIMEOUT_MS / 1000}s - no reply`));
+      }, CMD_REQUEST_TIMEOUT_MS);
+      fsReadPending.set(id, { resolve, reject, timer });
+      const topic = reqTopic('fs-read');
+      const payload = JSON.stringify({ id, args: { path, offset } });
+      client.publish(topic, payload);
+      logEvent('out', topic, payload);
+    });
+  }
+
+  // "busy" - черга плати на мить заповнена (панелі System/Wi-Fi теж опитують):
+  // це не збій, а привід почекати й повторити.
+  async function requestFsReadRetry(path, offset) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await requestFsRead(path, offset);
+      } catch (e) {
+        if (e.message !== 'busy' || attempt >= 10) throw e;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+  }
+
+  async function viewFsFile(path) {
+    if (fsViewing) return;
+    const entry = lastFsList && lastFsList.entries.find((e) => fsJoin(lastFsList.path, e.name) === path);
+    const size = entry ? entry.size : 0;
+    const isImage = !!fsImageMime(path);
+    // Зображення обрізати не можна - з половини JPEG лишається сіра смуга, -
+    // тому стеля FS_PREVIEW_MAX на нього не діє (лише FS_IMAGE_MAX).
+    const limit = isImage ? FS_IMAGE_MAX : FS_PREVIEW_MAX;
+    // Той самий confirm, що на порталі для великого файла, але поріг нижчий:
+    // кожні 3 КБ - окремий MQTT-запит.
+    if (size > 64 * 1024 && !confirm(`This file is ${fmtBytes(size)}. Fetch ${fmtBytes(Math.min(size, limit))} over MQTT?`)) return;
+    fsViewing = true;
+    if (fsPreview && fsPreview.imageUrl) URL.revokeObjectURL(fsPreview.imageUrl);
+    const chunks = new Map(); // offset -> Uint8Array
+    let got = 0;
+    let total = size;
+    const progress = () => {
+      fsPreview = { meta: `${path} · reading… ${fmtBytes(got)}${total ? ' / ' + fmtBytes(total) : ''}`, text: '' };
+      paintFsPreview();
+    };
+    try {
+      progress();
+      // Перший шматок - послідовно: з нього відомі справжні size і крок.
+      const first = await requestFsReadRetry(path, 0);
+      const firstBytes = b64ToBytes(first.data);
+      chunks.set(0, firstBytes);
+      got = firstBytes.length;
+      total = first.size;
+      const step = firstBytes.length;
+      const end = Math.min(total, limit);
+      let next = step;
+      progress();
+      // Решта - FS_READ_WINDOW запитів одночасно (SAPI_MAX_INFLIGHT, ліміт черги плати).
+      const worker = async () => {
+        while (next < end) {
+          const offset = next;
+          next += step;
+          const r = await requestFsReadRetry(path, offset);
+          const bytes = b64ToBytes(r.data);
+          chunks.set(offset, bytes);
+          got += bytes.length;
+          progress();
+        }
+      };
+      if (step > 0) await Promise.all(Array.from({ length: FS_READ_WINDOW }, worker));
+      let bytes = concatBytes([...chunks.keys()].sort((x, y) => x - y).map((k) => chunks.get(k)));
+      if (!isImage && bytes.length > limit) bytes = bytes.subarray(0, limit);
+      const p = fsPreviewFromBytes(path, bytes, total);
+      fsPreview = p.imageMime
+        ? { meta: p.meta, imageUrl: URL.createObjectURL(new Blob([bytes], { type: p.imageMime })) }
+        : p;
+    } catch (e) {
+      fsPreview = { meta: path, text: e.message };
+    }
+    fsViewing = false;
+    paintFsPreview();
+  }
+
   // "auto" - низький пріоритет: незалежний ланцюжок setTimeout, не завʼязаний
   // на COMMANDS/backoff-механізм панелей (той для чотирьох агрегатів,
   // журнал - поодинокий керований запит). Умови перевіряються щотік, а не
@@ -1858,6 +2038,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     dot.className = state === 'off' ? '' : state;
     label.textContent = { off: 'disconnected', connecting: 'connecting...', on: 'connected' }[state];
     for (const cmd of COMMANDS) panels[cmd].refreshBtn.disabled = state !== 'on';
+    $('#btn-fs-refresh').disabled = state !== 'on';
 
     // Вкладки System/Wi-Fi/EcoFlow/Log мають сенс лише з живими даними -
     // поки не connected, показувати їх порожніми ("-" у кожній) створює
@@ -1953,6 +2134,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       applyPersistedToggles();
       for (const cmd of COMMANDS) requestCmd(cmd);
       requestWifiConnections(); // saved profiles - поза COMMANDS, той самий безумовний перший запит
+      requestFsList(); // Files - так само поза COMMANDS
       requestCommandsList();
     });
 
@@ -2048,6 +2230,46 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
         } else {
           logEvent('err', topic, null, `wifi-connections error: ${msg.error || 'unknown'}`);
         }
+        return;
+      }
+
+      // 'fs-list' - той самий одноразовий запит поза COMMANDS (requestFsList()).
+      if (topic === replyTopic('fs-list')) {
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch (e) {
+          return;
+        }
+        if (fsPendingId !== null && msg.id !== fsPendingId) return; // застаріла відповідь
+        clearTimeout(fsTimeoutTimer);
+        fsPendingId = null;
+        if (msg.ok) {
+          lastFsList = msg.data;
+          $('#fs-out').innerHTML = renderFsList(lastFsList);
+          paintFsPreview();
+        } else {
+          logEvent('err', topic, null, `fs-list error: ${msg.error || 'unknown'}`);
+        }
+        return;
+      }
+
+      // 'fs-read' - відповідь на шматок файла (viewFsFile()): збіг по id
+      // розв'язує проміс, помилка (в т.ч. ok:false усередині data) - reject.
+      if (topic === replyTopic('fs-read')) {
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch (e) {
+          return;
+        }
+        const pending = fsReadPending.get(msg.id);
+        if (!pending) return; // застаріла відповідь
+        const { resolve, reject, timer } = pending;
+        clearTimeout(timer);
+        fsReadPending.delete(msg.id);
+        if (msg.ok && msg.data && msg.data.ok) resolve(msg.data);
+        else reject(new Error(msg.error || (msg.data && msg.data.message) || 'read failed'));
         return;
       }
 

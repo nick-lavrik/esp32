@@ -96,9 +96,19 @@ public:
   // звіряються з ним ДО того, як задача потрапить у чергу.
   static bool isSafePath(const String& path);
 
+  // Список каталогу + місткість (JSON {"ok":..}). Публічний: його ж віддає
+  // JSON-команда 'fs-list' MQTT SAPI (src/main.cpp) - один форматер на
+  // портал і SAPI (CLAUDE.md, DRY). Виконувати з loop(), як і решту.
+  String listJson(const String& path);
+
+  // Один шматок файла (до kReadChunk байт з offset) у base64 - для JSON-команди
+  // 'fs-read' MQTT SAPI, де потоку /api/fs/raw нема. Клієнт добирає файл
+  // послідовними викликами, поки "eof". JSON {"ok":..} як і listJson().
+  static constexpr size_t kReadChunk = 3072;
+  String readJson(const String& path, uint32_t offset);
+
 private:
   // Усі виконуються з WebJobQueue, тобто в контексті loop().
-  String _listJob(const String& path);
   String _writeJob(const String& path, const String& content);
   String _mkdirJob(const String& path);
   String _removeJob(const String& path);

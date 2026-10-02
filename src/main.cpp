@@ -697,10 +697,10 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 // компілюється, тож ні писати, ні читати цей масив нема кому - без цього
 // гейта registerJsonApiCommandName() лишався б "defined but not used" саме на
 // esp8266 (перевірено збіркою).
-static constexpr size_t kMaxJsonApiCommands = 8;  // 7 наявних (system-info/
-                                                   // wifi-status/wifi-connections/
-                                                   // ecoflow-status/ecoflow-journal/
-                                                   // mqtt-status/commands-list) + запас
+static constexpr size_t kMaxJsonApiCommands = 10;  // 9 наявних (system-info/
+                                                    // wifi-status/wifi-connections/
+                                                    // ecoflow-status/ecoflow-journal/
+                                                    // mqtt-status/commands-list/fs-list/fs-read) + запас
 static const char* kJsonApiCommandNames[kMaxJsonApiCommands] = {};
 static size_t kJsonApiCommandCount = 0;
 
@@ -792,9 +792,7 @@ static const JsonApiEntry kJsonApiCommandsList = {"commands-list", jsonApiNoArgs
 // компілюються (jsonApiNoArgs/handleJsonApiRequest/registerJsonApiEntry/
 // commands-list - вище, поза цим гейтом).
 
-// Пре-альфа: без LittleFS/SD (ті прив'язані до інстанс-колбеків
-// WebSystemModule, а не до незалежних static-методів; розширення - окремим
-// кроком, коли з'явиться другий провайдер такого роду).
+// Пре-альфа: LittleFS і SD - через webSystemModule.littleFsJson()/sdJson().
 //
 // "portal" - той самий об'єкт, що й /api/status (WebPortal::statusJson(),
 // docs/mqtt-web-handoff.md, розділ "SAPI ... UI-сесія"): env/revision/
@@ -812,6 +810,10 @@ static String jsonApiSystemInfoExecute(const uint8_t* /*raw*/) {
   out += WebSystemModule::heapStatsJson();
   out += ",\"flash\":";
   out += WebSystemModule::flashStatsJson();
+  out += ",\"littlefs\":";
+  out += webSystemModule.littleFsJson();
+  out += ",\"sd\":";
+  out += webSystemModule.sdJson();
   out += ",\"nvs\":";
   out += WebSystemModule::nvsStatsJson();
   out += ",\"partitions\":";
@@ -845,6 +847,64 @@ static String jsonApiWifiConnectionsExecute(const uint8_t* /*raw*/) {
 
 static const JsonApiEntry kJsonApiWifiConnections = {
     "wifi-connections", jsonApiNoArgs, jsonApiWifiConnectionsExecute};
+
+// Дзеркало /api/fs/list (WebFilesModule::listJson(), той самий форматер):
+// вміст одного каталогу LittleFS + місткість. Каталог - аргумент "path"
+// (за замовчуванням "/"), перевірений тим самим isSafePath(), що й роут
+// порталу, ще в resolve() - небезпечний шлях відсікається як "bad args" і в
+// чергу не потрапляє. Лише читання: SAPI не пише у файлову систему.
+struct FsListArgs {
+  char path[WebFilesModule::kMaxPath + 1] = "/";
+};
+static_assert(sizeof(FsListArgs) <= CommandQueue::kLineSize, "FsListArgs has to fit into Slot.payload");
+
+static bool jsonApiFsListResolve(JsonVariantConst args, uint8_t* rawOut, size_t rawCapacity) {
+  if (rawCapacity < sizeof(FsListArgs)) return false;
+  const String path = args["path"] | "/";
+  if (!WebFilesModule::isSafePath(path)) return false;
+  FsListArgs a;
+  strncpy(a.path, path.c_str(), sizeof(a.path) - 1);
+  memcpy(rawOut, &a, sizeof(a));
+  return true;
+}
+
+static String jsonApiFsListExecute(const uint8_t* raw) {
+  FsListArgs args;
+  memcpy(&args, raw, sizeof(args));
+  return webFilesModule.listJson(String(args.path));
+}
+
+static const JsonApiEntry kJsonApiFsList = {"fs-list", jsonApiFsListResolve, jsonApiFsListExecute};
+
+// Вміст файла шматками (WebFilesModule::readJson(), base64) - для Preview
+// вкладки Files SAPI. Аргументи: path + offset; клієнт добирає файл
+// послідовними запитами, поки "eof". Лише читання.
+struct FsReadArgs {
+  uint32_t offset = 0;
+  // Решта слота: kMaxPath+1 разом з offset не влізло б у kLineSize, тож шлях
+  // тут трохи коротший за портальний (довший - "bad args").
+  char path[CommandQueue::kLineSize - sizeof(uint32_t)] = "";
+};
+static_assert(sizeof(FsReadArgs) <= CommandQueue::kLineSize, "FsReadArgs has to fit into Slot.payload");
+
+static bool jsonApiFsReadResolve(JsonVariantConst args, uint8_t* rawOut, size_t rawCapacity) {
+  if (rawCapacity < sizeof(FsReadArgs)) return false;
+  const String path = args["path"] | "";
+  FsReadArgs a;
+  if (!WebFilesModule::isSafePath(path) || path.length() >= sizeof(a.path)) return false;
+  strncpy(a.path, path.c_str(), sizeof(a.path) - 1);
+  a.offset = args["offset"] | 0u;
+  memcpy(rawOut, &a, sizeof(a));
+  return true;
+}
+
+static String jsonApiFsReadExecute(const uint8_t* raw) {
+  FsReadArgs args;
+  memcpy(&args, raw, sizeof(args));
+  return webFilesModule.readJson(String(args.path), args.offset);
+}
+
+static const JsonApiEntry kJsonApiFsRead = {"fs-read", jsonApiFsReadResolve, jsonApiFsReadExecute};
 
 #if HAS_ECOFLOW_CLIENT
 // Дзеркало /api/ecoflow/status - тут форматер уже інший
@@ -2254,6 +2314,8 @@ void setupMqttClient() {
   registerJsonApiEntry(kJsonApiSystemInfo);
   registerJsonApiEntry(kJsonApiWifiStatus);
   registerJsonApiEntry(kJsonApiWifiConnections);
+  registerJsonApiEntry(kJsonApiFsList);
+  registerJsonApiEntry(kJsonApiFsRead);
 #if HAS_ECOFLOW_CLIENT
   registerJsonApiEntry(kJsonApiEcoflowStatus);
   registerJsonApiEntry(kJsonApiEcoflowJournal);

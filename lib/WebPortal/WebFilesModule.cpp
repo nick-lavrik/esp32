@@ -1,6 +1,7 @@
 #include "WebFilesModule.hpp"
 
 #include <ESPAsyncWebServer.h>
+#include <mbedtls/base64.h>
 
 #include "WebJson.hpp"
 #include "WebPortal.hpp"
@@ -24,7 +25,49 @@ bool WebFilesModule::isSafePath(const String& path) {
   return true;
 }
 
-String WebFilesModule::_listJob(const String& path) {
+String WebFilesModule::readJson(const String& path, uint32_t offset) {
+  File f = _fs.open(path, "r");
+  if (!f || f.isDirectory()) {
+    if (f) f.close();
+    return webjson::fail("No such file");
+  }
+  const size_t size = f.size();
+  size_t length = 0;
+  // Буфери - у heap, не на стеку loop(): 3 КБ + 4 КБ там зайві.
+  uint8_t* raw = (uint8_t*)malloc(kReadChunk);
+  const size_t b64Cap = 4 * ((kReadChunk + 2) / 3) + 1;
+  unsigned char* b64 = (unsigned char*)malloc(b64Cap);
+  size_t b64Len = 0;
+  if (raw && b64 && offset <= size && f.seek(offset)) {
+    length = f.read(raw, kReadChunk);
+    mbedtls_base64_encode(b64, b64Cap, &b64Len, raw, length);
+  } else if (!raw || !b64) {
+    f.close();
+    free(raw);
+    free(b64);
+    return webjson::fail("Out of memory");
+  }
+  f.close();
+
+  String json = "{\"ok\":true,\"path\":";
+  json += webjson::quote(path);
+  json += ",\"size\":";
+  json += (uint32_t)size;
+  json += ",\"offset\":";
+  json += offset;
+  json += ",\"length\":";
+  json += (uint32_t)length;
+  json += ",\"eof\":";
+  json += webjson::boolean(offset + length >= size);
+  json += ",\"data\":\"";
+  json.concat((const char*)b64, b64Len);
+  json += "\"}";
+  free(raw);
+  free(b64);
+  return json;
+}
+
+String WebFilesModule::listJson(const String& path) {
   File dir = _fs.open(path, "r");
   if (!dir) return webjson::fail("No such directory");
   if (!dir.isDirectory()) {
@@ -186,7 +229,7 @@ void WebFilesModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
     String path = "/";
     if (request->hasParam("path") && !pathParam(request, false, "path", path)) return;
 
-    submit(request, [this, path]() { return _listJob(path); });
+    submit(request, [this, path]() { return listJson(path); });
   });
 
   // ---- файл цілком ----

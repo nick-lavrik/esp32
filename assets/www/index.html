@@ -303,6 +303,23 @@ dl.legend dt { color: var(--muted); text-decoration: underline;
    не вгадає (курсор "help" сам собою непомітний, поки на нього не навести).
    ПРАВИЛО (web-portal): будь-яке значення з title-хінтом супроводжується
    цією позначкою - hintIcon() у JS. */
+/* Бар використання (System: Memory, LittleFS, SD, NVS) - порт heapBarHtml()/usageBarHtml()
+   зі SAPI (sapi/render.js, sapi/index.html): той самий вигляд, кожен сегмент
+   зі своїм title. Дві копії свідомі - SAPI і портал не діляться кодом. */
+.heap-bar { position: relative; height: 20px; border-radius: 4px; background: var(--line);
+  overflow: hidden; margin: 10px 0 8px; }
+.heap-bar-used, .heap-bar-largest, .heap-bar-free { position: absolute; top: 0; bottom: 0; }
+.heap-bar-used { left: 0; background: var(--accent); }
+.heap-bar-largest { background: var(--ok); opacity: .55; }
+.heap-bar-marker { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--warn); }
+.heap-bar-legend { display: flex; flex-wrap: wrap; column-gap: 12px; row-gap: 4px;
+  font-size: var(--font-size-small); color: var(--muted); }
+.heap-bar-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.heap-bar-legend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.heap-bar-legend .sw-used { background: var(--accent); }
+.heap-bar-legend .sw-largest { background: var(--ok); opacity: .55; }
+.heap-bar-legend .sw-free { background: var(--line); border: 1px solid var(--muted); }
+.heap-bar-legend .sw-marker { background: var(--warn); }
 .hint-mark { color: var(--muted); font-size: .75em; margin-left: .3em; position: relative; top: -0.3em; }
 /* Пробіл на краю SSID. Лапки для цього не годяться: вони читаються як частина
    імені, а на краю рядка ще й зливаються з типографікою решти сторінки. Тут
@@ -350,6 +367,9 @@ textarea:focus { outline: 1px solid var(--accent); }
    картку в 260px переважно порожньою: підпис і значення й так короткі,
    довге лишається в .eco-sub на власному рядку (див. нижче). */
 .card dl { grid-template-columns: max-content 1fr; }
+/* dl над баром (Memory/LittleFS/SD/NVS): мінімум 6 рядків заввишки, щоб бари сусідніх
+   карток стояли на одній лінії; більше рядків - dl росте, бар опускається нижче. */
+.card dl.dl-bar { grid-template-rows: repeat(6, minmax(1lh, auto)); }
 /* Device - єдина картка з ДВОМА dl (#sys-device - фоновий тік, #sys-device-flash
    - лише за Refresh, окремо саме через різний час оновлення). max-content
    рахується для кожного dl окремо, тож "Chip size" і "Firmware env" виходили
@@ -724,22 +744,26 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
 
   <div class="card">
   <h2>Memory</h2>
-  <dl id="sys-memory"><dt>Total</dt><dd class="muted">Press Refresh.</dd></dl>
+  <dl class="dl-bar" id="sys-memory"><dt>Total</dt><dd class="muted">Press Refresh.</dd></dl>
+  <div id="sys-memory-bar"></div>
   </div>
 
   <div class="card">
   <h2>LittleFS</h2>
-  <dl id="sys-littlefs"></dl>
+  <dl class="dl-bar" id="sys-littlefs"></dl>
+  <div id="sys-littlefs-bar"></div>
   </div>
 
   <div class="card" id="sys-sd-wrap" hidden>
   <h2>SD card</h2>
-  <dl id="sys-sd"></dl>
+  <dl class="dl-bar" id="sys-sd"></dl>
+  <div id="sys-sd-bar"></div>
   </div>
 
   <div class="card">
   <h2>NVS</h2>
-  <dl id="sys-nvs"></dl>
+  <dl class="dl-bar" id="sys-nvs"></dl>
+  <div id="sys-nvs-bar"></div>
   </div>
 
   <div class="card">
@@ -935,6 +959,7 @@ table.zebra tbody tr:hover { background: #ffffff0f; }
     <thead><tr><th>Name</th><th class="opt num">Size</th><th></th></tr></thead>
     <tbody><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
   </table>
+  <div id="fs-bar"></div>
   </div>
 
   <div class="col">
@@ -1266,6 +1291,53 @@ function fsUsageRows(used, total) {
   ];
 }
 
+// Бар "використано / вільно" для місткостей з двох чисел (LittleFS) - порт
+// usageBarHtml() зі SAPI. Повертає РОЗМІТКУ (числа - лише з Number/fsSize).
+function usageBarHtml(used, total, fmt = fsSize) {
+  if (!total) return "";
+  const u = Math.min(total, Math.max(0, used));
+  const pct = (u / total) * 100;
+  return `<div class="heap-bar">` +
+      `<div class="heap-bar-used" style="width:${pct.toFixed(2)}%" title="Used: ${fmt(u)} of ${fmt(total)}"></div>` +
+      `<div class="heap-bar-free" style="left:${pct.toFixed(2)}%;width:${(100 - pct).toFixed(2)}%" ` +
+        `title="Free: ${fmt(total - u)} of ${fmt(total)}"></div>` +
+    `</div>` +
+    `<div class="heap-bar-legend"><span><i class="sw sw-used"></i>Used</span>` +
+    `<span><i class="sw sw-free"></i>Free</span></div>`;
+}
+
+// Бар heap (Memory) - порт heapBarHtml() зі SAPI: Used, Largest free block
+// (вільне одним шматком), решта - вільне, побите на фрагменти; marker - де
+// проходила межа used/free в найгірший момент від старту (Min free ever).
+function heapBarHtml(h) {
+  const total = h.totalBytes;
+  if (!total) return "";
+  const used = Math.max(0, total - (h.freeBytes || 0));
+  const usedPct = Math.min(100, (used / total) * 100);
+  const largest = Math.min(h.largestFreeBlockBytes || 0, total - used);
+  const largestPct = Math.min(100 - usedPct, (largest / total) * 100);
+  const freeTotal = total - used;
+  const fragPct = Math.max(0, 100 - usedPct - largestPct);
+  const marker = h.minFreeEverBytes
+    ? `<div class="heap-bar-marker" style="left:${Math.min(100, Math.max(0, ((total - h.minFreeEverBytes) / total) * 100)).toFixed(2)}%" ` +
+      `title="Min free ever: ${fsSize(h.minFreeEverBytes)} (most memory ever used at once since boot)"></div>`
+    : "";
+  const frag = fragPct > 0
+    ? `<div class="heap-bar-free" style="left:${(usedPct + largestPct).toFixed(2)}%;width:${fragPct.toFixed(2)}%" ` +
+      `title="Free: ${fsSize(Math.max(0, freeTotal - largest))} in smaller fragments (${fsSize(freeTotal)} free in total)"></div>`
+    : "";
+  return `<div class="heap-bar">` +
+      `<div class="heap-bar-used" style="width:${usedPct.toFixed(2)}%" title="Used: ${fsSize(used)} of ${fsSize(total)}"></div>` +
+      `<div class="heap-bar-largest" style="left:${usedPct.toFixed(2)}%;width:${largestPct.toFixed(2)}%" ` +
+        `title="Largest free block: ${fsSize(largest)} (largest single contiguous chunk)"></div>` +
+      frag + marker +
+    `</div>` +
+    `<div class="heap-bar-legend"><span><i class="sw sw-used"></i>Used</span>` +
+    `<span><i class="sw sw-largest"></i>Largest free block</span>` +
+    `<span><i class="sw sw-free"></i>Free (fragmented)</span>` +
+    (h.minFreeEverBytes ? `<span><i class="sw sw-marker"></i>Min free ever</span>` : "") + `</div>`;
+}
+
 // Розширена діагностика (/api/system/info) - на відміну від renderSystemStatus()
 // вище, НЕ входить у fast poll: чіпає flash (NVS/partition table/SD), тому
 // підтягується лише при відкритті вкладки і за клацанням Refresh (кнопка
@@ -1275,6 +1347,7 @@ function renderSystemInfo(r) {
   const h = r.heap;
   const memUnit = fsUnit(h.totalBytes || h.freeBytes);
   const freePct = h.totalBytes > 0 ? Math.round((h.freeBytes / h.totalBytes) * 100) : null;
+  $("#sys-memory-bar").innerHTML = heapBarHtml(h);
   $("#sys-memory").innerHTML = dlRows([
     ["Total", h.totalBytes ? fsSizeIn(h.totalBytes, memUnit) : "–"],
     ["Free", fsSizeIn(h.freeBytes, memUnit) + (freePct != null ? " (" + freePct + "%)" : "")],
@@ -1284,6 +1357,7 @@ function renderSystemInfo(r) {
   ]);
 
   const fs = r.littlefs;
+  $("#sys-littlefs-bar").innerHTML = fs.available ? usageBarHtml(fs.usedBytes, fs.totalBytes) : "";
   $("#sys-littlefs").innerHTML = fs.available
     ? dlRows(fsUsageRows(fs.usedBytes, fs.totalBytes))
     : "<dt>LittleFS</dt><dd class=\"muted\">not available</dd>";
@@ -1294,6 +1368,7 @@ function renderSystemInfo(r) {
     $("#sys-sd").innerHTML = r.sd.present
       ? dlRows([["Type", escapeHtml(r.sd.type)], ...fsUsageRows(r.sd.usedBytes, r.sd.sizeBytes)])
       : "<dt>Card</dt><dd class=\"muted\">not detected</dd>";
+    $("#sys-sd-bar").innerHTML = r.sd.present ? usageBarHtml(r.sd.usedBytes, r.sd.sizeBytes) : "";
   }
 
   // Паспорт чипа + флеша - у картці Device (не власна картка Flash: там
@@ -1333,6 +1408,8 @@ function renderSystemInfo(r) {
       }).join("");
 
   const nvs = r.nvs;
+  $("#sys-nvs-bar").innerHTML = nvs.available
+    ? usageBarHtml(nvs.usedEntries, nvs.totalEntries, (x) => x.toLocaleString() + " entries") : "";
   $("#sys-nvs").innerHTML = nvs.available
     ? dlRows((() => {
         const pct = nvs.totalEntries > 0 ? Math.round((nvs.usedEntries / nvs.totalEntries) * 100) : 0;
@@ -2340,6 +2417,8 @@ function renderFs() {
     : "";
   $("#fs-count").textContent = list.length + " item(s)" +
     (fsData.truncated ? " — list truncated" : "") + usage;
+
+  $("#fs-bar").innerHTML = usageBarHtml(fsData.used, fsData.total);
 
   const body = $("#fs-table tbody");
   if (!list.length) {

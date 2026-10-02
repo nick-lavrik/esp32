@@ -14,7 +14,9 @@
 const assert = require('node:assert/strict');
 const { renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus,
         ecoflowSystemDevicesHtml, ecoTableRow, mqttSystemRows, heapBarHtml, ecoParamsTable,
-        ecoJournalRow, ecoJournalSection, ecoFinishText, ssidLabel, wifiProfilesTable } = require('../render.js');
+        ecoJournalRow, ecoJournalSection, ecoFinishText, ssidLabel, wifiProfilesTable,
+        usageBarHtml, renderFsList,
+        fsPreviewFromBytes, hexDump, b64ToBytes, concatBytes, fsIsTextual } = require('../render.js');
 
 const CHIP_FIXTURE = {
   chip: { model: 'ESP32-C3', revision: 4, cores: 1, cpuFreqMHz: 160, psramFound: false, psramBytes: 0 },
@@ -531,6 +533,77 @@ test('system-info: extra.mqtt - MQTT-картка без моку', () => {
   assertNoLeakedPlaceholders(html);
   assert.match(html, /mqtt-esp32-c3/);
   assert.doesNotMatch(html, /<h2>MQTT<\/h2><dl><dt>Connection<\/dt><dd class="muted">\*\*\*/);
+});
+
+// --- LittleFS: картка, бар, вкладка Files ---
+
+test('System: картка LittleFS - рядки Total/Used/Free і бар used/free', () => {
+  const html = renderSystemInfo({ ...CHIP_FIXTURE, littlefs: { available: true, usedBytes: 262144, totalBytes: 1048576 } });
+  assert.match(html, /<dt>Total<\/dt><dd>1\.00 MB<\/dd><dt>Used<\/dt><dd>0\.25 MB \(25%\)<\/dd>/);
+  assert.match(html, /\(25%\)/);
+  assert.match(html, /\(75%\)/);
+  assert.match(html, /Used: 256\.0 KB of 1\.00 MB/);
+});
+
+test('System: LittleFS недоступна - not available; без поля - мок', () => {
+  assert.match(renderSystemInfo({ ...CHIP_FIXTURE, littlefs: { available: false } }), /LittleFS<\/dt><dd class="muted">not available/);
+  assert.match(renderSystemInfo(CHIP_FIXTURE), /<h2>LittleFS<\/h2><dl class="dl-bar">.*\*\*\*/s);
+});
+
+test('System: NVS і SD - бар; плата без SD - картки нема; без поля sd - мок', () => {
+  const sd = { available: true, present: true, type: 'SDHC', sizeBytes: 4e9, usedBytes: 1e9 };
+  const html = renderSystemInfo({ ...CHIP_FIXTURE, sd });
+  assert.match(html, /<h2>SD card<\/h2>.*SDHC.*Used: 953\.67 MB of 3\.73 GB/s);
+  assert.match(html, /Used: 12 entries of 1,000 entries|Used: 12 entries of 1\D000 entries/);
+  assert.doesNotMatch(renderSystemInfo({ ...CHIP_FIXTURE, sd: { available: false } }), /SD card/);
+  assert.match(renderSystemInfo({ ...CHIP_FIXTURE, sd: { available: true, present: false } }), /not detected/);
+  assert.match(renderSystemInfo(CHIP_FIXTURE), /<h2>SD card<\/h2><dl class="dl-bar">.*\*\*\*/s);
+});
+
+test('usageBarHtml: total=0 - порожньо; used>total затискається до 100%', () => {
+  assert.equal(usageBarHtml(0, 0), '');
+  assert.match(usageBarHtml(2000, 1000), /width:100\.00%/);
+});
+
+test('renderFsList: каталоги вгорі, крихти, Open лише на каталозі, View заблокований', () => {
+  const html = renderFsList({ ok: true, path: '/www', label: 'LittleFS', truncated: false, used: 100, total: 1000,
+    entries: [{ name: 'b.txt', dir: false, size: 5 }, { name: 'sub', dir: true, size: 0 }, { name: 'a.txt', dir: false, size: 7 }] });
+  assert.ok(html.indexOf('>sub<') < html.indexOf('>a.txt<'));
+  assert.ok(html.indexOf('>a.txt<') < html.indexOf('>b.txt<'));
+  assert.match(html, /data-fs-cd="\/www"/);
+  assert.match(html, /data-fs-open="\/www\/sub"/);
+  assert.equal((html.match(/disabled title/g) || []).length, 2 + 4); // New folder/file + форма Editor
+  assert.match(html, /<tr data-fs-view="\/www\/a\.txt">/);
+  assert.match(html, /<button class="act ghost" data-fs-view="\/www\/b\.txt">View<\/button>/);
+  assert.ok(html.indexOf('fs-table') < html.indexOf('heap-bar'), 'бар під списком файлів');
+  assert.match(html, /<h2>Editor[\s\S]*<h2>Preview/);
+  assert.match(html, /3 item\(s\)/);
+});
+
+test('fsPreview: текст, порожній файл, бінарник (hex), картинка, обрізаний файл', () => {
+  const enc = (s) => new TextEncoder().encode(s);
+  assert.deepEqual(fsPreviewFromBytes('/a.txt', enc('héllo'), 6), { meta: '/a.txt · 6 B', text: 'héllo' });
+  assert.equal(fsPreviewFromBytes('/e.txt', enc(''), 0).text, '(empty)');
+  const bin = fsPreviewFromBytes('/b.bin', new Uint8Array([0, 0x41, 255]), 3);
+  assert.match(bin.meta, /binary$/);
+  assert.equal(bin.text, '00000000  00 41 ff                                          .A.');
+  assert.equal(fsPreviewFromBytes('/x/p.JPG', new Uint8Array(4), 4).imageMime, 'image/jpeg');
+  assert.match(fsPreviewFromBytes('/big.txt', enc('abc'), 5000).meta, /first 3 B of 4\.9 KB/);
+});
+
+test('b64ToBytes/concatBytes: розкодування шматків і склейка', () => {
+  const a = b64ToBytes(Buffer.from('ab').toString('base64'));
+  const b = b64ToBytes(Buffer.from('cd').toString('base64'));
+  assert.equal(new TextDecoder().decode(concatBytes([a, b])), 'abcd');
+  assert.equal(fsIsTextual(new Uint8Array([10, 65])), true);
+  assert.equal(fsIsTextual(new Uint8Array([0])), false);
+});
+
+test('renderFsList: ok:false, порожній і незавантажений стани; ім\'я екранується', () => {
+  assert.match(renderFsList({ ok: false, message: 'No such directory' }), /No such directory/);
+  assert.match(renderFsList(null), /Not loaded yet/);
+  assert.match(renderFsList({ ok: true, path: '/', entries: [] }), /Directory is empty/);
+  assert.doesNotMatch(renderFsList({ ok: true, path: '/', entries: [{ name: '<b>', dir: false, size: 1 }] }), /<b>/);
 });
 
 // --- heapBarHtml (bar для Memory) ---

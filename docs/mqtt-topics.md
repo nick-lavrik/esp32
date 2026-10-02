@@ -49,9 +49,11 @@ Allowlist, не дзеркало всіх serial-команд:
 
 | `<cmd>` | Джерело даних | Умова збірки |
 |---|---|---|
-| `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebPortal::statusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebSystemModule::littleFsJson()` + `WebPortal::statusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `wifi-status` | `WebWifiModule::portalStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `wifi-connections` | `WebWifiModule::portalConnectionsJson()` (той самий, що `/api/wifi/connections` порталу) — збережені профілі, окремо від `wifi-status` (список міняється рідко, не на кожен статус-тик) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `fs-list` | `WebFilesModule::listJson()` (той самий, що `/api/fs/list` порталу) — вміст ОДНОГО каталогу LittleFS + місткість. Аргумент `args.path` (за замовчуванням `"/"`), перевіряється `isSafePath()` ще в `resolve()` — небезпечний шлях = `bad args`. Лише читання. Помилка каталогу (`No such directory`/`Not a directory`) приходить як `data:{"ok":false,"message":..}` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `fs-read` | `WebFilesModule::readJson()` — один шматок файла LittleFS (`args.path`, `args.offset`, до 3072 байт) у base64: `data:{ok,path,size,offset,length,eof,data}`. Клієнт добирає файл послідовними запитами до `eof` (Preview вкладки Files). Шлях — як у `fs-list`, але ≤123 символів. Лише читання | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `ecoflow-journal` | `WebEcoflowModule::journalJson()` (той самий провайдер, що `/api/ecoflow/journal` порталу, `EcoflowJournalView.hpp`) — окремий запит, не розширення `ecoflow-status` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
@@ -127,7 +129,7 @@ topic-per-device (як `ecoflow-params/<sn>` вище): запит рідкіс�
   рядок — буквальне ім'я макроса (`"BOARD_HAS_DISPLAY"`, не перейменований
   варіант).
 - `commands` — масив імен зареєстрованих JSON API команд (`"system-info"`,
-  `"wifi-status"`, `"wifi-connections"`, `"ecoflow-status"`, `"ecoflow-journal"`,
+  `"wifi-status"`, `"wifi-connections"`, `"fs-list"`, `"fs-read"`, `"ecoflow-status"`, `"ecoflow-journal"`,
   `"mqtt-status"`, `"commands-list"` — залежно від env), джерело —
   `registerJsonApiEntry()` (`src/main.cpp`): той самий виклик, що підписує
   `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий fixed-size

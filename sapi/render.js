@@ -58,6 +58,7 @@ function ssidLabel(ssid) {
 function dash(v) { return v === null || v === undefined ? '-' : v; }
 function fmtBytes(n) {
   if (n === null || n === undefined) return '-';
+  if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
   if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB';
   if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
   return n + ' B';
@@ -572,6 +573,38 @@ function heapBarHtml(h) {
     `</div>`;
 }
 
+// Бар "використано / вільно" для місткостей з двох чисел (LittleFS) - той самий
+// вигляд і CSS (.heap-bar), що heapBarHtml() вище, але без Largest/Min free:
+// у файлової системи нема "найбільшого вільного блоку" в тому сенсі, що в купи.
+// Два сегменти: Used (суцільний) і Free (порожній трек), кожен з власним title.
+// fmt - як підписати число в title: байти (LittleFS, SD) або записи (NVS).
+function usageBarHtml(used, total, fmt = fmtBytes) {
+  if (!total) return '';
+  const u = Math.min(total, Math.max(0, used));
+  const usedPct = (u / total) * 100;
+  return `<div class="heap-bar">` +
+      `<div class="heap-bar-used" style="width:${usedPct.toFixed(2)}%" ` +
+        `title="Used: ${esc(fmt(u))} of ${esc(fmt(total))}"></div>` +
+      `<div class="heap-bar-free" style="left:${usedPct.toFixed(2)}%;width:${(100 - usedPct).toFixed(2)}%" ` +
+        `title="Free: ${esc(fmt(total - u))} of ${esc(fmt(total))}"></div>` +
+    `</div>` +
+    `<div class="heap-bar-legend">` +
+      `<span><i class="sw sw-used"></i>Used</span>` +
+      `<span><i class="sw sw-free"></i>Free</span>` +
+    `</div>`;
+}
+
+// Total/Used/Free однією одиницею + відсотки - порт fsUsageRows() порталу.
+function fsUsageRows(used, total) {
+  const unit = fsUnit(total);
+  const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+  return [
+    ['Total', fsSizeIn(total, unit)],
+    ['Used', `${fsSizeIn(used, unit)} (${pct}%)`],
+    ['Free', `${fsSizeIn(total - used, unit)} (${100 - pct}%)`],
+  ];
+}
+
 function renderSystemInfo(data, extra) {
   extra = extra || {};
   const c = data.chip || {}, h = data.heap || {}, f = data.flash || {}, n = data.nvs || {};
@@ -632,7 +665,7 @@ function renderSystemInfo(data, extra) {
 
   const memUnit = fsUnit(h.totalBytes || h.freeBytes || 1);
   const freePct = h.totalBytes > 0 ? Math.round((h.freeBytes / h.totalBytes) * 100) : null;
-  html += '<div class="card"><h2>Memory</h2><dl>' + dlRows([
+  html += '<div class="card"><h2>Memory</h2><dl class="dl-bar">' + dlRows([
     ['Total', h.totalBytes ? fsSizeIn(h.totalBytes, memUnit) : '-'],
     ['Free', fsSizeIn(h.freeBytes, memUnit) + (freePct != null ? ` (${freePct}%)` : '')],
     ['Largest free block', fsSizeIn(h.largestFreeBlockBytes, memUnit)],
@@ -640,10 +673,23 @@ function renderSystemInfo(data, extra) {
     ['Min free ever', h.minFreeEverBytes ? fsSizeIn(h.minFreeEverBytes, memUnit) : '-'],
   ]) + '</dl>' + heapBarHtml(h) + '</div>';
 
-  html += `<div class="card"><h2>LittleFS</h2><dl>${mockDl(['Total', 'Used', 'Free'])}</dl></div>`;
-  html += `<div class="card"><h2>SD card</h2><dl>${mockDl(['Type', 'Total', 'Used', 'Free'])}</dl></div>`;
+  // data.littlefs - відсутнє у відповіді старої прошивки (до fs-list): мок, а не "not available".
+  const fs = data.littlefs;
+  html += '<div class="card"><h2>LittleFS</h2>' + (!fs ? `<dl class="dl-bar">${mockDl(['Total', 'Used', 'Free'])}</dl>`
+    : fs.available ? '<dl class="dl-bar">' + dlRows(fsUsageRows(fs.usedBytes, fs.totalBytes)) + '</dl>' + usageBarHtml(fs.usedBytes, fs.totalBytes)
+    : '<dl class="dl-bar"><dt>LittleFS</dt><dd class="muted">not available</dd></dl>') + '</div>';
+  // Як на порталі: плата без SD (available:false) - картки нема взагалі;
+  // data.sd відсутнє (стара прошивка) - мок.
+  const sd = data.sd;
+  if (!sd || sd.available) {
+    html += '<div class="card"><h2>SD card</h2>' + (!sd ? `<dl class="dl-bar">${mockDl(['Type', 'Total', 'Used', 'Free'])}</dl>`
+      : sd.present
+        ? '<dl class="dl-bar">' + dlRows([['Type', esc(sd.type)], ...fsUsageRows(sd.usedBytes, sd.sizeBytes)]) + '</dl>'
+          + usageBarHtml(sd.usedBytes, sd.sizeBytes)
+        : '<dl class="dl-bar"><dt>Card</dt><dd class="muted">not detected</dd></dl>') + '</div>';
+  }
 
-  html += '<div class="card"><h2>NVS</h2><dl>' + (n.available ? dlRows((() => {
+  html += '<div class="card"><h2>NVS</h2>' + (n.available ? '<dl class="dl-bar">' + dlRows((() => {
     const pct = n.totalEntries > 0 ? Math.round((n.usedEntries / n.totalEntries) * 100) : 0;
     return [
       ['Total', n.totalEntries.toLocaleString()],
@@ -651,7 +697,8 @@ function renderSystemInfo(data, extra) {
       ['Free', `${n.freeEntries.toLocaleString()} (${100 - pct}%)`],
       ['Namespaces', dash(n.namespaceCount)],
     ];
-  })()) : '<dt>NVS</dt><dd class="muted">not available</dd>') + '</dl></div>';
+  })()) + '</dl>' + usageBarHtml(n.usedEntries, n.totalEntries, (x) => x.toLocaleString() + ' entries')
+    : '<dl class="dl-bar"><dt>NVS</dt><dd class="muted">not available</dd></dl>') + '</div>';
 
   html += '<div class="card"><h2>Modules</h2>' + (portal
     ? (portal.modules && portal.modules.length
@@ -909,6 +956,139 @@ function renderEcoflowStatus(data, extra) {
   return html;
 }
 
+// Вкладка Files - лише перегляд каталогу LittleFS (порт лівої колонки #tab-files
+// порталу: крихти, лічильник, таблиця Name/Size). Редактор, New file/folder,
+// Rename/Delete/Download - мутації, яких SAPI не робить (sapi/README.md,
+// "Пре-альфа"), тому ті кнопки заблоковані з title, як Connect у Wi-Fi.
+// data - відповідь 'fs-list' (формат /api/fs/list порталу); ok:false -
+// повідомлення з message ("No such directory"), без падіння.
+const kFsReadOnlyHint = 'Not implemented yet - SAPI is read-only (mutations over MQTT are planned)';
+// --- Preview файла: порт fsIsTextual()/hexDump()/FS_IMAGES порталу. Портал
+// вантажить файл потоком /api/fs/raw; тут байти приходять шматками base64
+// ('fs-read'), а розпізнавання типу й показ - ті самі.
+const FS_IMAGE_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+  bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml', ico: 'image/x-icon', avif: 'image/avif' };
+// Скільки байтів Preview максимум тягне по MQTT (шматок - 3 КБ, тобто ~85 запитів).
+const FS_PREVIEW_MAX = 256 * 1024;
+// Зображення вантажимо цілком (обрізане не відображається): стеля лише як запобіжник.
+const FS_IMAGE_MAX = 1024 * 1024;
+
+function fsImageMime(path) {
+  const dot = path.lastIndexOf('.');
+  return dot > 0 ? FS_IMAGE_MIME[path.substring(dot + 1).toLowerCase()] || null : null;
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function concatBytes(chunks) {
+  const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  return out;
+}
+
+// Керівні байти, а не "все < 0x80": UTF-8 у файлі законний, 0x00 у текстовому - ні.
+function fsIsTextual(bytes) {
+  for (let i = 0; i < bytes.length; i++) {
+    const c = bytes[i];
+    if (c === 9 || c === 10 || c === 13) continue;
+    if (c < 0x20 || c === 0x7f) return false;
+  }
+  return true;
+}
+
+function hexDump(bytes) {
+  const lines = [];
+  for (let off = 0; off < bytes.length; off += 16) {
+    const row = Array.from(bytes.subarray(off, off + 16));
+    const cells = row.map((b) => b.toString(16).padStart(2, '0'));
+    while (cells.length < 16) cells.push('  ');
+    const ascii = row.map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.')).join('');
+    lines.push(off.toString(16).padStart(8, '0') + '  ' + cells.slice(0, 8).join(' ') + '  '
+      + cells.slice(8).join(' ') + '  ' + ascii);
+  }
+  return lines.join('\n');
+}
+
+// bytes - те, що встигли прочитати (може бути початок файла); total - повний
+// розмір. Повертає {meta, text} або {meta, imageMime} - DOM (blob URL, <img>)
+// будує index.html. Текст, "(empty)", hex-дамп бінарника - як на порталі.
+function fsPreviewFromBytes(path, bytes, total) {
+  const cut = bytes.length < total ? ` · first ${fmtBytes(bytes.length)} of ${fmtBytes(total)}` : '';
+  const meta = `${path} · ${fmtBytes(total)}` + cut;
+  const mime = fsImageMime(path);
+  if (mime) return { meta, imageMime: mime };
+  if (!fsIsTextual(bytes)) return { meta: meta + ' · binary', text: hexDump(bytes) };
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  return { meta, text: bytes.length === 0 ? '(empty)' : text };
+}
+
+function fsJoin(dir, name) { return dir === '/' ? '/' + name : dir + '/' + name; }
+
+function fsCrumbsHtml(data) {
+  const parts = data.path.split('/').filter((p) => p.length);
+  const crumbs = [`<button data-fs-cd="/">${esc(data.label || 'root')}</button>`];
+  let acc = '';
+  for (const part of parts) {
+    acc += '/' + part;
+    crumbs.push('<span class="sep">/</span>', `<button data-fs-cd="${esc(acc)}">${esc(part)}</button>`);
+  }
+  return crumbs.join('');
+}
+
+// Права колонка Files - порт Editor + Preview порталу. Редактор тут лише
+// "місце під форму" (усе disabled: SAPI не пише у файлову систему), Preview -
+// той самий блок #fs-view з placeholder'ом: вміст файлів по MQTT не віддається.
+function fsEditorHtml() {
+  const hint = esc(kFsReadOnlyHint);
+  return '<h2>Editor <span class="muted" style="font-size:.75em; font-weight:400"></span></h2>'
+    + '<form id="fs-form" class="row" onsubmit="return false">'
+    + `<input id="fs-file" class="fill" placeholder="/path/to/file" disabled title="${hint}">`
+    + '<span id="fs-actions">'
+    + `<button class="act" type="submit" disabled title="${hint}">Save</button>`
+    + `<button class="act ghost" type="button" disabled title="${hint}">Clear</button></span>`
+    + `<textarea id="fs-content" rows="8" placeholder="file contents" wrap="off" disabled title="${hint}"></textarea>`
+    + '</form>'
+    + '<p class="muted">Editing is not available over MQTT yet (SAPI is read-only). '
+    + 'Files can be previewed: contents are fetched in 3 KB pieces.</p>'
+    + '<h2>Preview <span id="fs-view-meta" class="muted" style="font-size:.75em; font-weight:400"></span></h2>'
+    + '<div id="fs-view" class="muted">Nothing to preview.</div>';
+}
+
+function renderFsList(data) {
+  if (!data) return '<p class="muted">Not loaded yet.</p>';
+  if (!data.ok) return `<p class="muted">${esc(data.message || 'Cannot read directory')}</p>`;
+  // Каталоги вгорі, далі за іменем - як у порталі.
+  const list = data.entries.slice().sort((a, b) =>
+    a.dir !== b.dir ? (a.dir ? -1 : 1) : a.name.localeCompare(b.name));
+  const usage = data.total ? ` · ${fmtBytes(data.used)} of ${fmtBytes(data.total)} used` : '';
+  const count = `${list.length} item(s)${data.truncated ? ' - list truncated' : ''}${usage}`;
+  const rows = list.length === 0
+    ? '<tr><td colspan="3" class="muted">Directory is empty.</td></tr>'
+    : list.map((e) => {
+        const path = fsJoin(data.path, e.name);
+        const attr = ` ${e.dir ? 'data-fs-open' : 'data-fs-view'}="${esc(path)}"`;
+        const action = e.dir
+          ? `<button class="act ghost" data-fs-open="${esc(path)}">Open</button>`
+          : `<button class="act ghost" data-fs-view="${esc(path)}">View</button>`;
+        return `<tr${attr}><td class="n" title="${esc(path)}">${e.dir ? '\u{1F4C1} ' : ''}${esc(e.name)}</td>`
+          + `<td class="opt num muted">${e.dir ? '' : fmtBytes(e.size)}</td><td class="num">${action}</td></tr>`;
+      }).join('');
+  const files = `<h2>Files <span class="muted" style="font-size:.75em; font-weight:400">${esc(count)}</span></h2>`
+    + `<div class="row"><div class="fs-crumbs fill">${fsCrumbsHtml(data)}</div>`
+    + `<button class="act ghost" disabled title="${esc(kFsReadOnlyHint)}">New folder</button>`
+    + `<button class="act ghost" disabled title="${esc(kFsReadOnlyHint)}">New file</button></div>`
+    + '<table id="fs-table"><thead><tr><th>Name</th><th class="opt num">Size</th><th></th></tr></thead>'
+    + `<tbody>${rows}</tbody></table>`
+    + usageBarHtml(data.used, data.total);
+  return '<div class="cols"><div class="col">' + files + '</div><div class="col">' + fsEditorHtml() + '</div></div>';
+}
+
 const RENDERERS = {
   'system-info': renderSystemInfo,
   'wifi-status': renderWifiStatus,
@@ -927,7 +1107,8 @@ if (typeof module !== 'undefined' && module.exports) {
     ecoflowSystemRows, ecoflowSystemDevicesHtml, ecoSysDeviceRow, ecoDeviceDetailRows,
     ecoBrokerText, ecoTransportText, ecoTableRow, ecoDeviceCard, ecoParamsTable,
     ecoJournalRow, ecoJournalSection, ecoFinishText,
-    mqttSystemRows, mqttConnectionRows, mqttLwtRows, mqttConsoleMirrorRows, heapBarHtml,
+    mqttSystemRows, mqttConnectionRows, mqttLwtRows, mqttConsoleMirrorRows, heapBarHtml, usageBarHtml, fsUsageRows, renderFsList,
+    fsPreviewFromBytes, fsIsTextual, hexDump, b64ToBytes, concatBytes, fsImageMime, FS_PREVIEW_MAX, FS_IMAGE_MAX,
     renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus, RENDERERS,
   };
 }

@@ -54,6 +54,11 @@ public:
   static String nvsStatsJson();
   static String partitionsJson();
 
+  // LittleFS/SD - не static: дані приходять через колбеки екземпляра (шина
+  // залежить від плати). Спільні для /api/system/info і MQTT 'system-info'.
+  String littleFsJson() const;
+  String sdJson() const;
+
 private:
   // WebJobQueue (loop()): partition table і NVS-статистика - flash I/O, тому
   // весь звіт іде одним job'ом, а не окремою задачею на кожен блок.
