@@ -70,6 +70,12 @@
 #ifndef HAS_CONSOLE_MQTT
 #define HAS_CONSOLE_MQTT 0
 #endif
+#ifndef HAS_SD_WORKBENCH
+#define HAS_SD_WORKBENCH 0
+#endif
+#ifndef HAS_SD_MSC
+#define HAS_SD_MSC 0
+#endif
 
 // BOARD_HAS_LIGHT_SENSOR - похідний прапорець, не прямий запис у
 // environment.h (BOARD_HAS_, не HAS_, - апаратна ознака плати, той самий
@@ -122,6 +128,8 @@
   X(HAS_GMAIL_SENDER)    \
   X(HAS_MQTT_CLIENT)     \
   X(HAS_CONSOLE_MQTT)    \
+  X(HAS_SD_WORKBENCH)    \
+  X(HAS_SD_MSC)          \
   X(HAS_SCREEN_MIRROR)
 
 namespace features {
@@ -134,7 +142,7 @@ struct Entry {
 // Назва рядка - буквальне ім'я макроса (не перейменований варіант): друге
 // джерело назви того самого прапорця розходиться саме так, як розійшлись
 // "OPEN"/"open" у encryptionName() (CLAUDE.md, DRY). Дрібний, fixed-size
-// масив (13 записів) - PROGMEM тут не потрібен, розмір на порядки менший за
+// масив (16 записів) - PROGMEM тут не потрібен, розмір на порядки менший за
 // поріг, коли розміщення в RAM/DRAM (esp8266) взагалі помітне.
 #define FEATURE_ENTRY(flag) {#flag, static_cast<bool>(flag)},
 static const Entry kAll[] = {FEATURE_LIST(FEATURE_ENTRY)};

@@ -8,6 +8,8 @@
 
 #include <LittleFS.h>
 
+#include "Sd/Sd.hpp"
+
 static TouchScreenConfig makeTouchScreenConfig() {
   TouchScreenConfig c;
   // Приклад: контролер видає сирі 0..4095, екран фізично 320x240,
@@ -212,7 +214,7 @@ static auto littleFsUsage = [](size_t& used, size_t& total) {
 };
 WebFilesModule webFilesModule(LittleFS, "LittleFS", littleFsUsage);
 #if BOARD_HAS_SD
-// getSdCardInfo() - src/main.cpp, оголошення в AppGlobals.hpp.
+// getSdCardInfo() - src/Sd/SdCard.cpp.
 WebSystemModule webSystemModule(littleFsUsage, getSdCardInfo);
 #else
 WebSystemModule webSystemModule(littleFsUsage);

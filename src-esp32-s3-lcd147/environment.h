@@ -26,6 +26,25 @@
 #define BOARD_HAS_DISPLAY 1
 #define BOARD_HAS_TOUCHSCREEN 0
 #define BOARD_HAS_SD 1
+// Важкий SD-інструментарій поверх BOARD_HAS_SD (src/Sd/Sd.hpp): домени
+//   SD_PROBE  - sdprobe/sdscan/sdbb: діагностика шини й пінів, коли картка
+//               не монтується (лише SPI);
+//   SD_READER - sdraw/sdext4/sdbench/sdcrc/sdverify/sdmap: сирі сектори в
+//               обхід ФС (порятунок даних, бенчмарк, карта деградації);
+//               sdbench/sdcrc/sdmap блокують loop() на десятки секунд -
+//               перед ними 'watchdog off';
+//   SD_IMAGE  - sdimg: уся картка по HTTP для зняття образу, дисплей на цей
+//               час заморожений (лише SPI).
+// 0 - картка лишається носієм: монтування, 'status sd'/'sd+', System-вкладка.
+#define HAS_SD_WORKBENCH 1
+// USB Mass Storage: команда 'sdmsc on' віддає картку хосту як read-only
+// USB-накопичувач (TinyUSB MSC, src-<env>/SdMassStorage.cpp), без зняття
+// картки зі слоту. Хост читає сектори через той самий ActiveBulkReader, що й
+// SD_READER; після серії збоїв читання USB-стек просить перемонтувати картку,
+// і робить це loop() (remountCardIfMscAsked()), а не таск TinyUSB - виклик
+// end()/begin() драйвера звідти валив плату. Потрібен native USB і
+// реалізація SdMassStorage.cpp у src-<env>/ - тому окремо від HAS_SD_WORKBENCH.
+#define HAS_SD_MSC 1
 
 // MQTT-клієнт (lib/MqttClient) - опис принципу в env:esp32-4848s040.
 // PicoMQTT присутній у lib_deps цього env.

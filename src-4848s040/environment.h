@@ -24,6 +24,9 @@
 #define BOARD_HAS_DISPLAY 1
 #define BOARD_HAS_TOUCHSCREEN 1
 #define BOARD_HAS_SD 1
+// Важкий SD-інструментарій (sdprobe/sdraw/sdbench/sdmap/sdimg/...) - опис у
+// env:esp32-s3-lcd147. Тут вимкнено: картка лише носій (status sd, System).
+#define HAS_SD_WORKBENCH 0
 
 // MQTT-клієнт (lib/MqttClient) - транспорт для загального `mqtt` (SAPI JSON
 // API, discovery, console-дзеркало) і, окремо, EcoflowClient. Явний

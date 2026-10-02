@@ -62,7 +62,9 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 | `TFT_ROTATION` | 2 | 3 | 3 | 3 | 3 | 1 | 0 | 2 |
 | `DISPLAY_SPLIT_COUNT` (смуг на кадр) | 1 | 2 | 6 | **3** ¹¹ | 4 | **2** | 0 | 1 |
 | `SPRITE_COLOR_DEPTH` | 16 | 16 | 16 | 16 | 16 | 16 | 16 | 1 |
-| SD (`BOARD_HAS_SD`) | SPI | SD_MMC 4-bit | SPI | — | SPI ¹ | SPI ² | — | — |
+| SD (`BOARD_HAS_SD`) | SPI | SPI (слот SD_MMC, `SD_FORCE_SPI`) | SPI | — | SPI ¹ | SPI ² | — | — |
+| SD-інструментарій (`HAS_SD_WORKBENCH`) | — | ✅ | — | — | — | — | — | — |
+| SD як USB-диск (`HAS_SD_MSC`) | — | ✅ | — | — | — | — | — | — |
 | Touch (`BOARD_HAS_TOUCHSCREEN`) | GT911 | — | XPT2046 | — | **AXS5106L** ⁴ | — | — | — |
 | IMU (`BOARD_HAS_IMU`) | — | — | — | — | **QMI8658A** ⁵ | — | — | — |
 | I²C (`I2C_SDA`/`I2C_SCL`) | 19 / 45 | — | — | — | **18 / 19** | — | — | — |
@@ -340,6 +342,8 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 | Ключ | Рід | Що вмикає | Flash | RAM |
 |---|---|---|---:|---:|
 | `BOARD_HAS_SD` | явний | SD-карта: монтування, `sd*`-команди, `SDCardInspector`, `SDRawReader`, `SDImageServer`, MSC | **70.4 КБ** | 1.7 КБ |
+| `HAS_SD_WORKBENCH` | явний (лише з `BOARD_HAS_SD`) | домени SD_PROBE/SD_READER/SD_IMAGE: `sdprobe`/`sdscan`/`sdbb`, `sdraw`…`sdmap`, `sdimg` + `SDRawReader`/`SDImageServer` (входить у 70.4 КБ рядка вище; виміряно 03.10.2026 вимкненням на тій самій `esp32-c6`) | **36.2 КБ** | 1.5 КБ |
+| `HAS_SD_MSC` | явний (лише з `BOARD_HAS_SD`, потрібен `src-<env>/SdMassStorage.cpp`) | `sdmsc` — картка як USB-накопичувач (TinyUSB MSC) | не міряно (лише s3-lcd147) | — |
 | `HAS_ECOFLOW_CLIENT` | явний | `src/Ecoflow/`: REST-автh, підпис, MQTT-клієнт EcoFlow, реєстр пристроїв | **53.8 КБ** | 1.3 КБ |
 | `HAS_GMAIL_SENDER` | від `lib_deps` (`ReadyMail`) | SMTP: команди `sendmail`, `mailto`, `EmailTarget` | **50.5 КБ** (до рефактора) | 2.0 КБ |
 | `HAS_WEB_PORTAL` | явний | `lib/WebPortal`: сервер, автентифікація, статика, розділи Wi-Fi, Commands і Console (SSE + опитування) | **68.8 КБ** ⁰ | **0.9 КБ** ¹ |
@@ -1206,9 +1210,54 @@ EcoFlow-блок і показувалась не та конфігурація 
 | `src/App/ConfigKeys.hpp` | ключі NVS `CFG_*`, дефолт `WATCHDOG_ENABLED` | — |
 | `src/Screen/Background.{hpp,cpp}` | `setupBackgroundImage()`; `registerBackgroundCommands()` — ефекти фону (`blur`…`dither`), `background`, `bg-dump`; без `LITTLEFS_BACKGROUND_IMAGE` команд немає | `setup()`, `setupSerialCommander()` |
 | `src/BackgroundImages.{hpp,cpp}` | малювання фону (`drawBackgroundImage()`), вшиті/PROGMEM-зображення | `loop()` |
+| `src/Sd/*` | SD-картка: `Sd.hpp` (публічний API), `SdBus.hpp` (шина, `activeSd()`), `SdCard`/`SdProbe`/`SdReader`/`SdImage`/`SdMsc` — див. «SD-картка: усі команди й місця» нижче | `setup()`, `setupSerialCommander()`, `loop()` (`sdimg`, MSC-remount) |
+| `src/Screen/DisplayBusYield.hpp` | `YIELD_DISPLAY_BUS()` — тимчасово віддати SPI-шину дисплея з-під кадру | SD, `display_flip()` |
 | `src/Ecoflow/EcoflowSetup.{hpp,cpp}` | `setupEcoflow()`: колбеки `EcoflowClient`/`EcoflowDeviceRegistry` (лог, retained `devices/<id>/ecoflow/<sn>/grid`), cron-задачі (live-чекпоінт, `expireStale()`, REST → MQTT на старті, `ecoflow` раз на хвилину), команди `ecoflow*` | `setup()`, після `setupMqttClient()` |
 | `src/Mqtt/JsonApi.{hpp,cpp}` | SAPI: реєстр і диспетчеризація `devices/<id>/api/<cmd>`, усі записи (`commands-list` завжди; решта — лише з `HAS_WEB_PORTAL`); `jsonApiCommandName()` для discovery | `setupMqttClient()` → `registerJsonApiCommands()` |
 | `src/Mqtt/Discovery.{hpp,cpp}` | `publishDiscovery()`: retained `devices/<id>/discovery`, `board` = `BOARD_NAME` з `environment.h` | `onConnect`-колбек у `setupMqttClient()` (таск `mqtt-net`) |
+
+### SD-картка: усі команди й місця, що з нею працюють
+
+Три рівні, кожен — свій прапорець у розділі 2 `src-<env>/environment.h`
+(опис — `env:esp32-s3-lcd147`). Код — `src/Sd/`, публічний API — `Sd/Sd.hpp`,
+вибір шини (SPI / SDMMC) — `Sd/SdBus.hpp` (`activeSd()`, `ActiveBulkReader`).
+`SD_USE_SDMMC` зараз не діє ніде: єдиний слот SD_MMC (`s3-lcd147`) працює по
+SPI через `SD_FORCE_SPI=1`.
+
+| Команда / місце | Що робить | Гейт | Файл | Вага |
+| :--- | :--- | :--- | :--- | :--- |
+| **Базове** | | | | |
+| `setupSD()` | монтування на старті; SPI — сходинки частот `SD_FREQ` → 400 кГц | `BOARD_HAS_SD` | `SdCard.cpp` | легка, але до 6,6 с ретраїв без картки |
+| `status sd` | `printSdStatus()`: тип, розмір, MBR-розділи (`SDCardInspector`) | `BOARD_HAS_SD` | `SdCard.cpp` | легка |
+| `status sd+` | `dumpSDInfo()`: звіт + лістинг кореня на 2 рівні | `BOARD_HAS_SD` | `SdCard.cpp` | легка |
+| картка на вкладці System, SAPI `system-info` | `getSdCardInfo()` → `WebSystemModule` | `BOARD_HAS_SD` + `HAS_WEB_PORTAL` | `SdCard.cpp` | легка |
+| **Домен SD_PROBE — діагностика шини й пінів** | | | | |
+| `sdprobe [force]` | CMD0/CMD8 вручну по SPI, сирі R1; `force` демонтує картку до ребуту | `HAS_SD_WORKBENCH`, лише SPI | `SdProbe.cpp` | середня |
+| `sdscan` | перебір `SD_CS`/`SD_MISO` (SCK/MOSI фіксовані) | `HAS_SD_WORKBENCH`, лише SPI | `SdProbe.cpp` | середня, смикає піни |
+| `sdbb` | bit-bang опитування без SPI-периферії | `HAS_SD_WORKBENCH`, лише SPI | `SdProbe.cpp` | середня |
+| **Домен SD_READER — сирі сектори (`SDRawReader`)** | | | | |
+| `sdraw <lba> [count]` | hexdump секторів в обхід ФС (≤ 16 за раз) | `HAS_SD_WORKBENCH` | `SdReader.cpp` | середня |
+| `sdext4 <1..4> [sb_lba]` | суперблок ext2/3/4 розділу MBR | `HAS_SD_WORKBENCH` | `SdReader.cpp` | середня |
+| `sdbench [lba] [sectors] [chunk]` | швидкість послідовного читання | `HAS_SD_WORKBENCH` | `SdReader.cpp` | блокує `loop()` на десятки секунд |
+| `sdcrc <lba> <count> [chunk] [vote_passes]` | CRC32 діапазону, голосування за більшістю | `HAS_SD_WORKBENCH` | `SdReader.cpp` | блокує `loop()` |
+| `sdverify <lba> <sectors> …` | повторюваність читання, нестабільні зони | `HAS_SD_WORKBENCH` | `SdReader.cpp` | блокує `loop()` |
+| `sdmap […]` | карта деградації по всій картці | `HAS_SD_WORKBENCH` | `SdReader.cpp` | блокує `loop()` на хвилини |
+| **Домен SD_IMAGE** | | | | |
+| `sdimg on\|off\|status` | уся картка по HTTP (`SDImageServer`) для зняття образу | `HAS_SD_WORKBENCH`, лише SPI | `SdImage.cpp` | важка; поки активна — ранній `return` у `loop()`, дисплей не малюється |
+| **USB-накопичувач** | | | | |
+| `sdmsc on\|off\|status` | картка хосту як read-only USB-диск (TinyUSB MSC, `src-<env>/SdMassStorage.cpp`) | `HAS_SD_MSC` | `SdMsc.cpp` | важка |
+| `remountCardIfMscAsked()` у `loop()` | перемонтування після серії збоїв читання — з `loop()`, не з таску TinyUSB | `HAS_SD_MSC` | `SdMsc.cpp` | — |
+
+Перед `sdbench`/`sdcrc`/`sdmap` — `watchdog off` (+ ребут): вони свідомо
+блокують `loop()` довше за таймаут watchdog. Усе, що читає картку з-під
+кадру, бере `YIELD_DISPLAY_BUS()` (`src/Screen/DisplayBusYield.hpp`): шина
+SPI на частині плат спільна з дисплеєм.
+
+| Плата | `BOARD_HAS_SD` | `HAS_SD_WORKBENCH` | `HAS_SD_MSC` |
+| :--- | :---: | :---: | :---: |
+| `esp32-s3-lcd147` | 1 | **1** | **1** |
+| `esp32-c6`, `esp32-c6-lcd096`, `esp32-4848s040`, `esp32-st7789` | 1 | 0 | 0 |
+| `esp32-c3`, `ttgo-t1`, `esp8266` | 0 | 0 | 0 |
 
 ### MQTT-підписки PicoMQTT: як насправді
 
@@ -1395,6 +1444,16 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **`src/main.cpp` → `src/Sd/*` + нові прапорці `HAS_SD_WORKBENCH`,
+  `HAS_SD_MSC` (крок 2.4 рефакторингу).** SD розкладено за доменами: базове
+  (`SdCard`, `BOARD_HAS_SD`), SD_PROBE/SD_READER/SD_IMAGE (`HAS_SD_WORKBENCH`),
+  USB-диск (`SdMsc`, `HAS_SD_MSC` замість перевірки `BOARD_ESP32_S3_LCD147` у
+  спільному коді). Макрос `ACTIVE_SD` → `activeSd()`; `YIELD_DISPLAY_BUS()` —
+  `src/Screen/DisplayBusYield.hpp`. Workbench увімкнено лише на
+  `esp32-s3-lcd147`; на `c6`/`c6-lcd096`/`4848s040`/`st7789` команди зникли:
+  `esp32-c6` Flash −36.2 КБ, RAM −1.7 КБ. Повна таблиця команд — «SD-картка:
+  усі команди й місця». Закрито борг «SD: важкі діагностичні команди…».
+  `main.cpp`: 4089 → 2615 рядків.
 - 2026-10-03 — **`src/main.cpp` → `src/Ecoflow/EcoflowSetup.{hpp,cpp}` (крок
   2.3 рефакторингу).** `setupEcoflow()` з усіма колбеками, cron-задачами й
   ~15 командами `ecoflow*`; `ecoflowVerbose` — стан модуля. Обгортку

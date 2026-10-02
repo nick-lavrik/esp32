@@ -122,11 +122,6 @@ extern WebCommandsModule webCommandsModule;
 extern WebNvsModule webNvsModule;
 extern WebFilesModule webFilesModule;
 extern WebSystemModule webSystemModule;
-#if BOARD_HAS_SD
-// Провайдер картки для вкладки System. Означена в src/main.cpp поруч із
-// dumpSDInfo() - саме там відомо, яка шина (SD чи SD_MMC) на цій платі.
-bool getSdCardInfo(WebSystemSdInfo& out);
-#endif
 #if HAS_SCREEN_MIRROR
 extern WebScreenModule webScreenModule;
 #endif
