@@ -393,6 +393,14 @@ tr.active > td:first-child { box-shadow: inset 2px 0 0 var(--ok); font-weight: 6
 #nvs-view { background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
   margin-top: 8px; white-space: pre; max-height: 50vh; overflow: auto;
   font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* Add or update + Value липнуть до верху, як #tab-nvs на порталі
+   (assets/www/index.html): таблиця ключів довша за екран, і без цього кожен
+   View - це скрол угору до переглядача й назад. Працює, бо .cols має
+   align-items: flex-start (розтягнута на висоту сусіда колонка не липне) і
+   колонка нижча за вікно (#nvs-view - не вище 50vh). В одну колонку
+   (<= 900px) форма стоїть ПІД таблицею, липнути їй нема до чого. */
+section[data-tab="nvs"] .col + .col { position: sticky; top: 16px; }
+@media (max-width: 900px) { section[data-tab="nvs"] .col + .col { position: static; } }
 #fs-table td.n { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 textarea { background: var(--bg); border: 1px solid var(--line); color: var(--text);
@@ -490,22 +498,24 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
    "heartbeat" і подібного простого тексту), розгортається кліком по
    .log-line, схований за замовчуванням (`hidden`). Для об'єднаного рядка
    (mergeReply) - дві підписані частини (request/reply) в тому самому блоці. */
-/* .log-pretty-body - єдиний реальний flex-child (скрол вмісту, на всю
-   висоту .log-pretty). .log-pretty-resize - НЕ flex-child, а
-   position:absolute overlay поверх body (position:relative тут же) - не
-   position:sticky (той зависав посеред JSON під час скролу, виглядав як
-   баг) і не окремий flex-рядок під вмістом (той з'їдав 14px власної
-   висоти - під ручкою просто не лишалось тексту, щоб крізь неї щось
-   бачити). Overlay напівпрозорий (.log-pretty-resize нижче) - останній
-   рядок під ним видно, притлумленим, а не відрізаним. */
-.log-pretty { position: relative; margin: 0 12px 8px 38px; background: #00000030;
-  border: 1px solid var(--line); border-radius: 4px; max-height: 320px;
-  display: flex; flex-direction: column; overflow: hidden; }
-/* padding-bottom (22, не 8) - запас під overlay-ручку (14px): реальний
+/* Блок зі зміною висоти - спільна розкладка для всіх таких блоків (pretty
+   log, Output вкладки Commands; attachResizeHandle() у JS):
+     .resizable       - коробка, якій ручка міняє висоту;
+     .resizable-body  - єдиний flex-child, скролить вміст на всю її висоту;
+     .resize-handle   - ручка: НЕ flex-child, а position:absolute overlay
+                        поверх body (position:relative на .resizable).
+   Не position:sticky (той зависав посеред JSON під час скролу, виглядав як
+   баг) і не окремий flex-рядок під вмістом (той з'їдав 14px власної висоти
+   - під ручкою просто не лишалось тексту, щоб крізь неї щось бачити).
+   Overlay напівпрозорий - останній рядок під ним видно, притлумленим, а не
+   відрізаним. padding-bottom тіла (22px) - запас під ручку (14px): реальний
    текст завжди можна доскролити ВИЩЕ ручки, вона перекриває лише цей
-   запасний "хвіст", не останній рядок даних. */
-.log-pretty-body { padding: 8px 10px 22px; overflow: auto; flex: 1 1 auto;
-  font-size: 11.5px; line-height: 1.45; }
+   запасний "хвіст". Решта padding тіла - у власних класах блоків. */
+.resizable { position: relative; display: flex; flex-direction: column; overflow: hidden; }
+.resizable-body { overflow: auto; flex: 1 1 auto; padding-bottom: 22px; }
+.log-pretty { margin: 0 12px 8px 38px; background: #00000030;
+  border: 1px solid var(--line); border-radius: 4px; max-height: 320px; }
+.log-pretty-body { padding: 8px 10px 22px; font-size: 11.5px; line-height: 1.45; }
 .log-pretty-body pre { margin: 0; white-space: pre-wrap; }
 .log-pretty-label { color: var(--muted); font-weight: 600; margin: 8px 0 2px; }
 .log-pretty-label:first-child { margin-top: 0; }
@@ -516,12 +526,12 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
    лишається читабельним, притлумленим; максимальна висота драгу обмежена
    в JS повною висотою вмісту (body.scrollHeight) - розтягнути порожнечу
    понад те, що реально є в блоці, не можна. */
-.log-pretty-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 14px;
+.resize-handle { position: absolute; left: 0; right: 0; bottom: 0; height: 14px;
   cursor: ns-resize; touch-action: none; display: flex; align-items: center; justify-content: center;
   background: rgba(14, 17, 22, .55); }
-.log-pretty-resize:hover, .log-pretty-resize.dragging { background: rgba(14, 17, 22, .8); }
-.log-pretty-resize::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--accent); opacity: .8; }
-.log-pretty-resize:hover::before, .log-pretty-resize.dragging::before { opacity: 1; }
+.resize-handle:hover, .resize-handle.dragging { background: rgba(14, 17, 22, .8); }
+.resize-handle::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--accent); opacity: .8; }
+.resize-handle:hover::before, .resize-handle.dragging::before { opacity: 1; }
 .muted { color: var(--muted); }
 .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-small); color: var(--muted); }
 .checkbox-row input { width: auto; }
@@ -538,13 +548,21 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 .cols { display: flex; gap: 20px; align-items: flex-start; }
 .cols > .col { flex: 1; min-width: 0; }
 @media (max-width: 900px) { .cols { flex-direction: column; } }
-#cmd-run-out { white-space: pre-wrap; word-break: break-word; min-height: 22vh;
+/* Output - .out як рамка (.resizable), а скролиться #cmd-run-out усередині:
+   ручці потрібна коробка, що НЕ скролиться, інакше вона їхала б разом із
+   текстом. Тому padding .out переїжджає на тіло. Без clampToContent (див.
+   attachResizeHandle): вивід приходить ПІСЛЯ запуску, і розтягнути порожню
+   панель наперед - нормальний сценарій. */
+#cmd-run-box { padding: 0; min-height: 22vh; }
+#cmd-run-out { padding: 10px 12px 22px; white-space: pre-wrap; word-break: break-word;
   font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #cmd-run-input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #cmd-list-filter { width: 100%; }
 #cmd-list-box { max-height: 40vh; overflow-y: auto; margin-top: 8px;
   border: 1px solid var(--line); border-radius: 6px; }
-#cmd-list-table td { padding: 4px 10px; vertical-align: baseline; }
+/* Без ліній між рядками: список - довідка, не таблиця даних, а підсвітка
+   при наведенні (нижче) і так показує, по якому рядку клік. */
+#cmd-list-table td { padding: 4px 10px; vertical-align: baseline; border-bottom: none; }
 #cmd-list-table tr[data-pick] { cursor: pointer; }
 #cmd-list-table tr[data-pick]:hover { background: #ffffff0f; }
 #cmd-list-table td.n { width: 1%; white-space: nowrap; color: var(--accent);
@@ -673,7 +691,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     </div>
 
     <h2>Output</h2>
-    <div id="cmd-run-out" class="out"></div>
+    <div id="cmd-run-box" class="out resizable"><div id="cmd-run-out" class="resizable-body"></div></div>
     </div>
 
     <div class="col">
@@ -1018,7 +1036,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     return frag;
   }
 
-  // Ручка зміни висоти .log-pretty - Pointer Events, не нативний CSS
+  // Ручка зміни висоти блока .resizable (CSS вище) - Pointer Events, не нативний CSS
   // `resize` (той на iOS Safari не працює тачем узагалі). setPointerCapture
   // прив'язує подальші move/up до САМОЇ ручки, незалежно від того, куди
   // фізично зʼїхав палець/курсор - document-рівневих слухачів не треба.
@@ -1030,11 +1048,12 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   // додавати її висоту зверху не треба (padding-bottom body вже несе запас
   // під неї). Рахується ОДИН раз на pointerdown (не на кожен pointermove -
   // зайвий reflow), далі drag просто клемпиться нею - розтягнути блок
-  // більше, ніж є реального вмісту, не можна.
-  function attachResizeHandle(pretty, body) {
+  // більше, ніж є реального вмісту, не можна. clampToContent: false - для
+  // блоків, куди вміст ще приїде (Output команди), там стеля - лише CSS.
+  function attachResizeHandle(box, body, clampToContent = true) {
     const handle = document.createElement('div');
-    handle.className = 'log-pretty-resize';
-    handle.title = 'потягнути - змінити висоту блока';
+    handle.className = 'resize-handle';
+    handle.title = 'drag to resize';
     let startY = 0;
     let startH = 0;
     let maxTotal = Infinity;
@@ -1042,21 +1061,21 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       ev.preventDefault(); // не тягнути виділення тексту під час драгу
       handle.setPointerCapture(ev.pointerId);
       startY = ev.clientY;
-      startH = pretty.getBoundingClientRect().height;
-      maxTotal = body.scrollHeight;
+      startH = box.getBoundingClientRect().height;
+      maxTotal = clampToContent ? body.scrollHeight : Infinity;
       handle.classList.add('dragging');
     });
     handle.addEventListener('pointermove', (ev) => {
       if (!handle.classList.contains('dragging')) return;
-      pretty.style.maxHeight = 'none'; // інакше CSS max-height:320px ріже ріст
+      box.style.maxHeight = 'none'; // інакше CSS max-height блока ріже ріст
       const h = Math.max(60, startH + (ev.clientY - startY));
-      pretty.style.height = Math.min(h, maxTotal) + 'px';
+      box.style.height = Math.min(h, maxTotal) + 'px';
     });
     handle.addEventListener('pointerup', (ev) => {
       handle.classList.remove('dragging');
       handle.releasePointerCapture(ev.pointerId);
     });
-    pretty.appendChild(handle);
+    box.appendChild(handle);
   }
   // Спільний шлях наповнення .log-pretty (одиночне повідомлення й
   // mergeReply) - завжди чистить і заново кладе вміст у .log-pretty-body +
@@ -1066,7 +1085,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   function setPrettyContent(pretty, ...nodes) {
     pretty.innerHTML = '';
     const body = document.createElement('div');
-    body.className = 'log-pretty-body';
+    body.className = 'log-pretty-body resizable-body';
     for (const n of nodes) body.appendChild(n);
     pretty.appendChild(body);
     attachResizeHandle(pretty, body);
@@ -1163,7 +1182,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
 
     if (parsed) {
       const pretty = document.createElement('div');
-      pretty.className = 'log-pretty';
+      pretty.className = 'log-pretty resizable';
       pretty.hidden = true;
       setPrettyContent(pretty, prettyBlock(raw));
       row.appendChild(pretty);
@@ -2019,6 +2038,10 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       renderCmdShortcuts();
     }
   });
+
+  // Ручка висоти Output - один раз: textContent='' у runCommand() чистить
+  // лише тіло (#cmd-run-out), ручка живе в рамці (#cmd-run-box).
+  attachResizeHandle($('#cmd-run-box'), $('#cmd-run-out'), false);
 
   $('#cmd-run-form').addEventListener('submit', (ev) => {
     ev.preventDefault();
