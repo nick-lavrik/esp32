@@ -128,7 +128,7 @@ public:
   // "params" ОДНОГО пристрою, яких mqttStatusJson() вище свідомо не несе
   // (розмір payload, розділ "Провайдер ≠ форматер", docs/mqtt-web-handoff.md).
   // snap - знімок ОДНОГО пристрою з devicesSnapshot() (виклик сам шукає збіг
-  // за серійним номером - main.cpp, registerEcoflowDeviceParamsEntries()).
+  // за серійним номером - src/Mqtt/JsonApi.cpp, registerEcoflowDeviceParamsEntries()).
   static String mqttDeviceParamsJson(const WebEcoflowDeviceSnapshot& snap);
 
   // Форматер журналу переходів grid (GET /api/ecoflow/journal і SAPI-команда

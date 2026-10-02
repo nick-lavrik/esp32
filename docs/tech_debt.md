@@ -1499,6 +1499,15 @@ ESP32-C6, і сусідні пам'яткі в auto-memory) — і важить 
 
 ## 6. Дрібне, що варто прибрати принагідно
 
+- `MqttClient::resubscribeAll()` (PicoMQTT-гілка) зараховує в
+  `subscribeDeniedCount()` і логує `subscribe <topic> denied` **будь-яку**
+  невдалу підписку: і SUBACK 0x80 (справжня відмова ACL), і `!accepted` —
+  обірване з'єднання посеред підписування. На `esp32-c6` при RSSI −86…−90 dBm
+  (03.10.2026) за хвилину після старту набралось `denied: 36 ... rejected by
+  broker (ACL)`, хоча ACL (`readwrite mykola-lavryk/#`) ці топіки дозволяє —
+  рядкам `denied` передує `MQTT disconnected`. Розвести два лічильники
+  (`denied` лише для 0x80, окремо «subscribe failed: connection lost»), щоб
+  вкладка MQTT не показувала ACL-проблему там, де її немає.
 - `HttpServer::setTemplateResolver()` — заглушка, `ITemplateResolver` не
   реалізований; або дописати, або прибрати разом із полем.
 - `src/netcli.h:626` — чотири попередження `-Wformat` (`%u` проти

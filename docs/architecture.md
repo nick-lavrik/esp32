@@ -1149,7 +1149,7 @@ EcoFlow-блок і показувалась не та конфігурація 
 | Таск | Хто створює | Стек | Що виконує | Обмеження |
 | :--- | :--- | ---: | :--- | :--- |
 | `loopTask` (`loop()`) | ядро Arduino | ядра | `CommandQueue::runNext()` (≤ 1 команда за ітерацію), `WebPortal::loop()` → `WebJobQueue`, `MqttClient::loop()` (вхідна черга + колбеки `addListener()`), `EcoflowClient::loop()`, кадр дисплея, `scheduler.loop()` (`TaskController`) | єдине місце для блокуючого: flash, `WiFi.*`, секунди роботи |
-| `mqtt-net`, `ecoflow-net`, `ecoflow-proxy-net` | `MqttClient::begin()`/`resume()`, ім'я — `MqttConfig::taskName` | 8 КБ (`MqttConfig::taskStackSize`), EcoFlow — 16 КБ | connect/loop PicoMQTT, вихідна черга, `onConnect`-колбек (`publishDiscovery()` у `src/main.cpp`) | єдиний власник сокета; таск **видаляється** на `suspend()` (SMTP/TLS) і створюється заново |
+| `mqtt-net`, `ecoflow-net`, `ecoflow-proxy-net` | `MqttClient::begin()`/`resume()`, ім'я — `MqttConfig::taskName` | 8 КБ (`MqttConfig::taskStackSize`), EcoFlow — 16 КБ | connect/loop PicoMQTT, вихідна черга, `onConnect`-колбек (`publishDiscovery()`, `src/Mqtt/Discovery.cpp`) | єдиний власник сокета; таск **видаляється** на `suspend()` (SMTP/TLS) і створюється заново |
 | `NetworkSupervisor` | `NetworkSupervisor::begin()` | 4096 | FSM радіо: скан, перебір кандидатів, `_connectTo()` (блокує до `connectTimeoutMs`), listener-и NS (`NetworkEventLogger`) | стек не зменшувати; ⚠ `end()` вбиває таск `vTaskDelete` посеред роботи |
 | arduino events | `NetworkEvents` фреймворку | — | обробники `WiFi.onEvent`, зокрема `STA_GOT_IP` у NS — бере `_mutex` NS | тому `WiFi.*` під `_mutex` NS = дедлок WiFi-стеку |
 | `async_tcp` | AsyncTCP | `CONFIG_ASYNC_TCP_STACK_SIZE` | хендлери порталу, SSE | не писати flash, не `WiFi.*`, не блокувати; читати знімки. Винятки — `docs/web_portal.md` |
@@ -1206,6 +1206,8 @@ EcoFlow-блок і показувалась не та конфігурація 
 | `src/App/ConfigKeys.hpp` | ключі NVS `CFG_*`, дефолт `WATCHDOG_ENABLED` | — |
 | `src/Screen/Background.{hpp,cpp}` | `setupBackgroundImage()`; `registerBackgroundCommands()` — ефекти фону (`blur`…`dither`), `background`, `bg-dump`; без `LITTLEFS_BACKGROUND_IMAGE` команд немає | `setup()`, `setupSerialCommander()` |
 | `src/BackgroundImages.{hpp,cpp}` | малювання фону (`drawBackgroundImage()`), вшиті/PROGMEM-зображення | `loop()` |
+| `src/Mqtt/JsonApi.{hpp,cpp}` | SAPI: реєстр і диспетчеризація `devices/<id>/api/<cmd>`, усі записи (`commands-list` завжди; решта — лише з `HAS_WEB_PORTAL`); `jsonApiCommandName()` для discovery | `setupMqttClient()` → `registerJsonApiCommands()` |
+| `src/Mqtt/Discovery.{hpp,cpp}` | `publishDiscovery()`: retained `devices/<id>/discovery`, `board` = `BOARD_NAME` з `environment.h` | `onConnect`-колбек у `setupMqttClient()` (таск `mqtt-net`) |
 
 ### MQTT-підписки PicoMQTT: як насправді
 
@@ -1256,6 +1258,11 @@ EcoFlow-блок і показувалась не та конфігурація 
   `esp_task_wdt_init()` у `Watchdog::begin()` тому повертає
   `ESP_ERR_INVALID_STATE`, і власний таймаут (60 с), імовірно, не
   застосовується. ⚠ На залізі не звірено.
+- **TFLite Micro і Wi-Fi CSI вже є у фреймворку.** Для esp32/c3/c6/s3 у
+  `framework-arduinoespressif32-libs/<chip>/` лежать прекомпільовані
+  `esp-tflite-micro` і `esp-nn` (заголовки й `.a`), а sdkconfig має
+  `CONFIG_ESP_WIFI_CSI_ENABLED=y` — `lib_deps` і перезбірка IDF не потрібні.
+  ⚠ Підключення TFLM з проєкту не звірено — `docs/ml_plan.md`, крок 2.1.
 
 ### Команди й вивід: спільні хелпери
 
@@ -1387,6 +1394,13 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **`src/main.cpp` → `src/Mqtt/JsonApi.*` + `Discovery.*` (крок
+  2.2 рефакторингу).** SAPI-реєстр, усі записи й блок реєстрації з
+  `setupMqttClient()` — `registerJsonApiCommands()`; `publishDiscovery()`
+  окремо. Структури аргументів SAPI — в анонімному namespace (ODR).
+  Рукописна мапа `kDiscoveryBoard` (`#elif` по 8 платах) → `BOARD_NAME` у
+  розділі 1 кожного `environment.h` (значення ті самі, payload discovery не
+  змінився); правило розділу 1 у `CLAUDE.md` доповнене.
 - 2026-10-03 — **`src/main.cpp` → `src/Screen/Background.{hpp,cpp}` (крок 2.1
   рефакторингу).** `setupBackgroundImage()` і всі команди фону (~25 ефектів,
   `background`, `bg-dump` з `rawPrintf()`) — один модуль; 25 окремих

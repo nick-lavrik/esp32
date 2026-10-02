@@ -33,9 +33,9 @@
 | `devices/{client-id}/status` | текст: `"offline"`/`"online"`/`"heartbeat"` | LWT — ні (`lwtRetain=false`) | плата публікує (LWT + online-publish + heartbeat кожні 5 хв); плата підписується на `devices/+/status` (чужі LWT) | `secrets.ini` (`mqtt_lwt_topic`/`_msg_offline`/`_msg_online`), `src/main.cpp:342,376-381,2029,2066-2070`, `MqttClient.cpp:206-234,268-294` |
 | `command/{client-id}` | текст: довільна serial-подібна команда | ні | плата підписується; зовнішній клієнт публікує | `src/main.cpp:2040-2050` |
 | `command/{client-id}/reply` | текст: людський лог-вивід порціями (≤512Б×8, з обрізанням) або `"busy: command queue is full"` | ні | плата публікує через `MqttReplyTarget` (`src/main.cpp:665-675`); зовнішній клієнт підписується | `lib/CommandResponse/MqttReplyTarget.hpp`, `lib/CommandResponse/CommandResponse.cpp`, `src/main.cpp:2047-2049` |
-| `devices/{client-id}/api/<cmd>` | JSON: `{"id":<num>}` (+ `"args"` для команд з аргументами — `ecoflow-journal`: `{"target":"all"\|"<sn>"}`, дефолт `"all"`) | ні | плата підписується (`addJsonListener`); зовнішній SAPI-клієнт публікує | `registerJsonApiEntry()`, `src/main.cpp:750-758,2054-2062` |
-| `devices/{client-id}/api/<cmd>/reply` | JSON: `{"id","ok":true,"data":{...}}` або `{"id","ok":false,"error":"bad args"\|"busy"}` | ні | плата публікує (через `MqttReplyTarget` або пряму відмову) | `handleJsonApiRequest()`, `src/main.cpp:731-742` |
-| `devices/{client-id}/api/ecoflow-params/<sn>` | JSON: `{"id":<num>}` | ні | плата підписується — ОДНА точна підписка на кожен серійник з `EcoflowDeviceRegistry::deviceTable()` (без wildcard), а не одна на `<cmd>` | `registerEcoflowDeviceParamsEntries()`, `src/main.cpp`, лише `HAS_ECOFLOW_CLIENT` |
+| `devices/{client-id}/api/<cmd>` | JSON: `{"id":<num>}` (+ `"args"` для команд з аргументами — `ecoflow-journal`: `{"target":"all"\|"<sn>"}`, дефолт `"all"`) | ні | плата підписується (`addJsonListener`); зовнішній SAPI-клієнт публікує | `registerJsonApiEntry()`, `src/Mqtt/JsonApi.cpp` |
+| `devices/{client-id}/api/<cmd>/reply` | JSON: `{"id","ok":true,"data":{...}}` або `{"id","ok":false,"error":"bad args"\|"busy"}` | ні | плата публікує (через `MqttReplyTarget` або пряму відмову) | `handleJsonApiRequest()`, `src/Mqtt/JsonApi.cpp` |
+| `devices/{client-id}/api/ecoflow-params/<sn>` | JSON: `{"id":<num>}` | ні | плата підписується — ОДНА точна підписка на кожен серійник з `EcoflowDeviceRegistry::deviceTable()` (без wildcard), а не одна на `<cmd>` | `registerEcoflowDeviceParamsEntries()`, `src/Mqtt/JsonApi.cpp`, лише `HAS_ECOFLOW_CLIENT` |
 | `devices/{client-id}/api/ecoflow-params/<sn>/reply` | JSON: `{"id","ok":true,"data":{"serialNumber","captureAll","droppedParams","params":{...}}}` або `{"id","ok":false,"error":"busy"}` | ні | плата публікує; drill-down на "params" ОДНОГО пристрою — `ecoflow-status` (агрегат вище) їх свідомо не несе (розмір payload) | `WebEcoflowModule::mqttDeviceParamsJson()`, `src/main.cpp` |
 | `devices/{client-id}/ecoflow/<serial>/grid` | JSON: `{"grid","timestamp","charge","remain"}` | **так** | плата публікує (лише на реальний перехід стану мережі) | `src/main.cpp:1351-1371`, `docs/ecoflow-grid-handoff.md` |
 | `devices/{client-id}/light-sensor` | текст: число | ні | плата з сенсором публікує; плати без сенсора підписуються на `devices/+/light-sensor` | `src/main.cpp:2075-2089` |
@@ -76,11 +76,11 @@ WiFi/MQTT. Не retained, але й не закрито: див. `docs/tech_debt
 `command/<id>` (запуск довільної команди).
 
 **`commands-list` — єдина з одинадцяти, що не потребує `HAS_WEB_PORTAL`**
-(виправлено 2026-09-27, `src/main.cpp`, розділ «MQTT SAPI-канал ... спільна
-інфраструктура»): `commandHandler` — глобал файлу, завжди визначений,
+(виправлено 2026-09-27, `src/Mqtt/JsonApi.cpp`, розділ «MQTT SAPI-канал ... спільна
+інфраструктура»): `commandHandler` — спільний глобал, завжди визначений,
 незалежно від порталу. Решта десять читають `webPortal`/`webWifiModule`/
 `webEcoflowModule`/`webMqttModule` — ці provider-об'єкти самі оголошені
-лише під `HAS_WEB_PORTAL` (`src/main.cpp:488-539`), тож на платі без
+лише під `HAS_WEB_PORTAL` (`src/App/AppGlobals.cpp`), тож на платі без
 порталу (напр. `esp32-c3` з `HAS_WEB_PORTAL=0`) discovery публікує
 `"commands":["commands-list"]`, а не порожній масив. Повне усунення
 залежності решти десяти — відкритий борг, `docs/tech_debt.md`, розділ
@@ -126,8 +126,10 @@ topic-per-device (як `ecoflow-params/<sn>` вище): запит рідкіс�
 `{"board","revision","features","commands"}`.
 Дизайн — `docs/mqtt-web-handoff.md`, розділ «Фаза 2».
 
-- `board` — рядок з рукописної мапи `BOARD_XXX` → назва (`src/main.cpp`,
-  біля `registerJsonApiEntry()`), не `platformio.ini`'s `board=`.
+- `board` — `BOARD_NAME` з розділу 1 `src-<env>/environment.h` (поруч з
+  `BOARD_XXX`; читає `publishDiscovery()`, `src/Mqtt/Discovery.cpp`), не
+  `platformio.ini`'s `board=`. Збігається з ім'ям env, крім `esp32-4848s040`
+  → `"4848s040"`.
 - `revision` — `GIT_REVISION` (короткий git-sha, `tools/pio_sapi_revision.py`).
 - `features` — масив АКТИВНИХ прапорців з `include/features.h` (повний каталог
   усіх `BOARD_HAS_*`/`HAS_*`, включно з похідними `BOARD_HAS_LIGHT_SENSOR`/
@@ -139,11 +141,10 @@ topic-per-device (як `ecoflow-params/<sn>` вище): запит рідкіс�
 - `commands` — масив імен зареєстрованих JSON API команд (`"system-info"`,
   `"wifi-status"`, `"wifi-connections"`, `"fs-list"`, `"fs-read"`, `"nvs-list"`, `"nvs-blob"`, `"ecoflow-status"`, `"ecoflow-journal"`,
   `"mqtt-status"`, `"commands-list"` — залежно від env), джерело —
-  `registerJsonApiEntry()` (`src/main.cpp`): той самий виклик, що підписує
-  `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий fixed-size
-  масив (`kJsonApiCommandNames`, без heap). На платі без порталу — `[]`
-  (масив і сам накопичувач гейтовані `!ESP8266`, поле лишається постійним
-  за формою, не зникає з payload).
+  `registerJsonApiEntry()` (`src/Mqtt/JsonApi.cpp`): той самий виклик, що
+  підписує `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий
+  fixed-size масив (`kJsonApiCommandNames`, без heap). На платі без порталу —
+  `["commands-list"]` (розділ 1 вище). На ESP8266 discovery немає взагалі.
 - Публікується з `mqtt.onConnect()` — тому **недоступний на ESP8266**:
   PubSubClient-гілка `MqttClient::connect()` не викликає
   `_connected_callback` узагалі (лише PicoMQTT-гілка, `MqttClient.cpp:

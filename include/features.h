@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>  // size_t у features::kCount - заголовок має бути самодостатнім
+
 // Єдиний каталог усіх BOARD_HAS_*/HAS_* прапорців, що будь-коли з'являються
 // в "Можливості та фічі" (розділ 2) будь-якого src-<env>/environment.h
 // (CLAUDE.md, "environment.h кожної плати"). Розділення по 8 environment.h
