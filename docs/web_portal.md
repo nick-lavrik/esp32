@@ -268,7 +268,7 @@ stats, partition table, SD), або дорого рахувати щотік (he
 
 **LittleFS - той самий колбек, що й `WebFilesModule`.** Формула
 `usedBytes()/totalBytes()` для LittleFS одна на весь портал
-(`littleFsUsage` у `setupWebPortal()`, `src/main.cpp`) - друга копія
+(`littleFsUsage`, `src/App/AppGlobals.cpp`) - друга копія
 розійшлася б першою (CLAUDE.md, DRY).
 
 **Точний час PHY-швидкості (Мбіт/с) недоступний.** `esp_wifi_sta_get_
@@ -862,7 +862,7 @@ PSRAM тим самим кодом, лише напряму TLS).** `GET /api/ec
 Стан ЗАГАЛЬНОГО MQTT-клієнта (`mqtt` у `src/main.cpp` - console mirror,
 віддалені команди, LWT, heartbeat) - **не** EcoFlow: у того свій розділ вище
 (`WebEcoflowModule`), окремий `MqttClient` з окремим `clientId` (коментар у
-`makeEcoflowConfig()`, `src/main.cpp` - інакше брокер вибиває клієнтів по
+`makeEcoflowConfig()`, `src/App/AppGlobals.cpp` - інакше брокер вибиває клієнтів по
 черзі за збіг id).
 
 **Модуль живе в `lib/WebPortal/WebMqttModule.{hpp,cpp}`**, на відміну від
@@ -889,8 +889,8 @@ EcoFlow-розділу вище: `MqttClient` і `ConsoleMqtt` - обидва в
 - **Heartbeat** - періодичне повідомлення в той самий LWT-топік МІЖ
   (пере)з'єднаннями, окремо від офлайн/онлайн (ті шле лише сам факт
   конекту/розриву). Джерело правди - `kMqttHeartbeatMessage`/
-  `MQTT_HEARTBEAT_INTERVAL_MS` у `src/main.cpp` (той самий cron-таск, що й
-  публікує); `WebMqttModule` отримує обидва значення конструктором, а не
+  `MQTT_HEARTBEAT_INTERVAL_MS` у `src/App/AppGlobals.hpp` (їх бере і
+  cron-таск у `setupMqttClient()`, що публікує); `WebMqttModule` отримує обидва значення конструктором, а не
   дублює літерал/число другий раз (DRY) - інакше сторінка могла б мовчки
   розійтись зі справжнім інтервалом. На повній вкладці MQTT - два окремі
   рядки (`Heartbeat message`/`Heartbeat interval`, `mqttHeartbeatRows()`); на

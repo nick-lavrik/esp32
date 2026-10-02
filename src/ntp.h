@@ -4,7 +4,7 @@
 #endif
 #include <NtpService.hpp>
 
-#include <Display.hpp>
+#include "App/AppGlobals.hpp"
 const char* ntpServer1 = "1.pool.ntp.org";
 const char* ntpServer2 = "ua.pool.ntp.org";
 const char* ntpServer3 = "pool.ntp.org";
@@ -12,7 +12,6 @@ const char* ntpServer3 = "pool.ntp.org";
 const long gmtOffset_sec = 2 * 3600;
 const int daylightOffset_sec = 3600;
 
-extern NtpService ntp;
 void setupNtpService() {
   // Callback викликається при кожній успішній синхронізації.
   ntp.addCallback([](struct timeval* tv) {

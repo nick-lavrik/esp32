@@ -863,7 +863,7 @@ mbedTLS ядра, який на C6 щойно перевірено робочи�
 Кожен env підмішує рівно одну теку через `build_src_filter = +<*> +<../src-<board>/>`. Там живе
 лише те, що не можна тримати спільним — `environment.h` і реалізації touch-контролерів та
 іншого заліза плати. Об'єкта панелі тут більше немає: ним володіє драйвер дисплея
-(`displayDriver` у `src/main.cpp`, див. «Як обирається графічний бекенд»).
+(`displayDriver` у `src/App/AppGlobals.cpp`, див. «Як обирається графічний бекенд»).
 
 `src-4848s040/` (+ GT911Touch, TouchController) · `src-esp32-s3-lcd147/` (+ SdMassStorage) ·
 `src-st7789/` (+ TouchController) · `src-ttgo-t1/` · `src-esp32-c6/` (+ touch, IMU) ·
@@ -927,7 +927,7 @@ Arduino_GFX під нашою сумісною обгорткою), тому с�
 
 - **`DisplayDriver`** — псевдонім типу драйвера, обраний тим самим ланцюжком (зараз завжди
   `TftEspiDriver`). Драйвер **володіє** панеллю і спрайтом смуги; глобала `tft` немає, об'єкт
-  один — `displayDriver` у `src/main.cpp`. Усе бекенд-специфічне (`getBuffer()` проти
+  один — `displayDriver` у `src/App/AppGlobals.cpp`. Усе бекенд-специфічне (`getBuffer()` проти
   `getPointer()`, порядок байтів спрайта `kCanvasSwapped565`, три гілки `pushImage8bpp()`,
   підсвітка/контраст у `setBrightness()`) живе тут. Контракт драйвера перелічений у шапці
   `TftEspiDriver.hpp`. Вибір компіляційний, без `virtual`: примітиви кличуться сотні разів на кадр.
@@ -1085,7 +1085,7 @@ EcoFlow-блок і показувалась не та конфігурація 
 - MQTT-клієнт з LWT (last will and testament); опційно поверх TLS, з паузою сесії на час
   HTTPS-запитів (див. розділ про `MqttClient` вище). Плюс періодичний heartbeat у той самий
   LWT-топік між (пере)з'єднаннями (`kMqttHeartbeatMessage`/`MQTT_HEARTBEAT_INTERVAL_MS`,
-  `src/main.cpp`) - опис полів і навіщо окремо від offline/online - `docs/web_portal.md`,
+  `src/App/AppGlobals.hpp`) - опис полів і навіщо окремо від offline/online - `docs/web_portal.md`,
   розділ «MQTT»
 - **Телеметрія EcoFlow** (обидві C6-плати, `esp32-c3`, `esp32-4848s040`, `esp32-s3-lcd147`):
   заряд, наявність мережі, час до заряду/розряду
@@ -1160,6 +1160,17 @@ EcoFlow-блок і показувалась не та конфігурація 
 
 ### Спільний стан: хто пише
 
+- **Глобали застосунку** (`ntp`, `scheduler`, `configStorage`,
+  `commandHandler`, `commandQueue`, `mqtt`, `consoleMqtt`, `ecoflow`,
+  `netSupervisor`, `httpServer`, веб-модулі, `display`, `displayConfig`, тач,
+  `mailer`) — означені лише в `src/App/AppGlobals.cpp`, оголошені в
+  `src/App/AppGlobals.hpp`. Порядок ініціалізації глобалів між TU в C++ не
+  визначений, а частина з них отримує інші в конструкторі (`Display` ←
+  `displayDriver`, `EcoflowClient` ← `mqtt`, `TouchEvents` ← `displayConfig`),
+  тому новий глобал з такою залежністю означається там само, після своїх
+  залежностей. Стан одного модуля (`showClock`, режими dino/test-gfx,
+  `routerApi`) лишається в самому модулі (поки — `src/main.cpp`). Ключі NVS
+  `CFG_*` і дефолт `WATCHDOG_ENABLED` — `src/App/ConfigKeys.hpp`.
 - **`NetworkSupervisor::_connections`** — FSM, arduino events, `loop()`
   (`src/netcli.h`, `WebWifiModule`). `connections()` і `getConnection()`
   віддають посилання/вказівник **без замка**; ⚠ записи через них з `loop()`
@@ -1171,7 +1182,7 @@ EcoFlow-блок і показувалась не та конфігурація 
 - **`ScreenMirror`** — буфер смуги захоплює `loop()`, віддає chunked-відповідь
   у `async_tcp` (`WebScreenModule`); ⚠ `tick()` звільняє буфер через 4 с
   drain, навіть якщо клієнт ще читає.
-- **`display`/`displayDriver`** (`lib/Display`, об'єкти в `src/main.cpp`) —
+- **`display`/`displayDriver`** (`lib/Display`, об'єкти в `src/App/AppGlobals.cpp`) —
   лише `loop()`: кадр, команди (`CommandQueue` теж виконується в `loop()`),
   `ScreenMirror::capture()` з `Display::flush()`. Шину на час SD/`setRotation()`
   віддає `YIELD_DISPLAY_BUS()` через `Display::releaseBus()`/`reacquireBus()`.
@@ -1201,7 +1212,7 @@ EcoFlow-блок і показувалась не та конфігурація 
 ### Збірка: неочевидне
 
 - **LDF компілює `lib/*` на всіх env**, де заголовок згаданий у
-  `src/main.cpp`, незалежно від `#if HAS_*` навколо `#include` (режим LDF
+  будь-якому файлі `src/`, незалежно від `#if HAS_*` навколо `#include` (режим LDF
   `chain` препроцесор не обчислює). Тож код бібліотеки мусить
   компілюватись і на ESP8266 — невикликане лінкер викине. Після правки
   `lib/` — `pio run -e esp8266`. (Пропущений крок коштував зламаного
@@ -1362,6 +1373,15 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **`src/main.cpp`: глобали й ключі NVS — в окремі файли
+  (кроки 0–1 рефакторингу).** Спільні об'єкти означені в
+  `src/App/AppGlobals.cpp` (оголошення — `AppGlobals.hpp`, замість
+  розкиданих `extern Display display;`), `CFG_*` → `src/App/ConfigKeys.hpp`
+  як `inline constexpr`. Прибрано мертвий код: `src/strip.h`, `src/led.h`,
+  `testAsusWRT2()`, `testRawTcpConnect()`, порожні `setupEventDispatcher()`/
+  `setupTaskCommander()`, невикористовувані `wifiClient`/`wifi_state`.
+  RAM/Flash: `esp32-c6` −128/+96 Б, `esp32-c3` −120/−96 Б, `esp8266`
+  −260/−68 Б.
 - 2026-10-02 — **`Display` переїхав у `lib/Display` і отримує драйвер у
   конструкторі.** `src/Display.*` → `lib/Display/Display.*`, `src/TftInstance.h`
   → `lib/Display/DisplayDriver.hpp` (вибір бекенду + `using DisplayDriver`),
@@ -1418,7 +1438,7 @@ ColumnLimit: 120
   EcoFlow-клієнтом нема: два клієнти на тому самому брокері мають різні
   `clientId` (`mqtt-<env>` проти `ANDROID_mqtt-<env>-ecoflow_<userId>`) — саме
   для цього вони й були розведені раніше (коментар у `makeEcoflowConfig()`,
-  `src/main.cpp`). ACL на rpi5 - глобальний `/etc/mosquitto/aclfile`
+  `src/App/AppGlobals.cpp`). ACL на rpi5 - глобальний `/etc/mosquitto/aclfile`
   (підключений з `mosquitto.conf`, не з `conf.d/ecoflow-proxy.conf`, де
   однойменна директива лишилась закоментованою старим слідом - уточнено
   `docs/tech_debt.md`) - і він enforced: без явного дозволу все за

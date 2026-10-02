@@ -2,9 +2,7 @@
 
 #if HAS_DINO_GAME
 
-#include <Display.hpp>
-
-extern Display display;
+#include "App/AppGlobals.hpp"
 
 namespace {
 

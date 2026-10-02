@@ -13,7 +13,7 @@
 //   ./convert space-01.jpg ../assets/space-mono-128x64.h 128 64 mono1 spaceMono128x64 128
 // #include "../assets/space-mono-128x64.h"
 
-extern Display display;
+#include "App/AppGlobals.hpp"
 
 // --- Варіант 1: картинка з PROGMEM (як backgroundSpace03, але 1bpp) ---
 void showFromMemory() {

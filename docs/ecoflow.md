@@ -112,7 +112,7 @@ ecoflow-login
 reflash`).
 
 **Застосування — виключно вручну, автоматики немає.** `makeEcoflowConfig()`
-(`src/main.cpp`) читає лише build-time прапорці
+(`src/App/AppGlobals.cpp`) читає лише build-time прапорці
 (`ECOFLOW_MQTT_USERNAME`/`_PASSWORD`/`ECOFLOW_USER_ID`) — NVS-копія існує
 лише для того, щоб людина мала звідки їх переписати. Перенести три
 значення в `secrets.ini`:

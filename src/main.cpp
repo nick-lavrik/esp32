@@ -124,7 +124,6 @@ using ActiveBulkReader = SdSpiBulkReader;
 // Потрібен команді smtp-probe для TLS-режиму (перевірка mbedTLS ядра).
 #include <WiFiClientSecure.h>
 #endif
-// #include <PubSubClient.h>
 #include <TouchScreenConfig.h>
 #if BOARD_HAS_IMU
 #include <ImuController.h>
@@ -205,6 +204,7 @@ using ActiveBulkReader = SdSpiBulkReader;
 #endif
 
 #include "features.h"
+#include "App/AppGlobals.hpp"
 #include "BackgroundImages.hpp"
 #include "TestGfx.hpp"
 #include "SizeFormatter.hpp"
@@ -215,255 +215,13 @@ using ActiveBulkReader = SdSpiBulkReader;
 #include "netcli.h"  // після wifi.h: netcli викликає WiFi_scan()
 #include "WifiNetworks.hpp"
 #include "journalcli.h"
-#include "strip.h"
 
 #if BOARD_HAS_TOUCHSCREEN
 #include <TouchController.h>
 #endif
 
-const char* EVT_REBOOT = "reboot";
-const char* CFG_SHOW_CLOCK = "clock";
-// Ключ NVS - максимум 15 символів (ConfigStorage::MAX_KEY_LENGTH).
-// Зберігається лише РЕКОРД: сам режим гри після ресету не відновлюється
-// (див. коментар у loadConfig()).
-const char* CFG_DINO_HIGHSCORE = "dino.hi";
-const char* CFG_BLINK_LED = "blink";  // ESP8266 BLINK_LED_PIN dependency
-const char* CFG_SYS_AUTOBRIGHTNESS = "auto-brightness";
-const char* CFG_DISPLAY_BRIGHTNESS = "brightness";
-// runtime override для MQTT_TOPIC_PREFIX (напр. dev/prod/qa/local, регіон, тощо); порожнє
-// -> дефолт з secrets.ini
-const char* CFG_MQTT_TOPIC_PREFIX = "mqtt.prefix";
-// runtime-override для ECOFLOW_AUTOCONNECT: "1"/"0"; порожнє -> build-time дефолт
-const char* CFG_ECOFLOW_AUTOCONNECT = "ecoflow.auto";
-// runtime-override: чи тягнути REST-знімок ('ecoflow-sync all') ПЕРЕД MQTT-
-// конектом на старті (docs/tech_debt.md, розрив REST/MQTT); перемикається
-// тією ж командою - 'ecoflow-sync on|off'. "1"/"0"; порожнє -> build-time
-// дефолт. Не "ecoflow.sboot" - читається як "secure boot".
-const char* CFG_ECOFLOW_SYNC_BOOT = "ecoflow.sync";
-// dump ecoflow device status each minute
-const char* CFG_ECOFLOW_WATCH = "ecoflow.watch";
-// runtime-override: чи писати журнал переходів grid у NVS (команда
-// 'ecoflow-journal on|off'); "1"/"0", порожнє -> увімкнено. Вимикає лише
-// NVS-частину EcoflowGridJournal - MQTT-дзеркало не залежить.
-const char* CFG_ECOFLOW_JOURNAL = "ecoflow.jrnl";
-// Build-time дефолт для Watchdog::begin() (Watchdog.hpp, озброюється в кінці
-// setup()) - визначено ТУТ, а не біля виклику в setup(), бо
-// setupSerialCommander() (команда 'watchdog', вище файлом) теж на нього
-// дивиться, а препроцесор бачить лише те, що визначено ВИЩЕ по файлу.
-#ifndef WATCHDOG_ENABLED
-#define WATCHDOG_ENABLED 1
-#endif
-// runtime-override для WATCHDOG_ENABLED: "1"/"0"; порожнє -> build-time
-// дефолт. Вимикати перед довгими SD-командами (sdbench/sdcrc/sdmap - свідомо
-// блокують loop() на десятки секунд, CommandQueue.cpp) - інакше watchdog
-// зніме плату посеред легітимного вимірювання. Команда 'watchdog on|off'.
-const char* CFG_WATCHDOG = "watchdog";
-// periodic 'heap' sampling (тимчасова діагностика фрагментації, docs/tech_debt.md)
-const char* CFG_HEAP_WATCH = "heap.watch";
-// Останні випущені app-креденшели (команда 'ecoflow-login'). Зберігаються
-// як резервна копія й журнал: застосувати їх з NVS на льоту не можна - MqttConfig
-// копіює вказівники в конструкторі глобального EcoflowClient, тобто до setup().
-const char* CFG_ECOFLOW_APP_ACCOUNT = "ecoflow.acc";
-const char* CFG_ECOFLOW_APP_PASSWORD = "ecoflow.pass";
-const char* CFG_ECOFLOW_APP_USER_ID = "ecoflow.uid";
-
-TouchScreenConfig makeTouchScreenConfig() {
-  TouchScreenConfig c;
-  // Приклад: контролер видає сирі 0..4095, екран фізично 320x240,
-  // а сама панель ще й повернута (типова ситуація для дешевих SPI TFT).
-  // c.rawMinX = 200;  c.rawMaxX = 3900; // підбирається калібруванням
-  // c.rawMinY = 200;  c.rawMaxY = 3900;
-
-#ifdef BOARD_ST7789
-  c.rawMinX = 212;
-  c.rawMaxX = 3714;
-  c.rawMinY = 329;
-  c.rawMaxY = 3817;
-
-  c.screenWidth = 320;
-  c.screenHeight = 240;
-
-  c.invertY = true;  // якщо вертикаль перевернута
-  c.invertX = true;  // якщо горизонталь перевернута
-  c.swapXY = false;  // якщо екран повернутий на 90/270 градусів
-
-  c.edgeZoneX = 25;
-  c.edgeZoneY = 25;
-#endif
-
-#ifdef BOARD_ESP32_C6
-  // AXS5106L віддає координати в НАТИВНИХ осях панелі (172 x 320), а екран
-  // працює в landscape (TFT_ROTATION=3), тобто 320 x 172 - звідси swapXY.
-  //
-  // Калібрування знято на живій платі по двох кутах:
-  //   лівий верхній  -> сирі (164, 312)   (максимуми обох осей)
-  //   правий нижній  -> сирі (6, 11)      (мінімуми обох осей)
-  // Обидві осі йдуть у зворотному напрямку, тому invertX і invertY.
-  // Невеликий недобір до країв (6..164 замість 0..171) - це фізичні поля
-  // панелі, спеціально розтягувати діапазон не варто: краї все одно
-  // дотискаються обрізанням у TouchPointMapper.
-  c.rawMinX = 0;
-  c.rawMaxX = TFT_WIDTH;   // 172, нативна ширина панелі
-  c.rawMinY = 0;
-  c.rawMaxY = TFT_HEIGHT;  // 320, нативна висота панелі
-
-  c.screenWidth = TFT_HEIGHT;   // 320 - екран у landscape
-  c.screenHeight = TFT_WIDTH;   // 172
-
-  c.swapXY = true;
-  c.invertX = true;
-  c.invertY = true;
-
-  c.edgeZoneX = 30;
-  c.edgeZoneY = 20;  // менше за X: по висоті всього 172 px
-#endif
-
-#ifdef BOARD_4848S040
-  c.rawMinX = 0;
-  c.rawMaxX = 480;
-  c.rawMinY = 0;
-  c.rawMaxY = 480;
-
-  c.screenWidth = 480;
-  c.screenHeight = 480;
-
-  c.invertX = false;
-  c.invertY = true;
-  c.swapXY = true;
-
-  c.edgeZoneX = 40;
-  c.edgeZoneY = 40;
-#endif
-
-#ifdef BOARD_ESP8266
-  c.screenWidth = 128;
-  c.screenHeight = 64;
-#endif
-
-  return c;
-}
-
-#if HAS_MQTT_CLIENT
-MqttConfig makeMqttConfig() {
-  MqttConfig config;
-  config.host = MQTT_HOST, config.port = MQTT_PORT, config.clientId = MQTT_CLIENT_ID;
-  config.username = MQTT_USERNAME;
-  config.password = MQTT_PASSWORD;
-  config.lwtTopic = MQTT_LWT_TOPIC;
-  config.lwtOfflineMessage = MQTT_LWT_MSG_OFFLINE;
-  config.lwtOnlineMessage = MQTT_LWT_MSG_ONLINE;
-  config.prefix = MQTT_TOPIC_PREFIX;  // build-time дефолт; runtime override - setupMqttClient()
-
-#if defined(ECOFLOW_MQTT_SHARE_CLIENT)
-  // EcoflowClient сидить на цьому самому клієнті (docs/tech_debt.md, "План:
-  // спільний MqttClient") - його quota-повідомлення бувають до ~2 КБ
-  // (EcoflowClient::makeMqttConfig(), той самий орієнтир), дефолтні 2 КБ
-  // ризикують обрізати найбільші пакети.
-  config.rootSubscribeBufferSize = 4 * 1024;
-#endif
-
-  return config;
-}
-#endif
-
 bool showClock = true;
 bool isAutoBrightness = false;
-
-NtpService ntp;
-EventDispatcher dispatcher;
-TaskController scheduler;
-ConfigStorage configStorage;
-JpegImage spaceImage;
-SerialCommander commandHandler;
-
-// Один вхід для всіх джерел команд (serial, MQTT, веб, cron) і один виконавець
-// у loop(). Див. lib/CommandQueue.
-CommandQueue commandQueue;
-WiFiClient wifiClient;
-// PubSubClient client(wifiClient);
-
-#if HAS_MQTT_CLIENT
-// Періодичний "доказ життя" в LWT-топік, окремо від самого LWT (offline/online
-// шле брокер/клієнт лише на конект/розрив) - щоб споживач бачив пристрій
-// живим і між цими подіями, а не лише в момент (пере)з'єднання. Іменована
-// константа, а не літерал у cron-виклику нижче: те саме значення показує
-// вкладка MQTT (WebMqttModule) - інакше сторінка могла б мовчки розійтись
-// зі справжнім інтервалом/повідомленням.
-#ifndef MQTT_HEARTBEAT_INTERVAL_MS
-#define MQTT_HEARTBEAT_INTERVAL_MS (5 * 60 * 1000UL)
-#endif
-static const char* const kMqttHeartbeatMessage = "heartbeat";
-
-MqttClient mqtt(makeMqttConfig());
-// runtime override поверх MqttConfig::prefix; заповнюється лише за наявності
-// CFG_MQTT_TOPIC_PREFIX в ConfigStorage, див. setupMqttClient()
-MqttKeyGenerator mqttTopicPrefixOverride;
-#endif
-
-#if HAS_CONSOLE_MQTT
-// Дзеркало консолі в "<prefix>/console/<MQTT_CLIENT_ID>" (lib/ConsoleMqtt).
-// Топік БЕЗ префікса - його підставить MqttClient::resolveTopic(), як і для
-// reply-топіка. Клієнт і сховище передані явно: щоб посадити дзеркало на
-// інший MqttClient, правиться цей рядок, а не бібліотека.
-ConsoleMqtt consoleMqtt(mqtt, configStorage, "console/" MQTT_CLIENT_ID);
-#endif
-
-#if HAS_ECOFLOW_CLIENT
-EcoflowClient::Config makeEcoflowConfig() {
-  EcoflowClient::Config config;
-  config.mqttHost = ECOFLOW_MQTT_HOST;
-  config.mqttPort = ECOFLOW_MQTT_PORT;
-  config.mqttUsername = ECOFLOW_MQTT_USERNAME;
-  config.mqttPassword = ECOFLOW_MQTT_PASSWORD;
-  config.accessKey = ECOFLOW_ACCESS_KEY;
-  config.secretKey = ECOFLOW_SECRET_KEY;
-#if defined(ECOFLOW_USER_ID)
-  // Потрібен лише для app-каналу (clientId ANDROID_..._<userId>).
-  config.userId = ECOFLOW_USER_ID;
-#endif
-#if defined(ECOFLOW_LOGIN) && defined(ECOFLOW_PASSWORD)
-  // Лише для 'ecoflow-login': перевипуск app-креденшелів.
-  config.email = ECOFLOW_LOGIN;
-  config.emailPassword = ECOFLOW_PASSWORD;
-#endif
-  // Окремий id від основного MQTT-клієнта: збіг id у межах акаунта змушує
-  // брокер вибивати клієнтів по черзі.
-  config.clientId = MQTT_CLIENT_ID "-ecoflow";
-#if defined(ECOFLOW_MQTT_PROXY_HOST)
-  // Стадія 1 підтверджена (docs/tech_debt.md, "MQTT-проксі"): на платах без
-  // PSRAM пряме TLS-з'єднання до mqtt-e.ecoflow.com і портал разом не
-  // влазять у heap (~57 КБ на mbedTLS-буфери). TLS переносимо на
-  // mosquitto-проксі (rpi5, тримає ОДНУ TLS-сесію на весь LAN), сюди
-  // приходить лише розшифрований plain MQTT. mqttUsername/mqttHost вище й
-  // далі визначають КАНАЛ і схему топіків (buildRootTopic/buildClientId) -
-  // це реальний акаунт EcoFlow, автентифікація на його брокері вже зроблена
-  // самим проксі. proxyUsername/Password - ОКРЕМІ, ЛОКАЛЬНІ LAN-креденшли
-  // listener'а на rpi5, не облікові дані EcoFlow.
-  config.proxyHost = ECOFLOW_MQTT_PROXY_HOST;
-  config.proxyUsername = ECOFLOW_MQTT_PROXY_USERNAME;
-  config.proxyPassword = ECOFLOW_MQTT_PROXY_PASSWORD;
-#endif
-  return config;
-}
-
-#if defined(ECOFLOW_MQTT_SHARE_CLIENT) && HAS_MQTT_CLIENT
-// Спільний MqttClient (docs/tech_debt.md, "План: спільний MqttClient") -
-// креди proxy й загального `mqtt` на цій платі вже сьогодні той самий
-// аліас у secrets.ini (mqtt_username/password == ecoflow_proxy_username/
-// password). `mqtt` оголошено вище - вже сконструйований на цей момент.
-EcoflowClient ecoflow(makeEcoflowConfig(), &mqtt);
-#else
-EcoflowClient ecoflow(makeEcoflowConfig());
-#endif
-EcoflowDeviceRegistry ecoflowDevices;
-#endif
-
-HttpServer httpServer(HttpServerConfig{});
-
-// Менеджер WiFi: тримає список мереж у NVS (namespace той самий, що й у
-// configStorage - PIO_PIOENV) і сам веде підключення. Керується командою 'net',
-// див. src/netcli.h.
-NetworkSupervisor netSupervisor(&configStorage);
 
 // Єдиний listener у прошивці: перекладає події FSM у лог. Усе інше в коді
 // питає стан у глобального WiFi (WiFi.isConnected() тощо) - воно працює
@@ -492,76 +250,11 @@ struct NetworkEventLogger : public INetworkSupervisorListener {
 
 NetworkEventLogger networkEventLogger;
 
-#if HAS_WEB_PORTAL
-// Веб-портал. Живе незалежно від того, чи є підключення до роутера: коли
-// жодної збереженої мережі не видно, NetworkSupervisor піднімає власну точку
-// доступу ("ESP-<env>"), і сторінка доступна на ній - саме тоді вона й
-// потрібна найбільше. Тому httpServer.begin() робиться один раз на старті і
-// не гаситься при зміні стану мережі.
-WebWifiModule webWifiModule(netSupervisor);
-WebConsoleModule webConsoleModule;
-WebCommandsModule webCommandsModule(commandHandler,
-                                   [](const char* line) { return commandQueue.submit(line); },
-                                   configStorage);
-WebNvsModule webNvsModule(configStorage);
-// Місткість розділу окремим замиканням: usedBytes()/totalBytes() є в
-// LittleFSFS, але не в fs::FS, через яке модуль дивиться на файлову систему.
-// Спільна і для WebFilesModule, і для WebSystemModule (вкладка System) -
-// друге дзеркалило б перше, якби лишилось окремим замиканням там само.
-auto littleFsUsage = [](size_t& used, size_t& total) {
-  used = LittleFS.usedBytes();
-  total = LittleFS.totalBytes();
-  return total > 0;
-};
-WebFilesModule webFilesModule(LittleFS, "LittleFS", littleFsUsage);
-#if BOARD_HAS_SD
-// Визначена нижче, в ACTIVE_SD-блоці (dumpSDInfo() і сусіди) - саме там
-// відомо, яка шина (SD чи SD_MMC) підключена на цій платі.
-bool getSdCardInfo(WebSystemSdInfo& out);
-WebSystemModule webSystemModule(littleFsUsage, getSdCardInfo);
-#else
-WebSystemModule webSystemModule(littleFsUsage);
-#endif
-#if HAS_SCREEN_MIRROR
-// Дзеркало екрана. Плата без спрайта кадру (esp32-c3) або з 1bpp-панеллю
-// (esp8266) віддавати браузеру нічого не може - там розділу просто немає
-// (див. HAS_SCREEN_MIRROR у include/features.h).
-WebScreenModule webScreenModule;
-#endif
-#if HAS_MQTT_CLIENT
-// Розділ "mqtt": стан ЗАГАЛЬНОГО клієнта (mqtt/consoleMqtt, оголошені вище,
-// стор. 345-357) - НЕ EcoflowClient, у нього свій розділ нижче.
-#if HAS_CONSOLE_MQTT
-WebMqttModule webMqttModule(mqtt, commandQueue, consoleMqtt, kMqttHeartbeatMessage, MQTT_HEARTBEAT_INTERVAL_MS);
-#else
-WebMqttModule webMqttModule(mqtt, commandQueue, kMqttHeartbeatMessage, MQTT_HEARTBEAT_INTERVAL_MS);
-#endif
-#endif
-#if HAS_ECOFLOW_CLIENT
-// Розділ живе в src/Ecoflow, не в lib/WebPortal - див. коментар у
-// WebEcoflowModule.hpp. ecoflow/ecoflowDevices оголошені вище (стор. 372-373).
-WebEcoflowModule webEcoflowModule(ecoflow, ecoflowDevices);
-#endif
-WebPortal webPortal(httpServer, configStorage);
-#endif
-
 // Хост і base64(login:password) приходять із secrets.ini через build_flags
 // (ROUTER_HOST / ROUTER_LOGIN_AUTHORIZATION) - раніше вони були захардкожені
 // тут, у файлі під git, попри те що механізм для секретів уже існував.
 RouterApiClient routerApi(ROUTER_HOST, ROUTER_LOGIN_AUTHORIZATION);
 
-// Обидва об'єкти визначені БЕЗУМОВНО, навіть коли BOARD_HAS_DISPLAY=0
-// (env:esp32-c3). Причина: display.* і displayConfig зустрічаються в цьому
-// файлі в сотнях місць, і обвішувати кожне "#if BOARD_HAS_DISPLAY" означало
-// б розділити на дві гілки файл на 4000+ рядків. Замість цього на платі без
-// дисплея сам Display стає порожнім: TFT_eSPI там - заглушка з
-// include/Setup_Headless.h, усі методи inline й no-op, тому компілятор
-// прибирає ці виклики цілком (у прошивці не лишається ні коду, ні буферів).
-//
-// Драйвер володіє панеллю (і спрайтом смуги) - окремого глобала tft немає;
-// тип DisplayDriver обирає lib/Display/DisplayDriver.hpp за BOARD_*.
-DisplayDriver displayDriver;
-Display display(displayDriver);
 #if HAS_DINO_GAME
 DinoRenderer dinoRenderer;
 #endif
@@ -587,25 +280,6 @@ uint8_t testGfxPendingClear = 0;
 bool testGfxAutoCycle = false;
 uint32_t testGfxCycleTs = 0;
 constexpr uint32_t kTestGfxCycleMs = 5000;
-
-TouchScreenConfig displayConfig = makeTouchScreenConfig();
-
-#if BOARD_HAS_TOUCHSCREEN
-TouchPointMapper mapper(displayConfig);
-TouchEvents touch(displayConfig);
-TouchController touchController;
-#endif
-
-#if HAS_GMAIL_SENDER
-GmailSender mailer(GMAIL_EMAIL, GMAIL_PASSWORD, "ESP32 Device");
-
-// Куди шле дим-тест "sendmail". Дефолт - на власну адресу відправника: лист
-// сам собі однаково проходить весь шлях через SMTP, а в коді не лишається
-// прошитої чужої адреси.
-#ifndef GMAIL_TEST_RECIPIENT
-#define GMAIL_TEST_RECIPIENT GMAIL_EMAIL
-#endif
-#endif
 
 // SMTP-дим-тест: найкоротший шлях перевірити, що лист узагалі виходить із
 // плати. Тіло листа - фіксований рядок, тому це перевірка саме транспорту, а
@@ -829,7 +503,7 @@ static String jsonApiSystemInfoExecute(const uint8_t* /*raw*/) {
 static const JsonApiEntry kJsonApiSystemInfo = {"system-info", jsonApiNoArgs, jsonApiSystemInfoExecute};
 
 // Дзеркало /api/wifi/status - той самий провайдерський знімок, що й портал
-// (webWifiModule оголошено вище, стор. ~491), той самий форматер: жодного
+// (webWifiModule, src/App/AppGlobals.cpp), той самий форматер: жодного
 // поля, вартого прибирати заради MQTT-бюджету (розділ «Провайдер ≠
 // форматер», docs/mqtt-web-handoff.md - другий (MQTT-специфічний) форматер
 // писати нема сенсу без різниці у вмісті).
@@ -1178,9 +852,11 @@ AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
 #endif
 
 #if BOARD_HAS_TOUCHSCREEN
-// Увесь тач логується в debug під власним тегом, а DEFAULT_LOG_LEVEL=3 (info)
-// debug ріже - тобто в звичайному режимі тут тихо, як і має бути. Щоб побачити
-// дотики під час налагодження: 'journal level touch debug'.
+// Увесь тач логується у verbose під власним тегом. Не в debug: типовий рівень
+// DEFAULT_LOG_LEVEL=3 - це саме Debug (LogLevel, JournalEntry.hpp), тобто debug
+// ішов у консоль і MQTT на кожну подію, а сирі координати з TouchEvents::update()
+// - на кожне опитування, поки палець лежить. Щоб побачити дотики під час
+// налагодження: 'journal level touch verbose'.
 //
 // Раніше цього не вміли, тому існувала окрема команда 'touchlog on|off' і
 // глобальний прапорець, що піднімав рівень одного повідомлення до info. І
@@ -1191,24 +867,24 @@ static const TLogger touchLog{"touch"};
 // «чи взагалі бачить панель і чи не з'їхав мапер» потрібен кожен дотик, тоді
 // як onClick мовчить, якщо жест виявився свайпом або переріс у hold - саме в
 // тих випадках, коли причину й шукають.
-void onTouchLog(TouchPoint p) { touchLog.debug("Touch: %d, %d", p.x, p.y); }
-void onHoldHandler(TouchPoint p, unsigned long ms) { touchLog.debug("Hold at %d,%d for %lu ms", p.x, p.y, ms); }
-void onDblClickHandler(TouchPoint p) { touchLog.debug("Double click: %d, %d\n", p.x, p.y); }
+void onTouchLog(TouchPoint p) { touchLog.verbose("Touch: %d, %d", p.x, p.y); }
+void onHoldHandler(TouchPoint p, unsigned long ms) { touchLog.verbose("Hold at %d,%d for %lu ms", p.x, p.y, ms); }
+void onDblClickHandler(TouchPoint p) { touchLog.verbose("Double click: %d, %d\n", p.x, p.y); }
 
-void onSwipeLeftHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe LEFT"); }
-void onSwipeRightHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe RIGHT"); }
-void onSwipeUpHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe UP"); }
-void onSwipeDownHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe DOWN"); }
+void onSwipeLeftHandler(TouchPoint start, TouchPoint end) { touchLog.verbose("Swipe LEFT"); }
+void onSwipeRightHandler(TouchPoint start, TouchPoint end) { touchLog.verbose("Swipe RIGHT"); }
+void onSwipeUpHandler(TouchPoint start, TouchPoint end) { touchLog.verbose("Swipe UP"); }
+void onSwipeDownHandler(TouchPoint start, TouchPoint end) { touchLog.verbose("Swipe DOWN"); }
 
 void onSwipeFromBottomHandler(TouchPoint start, TouchPoint end) {
-  touchLog.debug("Swipe FROM BOTTOM (e.g. open menu)");
+  touchLog.verbose("Swipe FROM BOTTOM (e.g. open menu)");
 }
 void onSwipeFromTopHandler(TouchPoint start, TouchPoint end) {
-  touchLog.debug("Swipe FROM TOP (e.g. notification shade)");
+  touchLog.verbose("Swipe FROM TOP (e.g. notification shade)");
 }
-void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end) { touchLog.debug("Swipe FROM LEFT (e.g. back)"); }
+void onSwipeFromLeftHandler(TouchPoint start, TouchPoint end) { touchLog.verbose("Swipe FROM LEFT (e.g. back)"); }
 void onSwipeFromRightHandler(TouchPoint start, TouchPoint end) {
-  touchLog.debug("Swipe FROM RIGHT (e.g. side panel)");
+  touchLog.verbose("Swipe FROM RIGHT (e.g. side panel)");
 }
 
 void onHoldDrawPoints(TouchPoint p, unsigned long ms) {
@@ -1269,6 +945,9 @@ void testAsusWRT() {
   Logger::info("");
 }
 
+// Офлайн-варіант testAsusWRT(): той самий розбір, але JSON береться з
+// LittleFS, а не з роутера. Потрібен, коли роутер недоступний - перевірити,
+// що парсер ще розуміє формат get_clientlist (зразок кладеться uploadfs).
 void testAsusWRT2() {
   Logger::info("====== AsusWRT test script =======");
   Logger::info("free heap: %u", ESP.getFreeHeap());
@@ -1280,11 +959,9 @@ void testAsusWRT2() {
     return;
   }
 
-  // Logger::info("free heap before read: %u", ESP.getFreeHeap());
   String json = file.readString();
   file.close();
   dumpAsusClientList(json);
-  // Logger::info("free heap after read (json size=%u): %u", json.length(), ESP.getFreeHeap());
   Logger::info("------ AsusWRT test script -------");
   Logger::info("");
 }
@@ -2331,7 +2008,6 @@ void setupMqttClient() {
 
   // mqtt.publish(MQTT_LWT_TOPIC, "dummy-init-message", 1);
   scheduler.addCronTask(MQTT_HEARTBEAT_INTERVAL_MS, []() { mqtt.publish(MQTT_LWT_TOPIC, kMqttHeartbeatMessage); });
-  // scheduler.addCronTask(30 * 60 * 1000UL, []() { testAsusWRT(); });
 
   /* #if !BOARD_ESP32_C6 || true
   mqtt.addStringListener("#", [](const char* topic, const char* payload) {
@@ -5141,6 +4817,8 @@ void setupSerialCommander() {
 #endif
 
   commandHandler.registerCommand("dump-asuswrt", "test AsusWRT", [](const String& args) { testAsusWRT(); });
+  commandHandler.registerCommand("dump-asuswrt2", "test AsusWRT parser on /asus-get_clientlist.json (LittleFS)",
+                                 [](const String& args) { testAsusWRT2(); });
 
   Logger::info("SerialCommander setup done");
 }
@@ -5203,8 +4881,6 @@ void loadConfig() {
   Logger::info("\t- %s = %d", CFG_DISPLAY_BRIGHTNESS, display.brightness());
   Logger::info("");
 }
-
-void setupEventDispatcher() { Logger::info("EventDispatcher setup done"); }
 
 // Замість колишнього setupWiFi(): підняти NetworkSupervisor і віддати йому
 // радіо. Виклик неблокуючий, як і раніше - FSM крутиться у власному
@@ -5298,8 +4974,6 @@ void setupWebPortal() {
   Logger::info("WebPortal setup done");
 }
 #endif
-
-void setupTaskCommander() {}
 
 void setupLightSensor() {
 #if BOARD_HAS_LIGHT_SENSOR
@@ -6044,23 +5718,6 @@ void setupWiFiIcon() {
   });
 }
 
-#if ESP32
-void testRawTcpConnect() {
-  static uint32_t lastTest = 0;
-  if (millis() - lastTest < 5000) return;
-  lastTest = millis();
-  WiFiClient testClient;
-  uint32_t t0 = millis();
-  bool ok = testClient.connect("18.156.19.212", 1883, 5000); // 5с - щоб побачити реальний час, не зрізаний коротшим таймаутом
-  uint32_t dt = millis() - t0;
-  Logger::warn("raw TCP connect: %s, took %ums", ok ? "OK" : "FAIL", dt);
-  if (ok) testClient.stop();
-}
-#else
-void testRawTcpConnect() {
-  Logger::error("I don't have WiFiClient");
-}
-#endif
 void setup() {
   uint32_t freeHeap = ESP.getFreeHeap();
   // Кожен крок ідеться через withTrace() (lib/Logger/Trace.hpp) - один
@@ -6075,7 +5732,6 @@ void setup() {
 
   withTrace("setupSD", []() { setupSD(); });
   withTrace("setupLittleFS", []() { setupLittleFS(); });
-  withTrace("setupEventDispatcher", []() { setupEventDispatcher(); });
   withTrace("setupConfigStorage", []() { setupConfigStorage(); });
   withTrace("setupSerialCommander", []() { setupSerialCommander(); });
   withTrace("setupBlinkLED", []() { setupBlinkLED(); });
@@ -6092,7 +5748,6 @@ void setup() {
 #endif
   withTrace("setupNtpService", []() { setupNtpService(); });
   withTrace("setupBackgroundImage", []() { setupBackgroundImage(); });
-  withTrace("setupTaskCommander", []() { setupTaskCommander(); });
   withTrace("setupLightSensor", []() { setupLightSensor(); });
   withTrace("setupMqttClient", []() { setupMqttClient(); });
 #if HAS_ECOFLOW_CLIENT
@@ -6107,7 +5762,6 @@ void setup() {
   loadConfig();
 
   display.flush();
-  // testAsusWRT();
   Logger::debug("free heap memory: %u", ESP.getFreeHeap());
   Logger::info("");
   Logger::info("> Ready. Enter 'list' for comand list.");
@@ -6117,7 +5771,7 @@ void setup() {
   // жоден з його кроків не годує watchdog.
   //
   // Опційний, за зразком ECOFLOW_AUTOCONNECT/ECOFLOW_SYNC_ON_BOOT: build-time
-  // дефолт (WATCHDOG_ENABLED, визначено вище файлом) + runtime-override у
+  // дефолт (WATCHDOG_ENABLED, src/App/ConfigKeys.hpp) + runtime-override у
   // ConfigStorage ('watchdog on|off', застосовується з наступного ребуту).
   // Вимикається свідомо, а не годується з довгих SD-команд (sdbench/sdcrc/
   // sdmap) - ці команди живуть у lib/SDRawReader, яка НЕ повинна знати про
@@ -6132,10 +5786,6 @@ void setup() {
   }
 }
 
-#if ESP32
-#include <esp_wifi.h> // Обов'язково додайте цей системний заголовок
-#endif
-int wifi_state = 0;
 void loop() {
   // Найперший рядок - до будь-яких ранніх return (напр. isSdImageModeActive()
   // нижче): інакше та гілка, що їх має, watchdog не годує, і він спрацював
@@ -6232,12 +5882,10 @@ void loop() {
   if (WiFi.isConnected()) {
     uint32_t t0 = millis();
     mqtt.loop();
-    // testRawTcpConnect();   // <-- тимчасово замість mqtt.loop();
     uint32_t dt = millis() - t0;
     if (dt > 200) {
       Logger::warn("mqtt.loop() took %ums", dt);
     }
-    // --- В loop(), замість (або поруч з) mqtt.loop() на час тесту: ---
     #if HAS_ECOFLOW_CLIENT
     // MQTT свідомо лишається активним і в грі - саме ним прилітає "dino off".
     // А EcoFlow тягне REST-запити й таки помітно рве кадр.
@@ -6268,7 +5916,6 @@ void loop() {
   if (showClock && !dinoOn && !testGfxActive) drawTime();
 #endif
 
-  // sendEmail();
   scheduler.loop();
 
   display.endWrite();
@@ -6279,7 +5926,6 @@ void loop() {
   updateImuFlip();
 
   display.flush();
-  // loopRgbLed();
 
   delay(1);
 }

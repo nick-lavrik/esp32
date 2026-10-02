@@ -4,9 +4,7 @@
 #include <Arduino.h>
 #include <string.h>
 
-#include <Display.hpp>
-
-extern Display display;
+#include "App/AppGlobals.hpp"
 
 namespace {
 

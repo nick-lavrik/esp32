@@ -7,9 +7,7 @@
 #include <RwLock.hpp>
 #include <SerialSink.hpp>
 
-#include <Display.hpp>
-
-extern Display display;
+#include "App/AppGlobals.hpp"
 
 void setupSerial() {
   rwlock::registerObject(Serial);

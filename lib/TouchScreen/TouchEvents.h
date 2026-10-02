@@ -82,7 +82,9 @@ public:
       auto p = ts.getPoint();
       TouchPoint raw{p.x, p.y};
       TouchPoint point = _mapper ? _mapper->map(raw) : raw;
-      _logger.debug("raw{x: %d y:%d} screen{x: %d y: %d}", raw.x, raw.y, point.x, point.y);
+      // verbose, не debug: рядок іде на КОЖНЕ опитування, поки палець лежить
+      // (50 Гц на esp32-c6) - на debug він заливав журнал і гальмував loop().
+      _logger.verbose("raw{x: %d y:%d} screen{x: %d y: %d}", raw.x, raw.y, point.x, point.y);
 
       update(true, point);
     } else {

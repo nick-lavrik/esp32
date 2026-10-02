@@ -70,7 +70,7 @@ ESP_TIMEOUT=30 ./esp status sd+   # для довгих відповідей
 
 `uploadfs` обов'язковий для плат із `LITTLEFS_BACKGROUND_IMAGE` (4848s040, s3-lcd147,
 c6-lcd096 — на `c6` фон тепер вшитий у прошивку, `BACKGROUND_PROGMEM_HEADER`) і для тесту
-`dump-asuswrt` (читає `/asus-get_clientlist.json`).
+`dump-asuswrt2` (читає `/asus-get_clientlist.json`).
 
 **Для веб-порталу він більше не потрібен** (з 15.09.2026): сторінка переїхала в
 `assets/www/` і їде всередині прошивки, а `data/www/` лишився порожнім — там тільки
@@ -172,7 +172,7 @@ DTR/RTS** — ресет робиться командою `reboot`, прогр�
 | :-- | :--- | :--- |
 | S1 | Прошити, відкрити монітор, натиснути RESET | Банер `*-*-*-...`, рядок з моделлю чипа і `(<PIOENV>)`, далі послідовність `... setup done`, наприкінці `> Ready. Enter 'list' for comand list.` |
 | S2 | Дочекатись 60 с без дій | Жодних reset/panic/`Guru Meditation`, `Stack canary`, `Task watchdog` у консолі |
-| S3 | `list` | Список команд. Обов'язково присутні: `list`, `status`, `reboot`, `scan`, `flip`, `led`, `clock`, `brightness`, `test-gfx`, `dump-mqtt`, `publish`, `mqtt-prefix`, `dump-asuswrt`; на платах із Gmail — ще й `mailto`, `sendmail`, `smtp-probe` |
+| S3 | `list` | Список команд. Обов'язково присутні: `list`, `status`, `reboot`, `scan`, `flip`, `led`, `clock`, `brightness`, `test-gfx`, `dump-mqtt`, `publish`, `mqtt-prefix`, `dump-asuswrt`, `dump-asuswrt2`; на платах із Gmail — ще й `mailto`, `sendmail`, `smtp-probe` |
 | S4 | `status sys` | Секція `ESP32 CHIP INFO`: модель чипа, ревізія, ядра, частота, SDK, Core, розмір і швидкість флеш, купа, PSRAM, WiFi SSID/RSSI, IP, `Last Reset Reason`, `display.brightness` |
 | S5 | `zzz` (неіснуюча команда) | `Unknown command: zzz` — **саме текст команди**, не сміття й не порожньо *(регресія R3)* |
 | S6 | `status` без аргументу | Підказка `use: status sys\|cfg\|sd\|sd+\|flash\|flash+\|littlefs` |
@@ -323,7 +323,8 @@ reply-підписника з розділу 0.3.
 | F4 | `status sd` | MBR-таблиця розділів. На «superfloppy»-картках (FAT без MBR) — рядок `MBR not found`, це не помилка | 4848s040, s3-lcd147, st7789, **c6**, c6-lcd096 |
 | F5 | `status sd+` | Тип картки, лістинг кореня (до 49 записів), розмір/used/free у відсотках | ті самі |
 | F6 | Вийняти SD і виконати `status sd`, потім `status sd+` | `SD не змонтована - читати нічого`, **без** зависання чи reset *(регресія R15 — до фіксу `status sd` без картки гарантовано перезавантажував плату: `readRAW()` не перевіряє `_pdrv` і читає `s_cards[0xFF]` за межами масиву)* | ті самі |
-| F7 | `dump-asuswrt` | Читає `/asus-get_clientlist.json` з LittleFS і друкує `client.name=…`. Потребує попереднього `uploadfs` | усі |
+| F7 | `dump-asuswrt` | Логін на роутер (`ROUTER_HOST`) + `get_clientlist`, друкує `client=… timer=…`. Потребує доступного ASUS-роутера | усі |
+| F7a | `dump-asuswrt2` | Той самий розбір, але JSON з `/asus-get_clientlist.json` (LittleFS) — перевірка парсера без роутера. Потребує попереднього `uploadfs` | усі |
 | F8 | `status sd` і `status sd+` на платах зі спільною шиною | Команда відпрацьовує до кінця. **Зависання намертво = регресія R16** (`YIELD_DISPLAY_BUS()` не віддав шину дисплея, дедлок на не рекурсивному `SPIClass::paramLock`) | **c6**, c6-lcd096 |
 | F9 | `sdbb` на змонтованій картці, далі `reboot` | Дамп `CS=HIGH` — суцільні `FF`; `CMD0 відповідь` містить `01`; усі три лінії `керується: ТАК`. Висновок чесно каже, що проба нічого не діагностує, бо картка вже була змонтована. Після проби картка демонтована — це очікувано, повертається після `reboot` | c6, c6-lcd096 |
 
@@ -501,7 +502,7 @@ reply-підписника з розділу 0.3.
 
 | Виправлення | Чому недосяжне | Що зробити, якщо треба перевірити |
 | :--- | :--- | :--- |
-| `RouterApiClient::login()`: відсутній `collectHeaders()` | `dump-asuswrt` тестує лише парсер із файлу LittleFS; `login()` з коду не викликається | Дописати тимчасову команду, що робить `routerApi.login()` + `fetchClientListJson()`, і мати доступний ASUS-роутер |
+| `RouterApiClient::login()`: відсутній `collectHeaders()` | `dump-asuswrt` викликає `routerApi.login()` + `fetchClientListJson()`, але без доступного ASUS-роутера не перевірено; `dump-asuswrt2` тестує лише парсер із файлу LittleFS | Прогнати `dump-asuswrt` поруч із ASUS-роутером |
 | `DataType`: необроблений `TYPE_EMPTY` у `switch` | `guess_type()`/`testGuessDataType()` не викликаються з `main.cpp` — мертвий код | Викликати `testGuessDataType()` із `setup()` |
 | `Display::pushImage8bpp`: переюзний буфер замість `malloc` щокадру | Гілка RGB332 недосяжна: у всіх env `SPRITE_COLOR_DEPTH=16` (на esp8266 — 1) | Поставити `-D SPRITE_COLOR_DEPTH=8` для `s3-lcd147` або `c6` (у `platformio.ini` для них уже є закоментовані рядки) |
 | HTTP-сервер (`lib/HttpServer`) | `httpServer.begin()` закоментований у `setup()` | Розкоментувати три рядки в `setup()`, потім `curl http://<ip>/` |

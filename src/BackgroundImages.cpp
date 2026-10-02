@@ -3,7 +3,7 @@
 
 #include <BackgroundImages.hpp>
 
-#include <Display.hpp>
+#include "App/AppGlobals.hpp"
 
 // Запечений фон під конкретну плату: шлях задає -D BACKGROUND_PROGMEM_HEADER
 // (див. platformio.ini). Хедер приносить із собою HAS_BACKGROUND_PROGMEM_RGB565
@@ -93,7 +93,6 @@ const void* getBackgroundImage(uint16_t* width, uint16_t* height, bool* bufferIs
   return backgroundImages[currentIndex];
 }
 
-extern Display display;
 void drawBackgroundImage() {
   uint16_t width, height;
   bool is8bpp = false;
