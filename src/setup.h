@@ -7,7 +7,7 @@
 #include <RwLock.hpp>
 #include <SerialSink.hpp>
 
-#include "Display.h"
+#include <Display.hpp>
 
 extern Display display;
 

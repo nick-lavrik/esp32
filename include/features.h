@@ -21,8 +21,8 @@
 // HAS_SCREEN_MIRROR - інша категорія: не self-detecting і не пряме поле
 // environment.h, а похідне з DISPLAY_SPLIT_COUNT/SPRITE_COLOR_DEPTH (розділ 4
 // environment.h) - той самий підхід, що BOARD_HAS_LIGHT_SENSOR нижче.
-// Обчислення перенесено сюди з src/Display.h (де воно раніше й жило,
-// помилково описане в цьому коментарі як self-detecting) - Display.h тепер
+// Обчислення перенесено сюди з Display.h (де воно раніше й жило,
+// помилково описане в цьому коментарі як self-detecting) - lib/Display/Display.hpp тепер
 // лише підключає цей файл.
 //
 // -include src-<env>/environment.h (platformio.ini) - глобальний build_flag,

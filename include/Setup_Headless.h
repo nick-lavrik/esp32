@@ -1,7 +1,7 @@
 // Setup_Headless.h
 // TFT_eSPI-сумісна ЗАГЛУШКА для плат БЕЗ дисплея (BOARD_HAS_DISPLAY=0).
 //
-// НАВІЩО: спільний прикладний код проєкту (src/main.cpp, src/Display.*,
+// НАВІЩО: спільний прикладний код проєкту (src/main.cpp, lib/Display/*,
 // src/ntp.h, src/setup.h, src/BackgroundImages.*) написаний під API
 // TFT_eSPI і кличе display.*/tft.* у сотнях місць. Обвішувати їх усі
 // "#if BOARD_HAS_DISPLAY" - це кілька сотень правок у файлі на 4000+
@@ -15,7 +15,7 @@
 // графічна бібліотека (TFT_eSPI / Arduino_GFX / LovyanGFX) у lib_deps
 // не потрібна.
 //
-// Підключається через src/TftInstance.h за !BOARD_HAS_DISPLAY - ця
+// Підключається через lib/Display/DisplayDriver.hpp за !BOARD_HAS_DISPLAY - ця
 // перевірка стоїть ПЕРШОЮ, тобто перекриває будь-який BOARD_*.
 //
 // width()/height() повертають 0: TFT_WIDTH/TFT_HEIGHT на такій платі
@@ -43,16 +43,16 @@
 #define TFT_DARKGREY 0x7BEF
 #define TFT_TRANSPARENT 0x0120
 
-// Датуми тексту (підмножина TFT_eSPI, якої вистачає src/Display.cpp)
+// Датуми тексту (підмножина TFT_eSPI, якої вистачає lib/Display/TftEspiDriver.cpp)
 #define TL_DATUM 0
 #define MC_DATUM 4
 
 // Успадкування від Print дає безкоштовно print()/println()/printf() -
-// рівно ті сигнатури, які кличе src/Display.h. write() відкидає байти,
+// рівно ті сигнатури, які кличе lib/Display/TftEspiDriver.hpp. write() відкидає байти,
 // тому ці виклики нічого не коштують, крім форматування рядка.
 //
 // ВАЖЛИВО: TFT_CS / TFT_DC / TFT_RST / TFT_BL тут НЕ визначені навмисно.
-// src/main.cpp і src/Display.cpp перевіряють їх через "#if defined(...)",
+// src/main.cpp і lib/Display/TftEspiDriver.cpp перевіряють їх через "#if defined(...)",
 // тобто без цих макросів уся робота з пінами дисплея (pinMode, підсвітка,
 // резервування пінів у gpio-командах) сама собою зникає зі збірки.
 class TFT_eSPI : public Print {
@@ -95,7 +95,7 @@ public:
   void fillCircle(int32_t, int32_t, int32_t, uint32_t) {}
   void drawBitmap(int16_t, int16_t, const uint8_t*, int16_t, int16_t, uint16_t) {}
 
-  // Обидві перевантаження pushImage() з src/Display.cpp: RGB565 і
+  // Обидві перевантаження pushImage() з lib/Display/TftEspiDriver.cpp: RGB565 і
   // "рідний" 8bpp (RGB332) варіант bodmer/TFT_eSPI.
   void pushImage(int32_t, int32_t, int32_t, int32_t, const uint16_t*) {}
   void pushImage(int32_t, int32_t, int32_t, int32_t, uint8_t*, bool, uint16_t* = nullptr) {}
@@ -104,14 +104,8 @@ private:
   uint8_t _rotation = 0;
 };
 
-/**
- * єдиний глобальний екземпляр, визначений в
- * @see file://./../src-esp32-c3/TftInstance.cpp
- */
-extern TFT_eSPI tft;
-
 // Спрайт на платі без дисплея не потрібен: env з BOARD_HAS_DISPLAY=0
-// зобов'язаний мати DISPLAY_SPLIT_COUNT=0, і тоді src/Display.h бере
+// зобов'язаний мати DISPLAY_SPLIT_COUNT=0, і тоді lib/Display/TftEspiDriver.hpp бере
 // гілку "sprite() == tft_" (без буфера кадру). Клас лишено як alias
 // суто щоб згадка TFT_eSprite деінде не ламала збірку.
 using TFT_eSprite = TFT_eSPI;

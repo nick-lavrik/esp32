@@ -129,7 +129,7 @@ topic-per-device (як `ecoflow-params/<sn>` вище): запит рідкіс�
 - `board` — рядок з рукописної мапи `BOARD_XXX` → назва (`src/main.cpp`,
   біля `registerJsonApiEntry()`), не `platformio.ini`'s `board=`.
 - `revision` — `GIT_REVISION` (короткий git-sha, `tools/pio_sapi_revision.py`).
-- `features` — масив АКТИВНИХ прапорців з `src/features.h` (повний каталог
+- `features` — масив АКТИВНИХ прапорців з `include/features.h` (повний каталог
   усіх `BOARD_HAS_*`/`HAS_*`, включно з похідними `BOARD_HAS_LIGHT_SENSOR`/
   `HAS_SCREEN_MIRROR` і колишніми self-detecting `HAS_MQTT_CLIENT`/
   `HAS_CONSOLE_MQTT`/`HAS_GMAIL_SENDER`/`HAS_PING`, усі вже переведені на
@@ -190,7 +190,7 @@ LWT для EcoFlow-клієнта свідомо не налаштовуєтьс
 | `1883` (LAN) | `user <PIOENV>` (загальний клієнт кожної плати) | `readwrite mykola-lavryk/#` |
 | `1883` (LAN), анонім | — | лише `read $SYS/#` (після ACL-фіксу 2026-09-22) |
 | `1883` (localhost) | локальні інструменти rpi5 | `read $SYS/#`+`mykola-lavryk/#`, `write` у DELTA2-топік |
-| `9001` (WebSockets, `sapi.conf`) | `user sapi-<env>` (браузерний SAPI) | `read devices/<client-id>/#` + `write devices/<client-id>/api/+` + `write command/<client-id>` + `read command/<client-id>/reply` (сторінка Commands, сесія 2026-09-26 — розворот попереднього рішення "без `command/`", `docs/mqtt-web-handoff.md`) |
+| `9001` (WebSockets, `sapi.conf`) | `user sapi-<env>` (браузерний SAPI; заведені `sapi-esp32-c3`, `sapi-esp32-c6` — спільний пароль, `/etc/mosquitto/sapi_passwd`) | `read devices/<client-id>/#` + `write devices/<client-id>/api/+` + `write command/<client-id>` + `read command/<client-id>/reply` (сторінка Commands, сесія 2026-09-26 — розворот попереднього рішення "без `command/`", `docs/mqtt-web-handoff.md`) |
 | bridge `ecoflow-proxy` | — | `topic /app/device/property/<SN> in` — по одному на серійник з `EcoflowDeviceRegistry` |
 
 ## 6. Секрети/build flags (без значень — самі значення в `secrets.ini`)

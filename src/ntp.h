@@ -4,7 +4,7 @@
 #endif
 #include <NtpService.hpp>
 
-#include "Display.h"
+#include <Display.hpp>
 const char* ntpServer1 = "1.pool.ntp.org";
 const char* ntpServer2 = "ua.pool.ntp.org";
 const char* ntpServer3 = "pool.ntp.org";

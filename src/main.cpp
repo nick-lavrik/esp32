@@ -72,7 +72,7 @@
 
 #include "Dino/DinoRenderer.hpp"  // без #if: LDF не обчислює препроцесор,
                                      // а lib/DinoGame має знайтись на всіх env
-#include "Display.h"
+#include <Display.hpp>
 #if BOARD_HAS_SD
 // SD_USE_SDMMC - внутрішній прапорець: SDMMC-режим є лише на платі з таким
 // роз'ємом, і лише якщо його явно не відключили через SD_FORCE_SPI.
@@ -525,7 +525,7 @@ WebSystemModule webSystemModule(littleFsUsage);
 #if HAS_SCREEN_MIRROR
 // Дзеркало екрана. Плата без спрайта кадру (esp32-c3) або з 1bpp-панеллю
 // (esp8266) віддавати браузеру нічого не може - там розділу просто немає
-// (див. HAS_SCREEN_MIRROR у src/features.h).
+// (див. HAS_SCREEN_MIRROR у include/features.h).
 WebScreenModule webScreenModule;
 #endif
 #if HAS_MQTT_CLIENT
@@ -557,7 +557,11 @@ RouterApiClient routerApi(ROUTER_HOST, ROUTER_LOGIN_AUTHORIZATION);
 // дисплея сам Display стає порожнім: TFT_eSPI там - заглушка з
 // include/Setup_Headless.h, усі методи inline й no-op, тому компілятор
 // прибирає ці виклики цілком (у прошивці не лишається ні коду, ні буферів).
-Display display;
+//
+// Драйвер володіє панеллю (і спрайтом смуги) - окремого глобала tft немає;
+// тип DisplayDriver обирає lib/Display/DisplayDriver.hpp за BOARD_*.
+DisplayDriver displayDriver;
+Display display(displayDriver);
 #if HAS_DINO_GAME
 DinoRenderer dinoRenderer;
 #endif
@@ -1114,7 +1118,7 @@ static constexpr const char* kDiscoveryBoard = "ttgo-t1";
 #error "Unknown board: add a kDiscoveryBoard entry in src/main.cpp"
 #endif
 
-// features - пряме дзеркало активних BOARD_HAS_*/HAS_* з src/features.h
+// features - пряме дзеркало активних BOARD_HAS_*/HAS_* з include/features.h
 // (каталог, не окрема таблиця перейменувань - той самий принцип, що вже
 // застосований до kDiscoveryBoard вище).
 static String discoveryFeaturesJson() {
@@ -1342,10 +1346,10 @@ void display_brightness(uint8_t percent, bool _auto) {
 struct DisplayBusYield {
   const bool _wasWriting;
   DisplayBusYield() : _wasWriting(display.isWriting()) {
-    if (_wasWriting) tft.endWrite();
+    if (_wasWriting) display.releaseBus();
   }
   ~DisplayBusYield() {
-    if (_wasWriting) tft.startWrite();
+    if (_wasWriting) display.reacquireBus();
   }
 };
 #define YIELD_DISPLAY_BUS() DisplayBusYield _displayBusYield_

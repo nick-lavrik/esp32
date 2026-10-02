@@ -586,7 +586,7 @@ reply-підписника з розділу 0.3.
 - PicoMQTT → M8 і M11 обов'язкові.
 
 ### 14.7 `esp32-c3` (ESP32-C3 SuperMini, RISC-V, **без екрана**)
-- **Перша й поки єдина безекранна плата.** `BOARD_HAS_DISPLAY=0` перемикає `src/TftInstance.h`
+- **Перша й поки єдина безекранна плата.** `BOARD_HAS_DISPLAY=0` перемикає `lib/Display/DisplayDriver.hpp`
   на заглушку `include/Setup_Headless.h` — клас з API `TFT_eSPI`, у якого всі методи порожні
   й inline. Тому блоки **D**, **I**, **T**, **V**, **L** пропускати, а не фіксувати як fail.
 - Команди `flip`, `clock`, `brightness` **є в `list`** (зареєстровані поза `#if`) і мовчки

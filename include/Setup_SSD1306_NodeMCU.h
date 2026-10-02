@@ -4,10 +4,10 @@
 // bodmer/TFT_eSPI підтримує лише SPI/паралельні кольорові панелі, а
 // LovyanGFX (як для 4848S040) теж розрахований на кольорові дисплеї,
 // тому тут - власна мінімальна TFT_eSPI/TFT_eSprite-сумісна обгортка
-// над Adafruit_SSD1306/Adafruit_GFX, щоб src/Display.h та src/Display.cpp
+// над Adafruit_SSD1306/Adafruit_GFX, щоб lib/Display/TftEspiDriver
 // (спільний прикладний код для ВСІХ плат) лишались без змін.
 //
-// Підключається через src/TftInstance.h за BOARD_ESP8266 (аналогічно тому,
+// Підключається через lib/Display/DisplayDriver.hpp за BOARD_ESP8266 (аналогічно тому,
 // як Setup_ST7701_4848S040.h підключається за BOARD_4848S040).
 //
 // ВАЖЛИВО: екран монохромний (1 біт на піксель) - SPRITE_COLOR_DEPTH=1,
@@ -35,7 +35,7 @@
 #define TFT_DARKGREY 1
 #define TFT_TRANSPARENT 0
 
-// Датуми тексту (підмножина TFT_eSPI, якої вистачає src/Display.cpp)
+// Датуми тексту (підмножина TFT_eSPI, якої вистачає lib/Display/TftEspiDriver.cpp)
 #define TL_DATUM 0
 #define MC_DATUM 4
 
@@ -47,7 +47,7 @@ namespace {
 }
 
 // "Пристрій" - сам OLED. Публічний API - підмножина bodmer/TFT_eSPI,
-// якою користується src/Display.h (init/setRotation/getRotation/width/
+// якою користується lib/Display/TftEspiDriver.hpp (init/setRotation/getRotation/width/
 // height/startWrite/endWrite).
 class TFT_eSPI : public Adafruit_SSD1306 {
 public:
@@ -94,7 +94,7 @@ public:
   // Кольорові (RGB565) зображення на монохромному екрані не мають сенсу -
   // цей метод не використовується для NodeMCU+OLED (BackgroundImages
   // виключені з build_src_filter для env:esp8266), лишений лише для
-  // сумісності сигнатури з src/Display.h.
+  // сумісності сигнатури з lib/Display/TftEspiDriver.hpp.
   void pushImage(int32_t, int32_t, int32_t, int32_t, const uint16_t*) {}
 
   /* int16_t textWidth(const char* text) {
@@ -127,12 +127,6 @@ private:
   uint8_t _rotation = 0;
 };
 
-/**
- * єдиний глобальний екземпляр, визначений в
- * @see file://./../src-esp8266/TftInstance.cpp
- */
-extern TFT_eSPI tft;
-
 // "Спрайт" - для монохромного SSD1306 окремого буфера кадру не потрібно:
 // Adafruit_SSD1306 вже є власним framebuffer'ом, тож TFT_eSprite малює
 // напряму в той самий буфер, що й tft (без подвійного виділення пам'яті).
@@ -158,7 +152,7 @@ public:
   // Кольорові (RGB565) зображення на монохромному екрані не мають сенсу -
   // цей метод не використовується для NodeMCU+OLED (BackgroundImages
   // виключені з build_src_filter для env:esp8266), лишений лише для
-  // сумісності сигнатури з src/Display.h.
+  // сумісності сигнатури з lib/Display/TftEspiDriver.hpp.
   void pushImage(int32_t, int32_t, int32_t, int32_t, const uint16_t*) {}
 
   // size_t fontHeight() { return 8 * textsize_y; } // вбудований шрифт Adafruit_GFX: комірка 8px по
@@ -190,7 +184,7 @@ public:
   }
 
   // Делегуємо до успадкованого Print::printf(const char*, ...) - так само,
-  // як src/Display.h робить для bodmer/TFT_eSPI та LGFX_Sprite.
+  // як lib/Display/TftEspiDriver.hpp робить для bodmer/TFT_eSPI та LGFX_Sprite.
   template <typename... Args>
   size_t printf(const __FlashStringHelper* ifsh, const Args&... args) {
     return _tft->printf(reinterpret_cast<const char*>(ifsh), args...);

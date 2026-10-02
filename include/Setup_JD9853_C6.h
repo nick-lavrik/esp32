@@ -24,10 +24,10 @@
 //
 // Третя графічна бібліотека лише для цієї плати, обгорнута у
 // TFT_eSPI/TFT_eSprite-сумісний фасад (той самий підхід, що й
-// Setup_SSD1306_NodeMCU.h для esp8266), щоб src/Display.h/.cpp (спільний
+// Setup_SSD1306_NodeMCU.h для esp8266), щоб lib/Display/TftEspiDriver (спільний
 // прикладний код для ВСІХ плат) лишались без змін.
 //
-// Підключається через src/TftInstance.h за BOARD_ESP32_C6 (аналогічно тому,
+// Підключається через lib/Display/DisplayDriver.hpp за BOARD_ESP32_C6 (аналогічно тому,
 // як Setup_ST7701_4848S040.h підключається за BOARD_4848S040).
 //
 // SPI-шина - ЄДИНА, СПІЛЬНА з TF-карткою (Arduino_HWSPI їде на глобальному
@@ -79,7 +79,7 @@
 #define TFT_DARKGREY 0x7BEF
 #define TFT_LIGHTGREY 0xC618
 
-// Датуми тексту (підмножина TFT_eSPI, якої вистачає src/Display.cpp)
+// Датуми тексту (підмножина TFT_eSPI, якої вистачає lib/Display/TftEspiDriver.cpp)
 #define TL_DATUM 0
 #define MC_DATUM 4
 
@@ -154,7 +154,7 @@ static const uint8_t jd9853_reg_init_operations[] = {
     END_WRITE};
 
 // "Пристрій" - фізичний JD9853/ST7789-сумісний дисплей. Публічний API, яким
-// користується src/Display.h/.cpp (init/setRotation/getRotation/width/height/
+// користується lib/Display/TftEspiDriver (init/setRotation/getRotation/width/height/
 // startWrite/endWrite/fillScreen/setCursor/print/...), успадкований від
 // Arduino_ST7789/Arduino_GFX без змін; тут додається лише те, чого немає
 // (init() з підсвіткою, textWidth/drawString-обгортки в стилі TFT_eSPI).
@@ -182,7 +182,7 @@ class TFT_eSPI : public Arduino_ST7789 {
   }
 
   // Arduino_GFX сам керує порядком байтів при передачі RGB565 по SPI -
-  // no-op, лишений лише для сумісності сигнатури з src/Display.h.
+  // no-op, лишений лише для сумісності сигнатури з lib/Display/TftEspiDriver.hpp.
   void setSwapBytes(bool) {}
 
   // Висота рядка ПОТОЧНОГО шрифту (див. ArduinoGfxFonts.h). Хардкод 8
@@ -224,19 +224,13 @@ class TFT_eSPI : public Arduino_ST7789 {
   Arduino_DataBus *_bus;
 };
 
-/**
- * єдиний глобальний екземпляр, визначений в
- * @see file://./../src-esp32-c6/TftInstance.cpp
- */
-extern TFT_eSPI tft;
-
 // "Спрайт" - TFT_eSprite-сумісна обгортка над Arduino_Canvas (offscreen
 // framebuffer Arduino_GFX). На відміну від TFT_eSprite (bodmer/TFT_eSPI),
 // Arduino_Canvas не має pushSprite(x, y) з довільними рантайм-координатами
 // (output_x/output_y фіксуються при створенні) - тому pushSprite() тут
 // напряму пише framebuffer канви в tft_ через draw16bitRGBBitmap(), що дає
 // той самий рантайм-контроль позиції, який потребує DISPLAY_SPLIT_COUNT
-// (src/Display.cpp::flush() зсуває y для кожного активного split-блоку).
+// (Display::flush() (lib/Display/Display.cpp) зсуває y для кожного активного split-блоку).
 class TFT_eSprite {
  public:
   explicit TFT_eSprite(TFT_eSPI *tft) : _tft(tft) {}
@@ -277,7 +271,7 @@ class TFT_eSprite {
 
   // Прямий доступ до пікселів канви (RGB565, рідний порядок байтів) -
   // потрібен дзеркалу екрана у веб-порталі (lib/ScreenMirror). Ім'я збігається
-  // з TFT_eSprite::getPointer() справжнього TFT_eSPI, тому Display.cpp не
+  // з TFT_eSprite::getPointer() справжнього TFT_eSPI, тому TftEspiDriver не
   // розгалужується на бекенди.
   void *getPointer() { return _canvas ? static_cast<void *>(_canvas->getFramebuffer()) : nullptr; }
 

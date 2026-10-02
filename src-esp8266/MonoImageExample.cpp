@@ -4,7 +4,7 @@
 
 #include <Arduino.h>
 
-#include "Display.h"  // extern TFT_eSPI tft; (Setup_SSD1306_NodeMCU.h)
+#include <Display.hpp>
 #include "JpegImage.hpp"
 #include "MonoBitmap.hpp"
 
@@ -12,6 +12,8 @@
 //   cd data && gcc convert.c -o convert -lm
 //   ./convert space-01.jpg ../assets/space-mono-128x64.h 128 64 mono1 spaceMono128x64 128
 // #include "../assets/space-mono-128x64.h"
+
+extern Display display;
 
 // --- Варіант 1: картинка з PROGMEM (як backgroundSpace03, але 1bpp) ---
 void showFromMemory() {
@@ -33,7 +35,9 @@ void showFromLittleFS(const char *path) {
     return;
   }
 
-  tft.clearDisplay();
-  tft.drawBitmap(0, 0, img.bufferMono1(), img.width(), img.height(), SSD1306_WHITE);
-  tft.display();
+  // Через Display, а не напряму в Adafruit_SSD1306: панеллю володіє драйвер.
+  // flush() на цій платі - це і є display() (DISPLAY_SPLIT_COUNT=1).
+  display.clear(SSD1306_BLACK);
+  display.drawBitmap(0, 0, img.bufferMono1(), img.width(), img.height(), SSD1306_WHITE);
+  display.flush();
 }

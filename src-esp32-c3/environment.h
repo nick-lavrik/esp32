@@ -18,9 +18,9 @@
 // ============================================================
 
 // ГОЛОВНЕ для цієї плати: дисплея немає взагалі. BOARD_HAS_DISPLAY=0
-// перемикає src/TftInstance.h на заглушку include/Setup_Headless.h -
+// перемикає lib/Display/DisplayDriver.hpp на заглушку include/Setup_Headless.h -
 // клас з API TFT_eSPI, у якого всі методи порожні й inline. Прикладний
-// код (src/main.cpp, src/Display.*, src/ntp.h, src/setup.h) лишається
+// код (src/main.cpp, lib/Display/*, src/ntp.h, src/setup.h) лишається
 // спільним з іншими платами, але компілятор викидає з нього весь вивід
 // на екран.
 #define BOARD_HAS_DISPLAY 0
@@ -101,7 +101,7 @@
 // Розміри лишаються визначеними як 0, а не викинутими: main.cpp друкує
 // їх у діагностиці ("Display: %dx%d") поза будь-якими #if. Разом з
 // дисплеєм вимкнено все, що від нього залежить:
-//   DISPLAY_SPLIT_COUNT=0    - без спрайта/буфера кадру (src/Display.h
+//   DISPLAY_SPLIT_COUNT=0    - без спрайта/буфера кадру (lib/Display/TftEspiDriver.hpp
 //                              бере гілку "sprite() == tft_")
 //   BACKGROUND_IMAGES_COUNT=0 + без LITTLEFS_BACKGROUND_IMAGE
 //                            - жодних фонових JPEG у RAM
@@ -110,7 +110,7 @@
 //                              під "#if CLOCK_TEXT_FONT && ...", незаданий
 //                              макрос у #if дає 0
 //   LOAD_FONT*/U8G2_FONT_SUPPORT не задані - шрифти нікуди виводити
-// TFT_CS/TFT_DC/TFT_RST/TFT_BL теж НЕ визначені: main.cpp і Display.cpp
+// TFT_CS/TFT_DC/TFT_RST/TFT_BL теж НЕ визначені: main.cpp і TftEspiDriver.cpp
 // перевіряють їх через "#if defined(...)", тож робота з пінами дисплея
 // (підсвітка, резервування пінів у gpio-командах) сама зникає зі збірки.
 #define TFT_WIDTH 0

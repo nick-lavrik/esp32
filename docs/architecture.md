@@ -18,7 +18,7 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 ## Плати (PlatformIO environments)
 
 Вісім середовищ. Ідентичність плати в коді — build flag `BOARD_*` (третя колонка), саме за ним
-розгалужується `src/main.cpp` і `src/Display.*`.
+розгалужується `src/main.cpp` і драйвер дисплея (`lib/Display/TftEspiDriver.*`).
 
 Усі компіляційні прапорці, специфічні для однієї плати (піни, `BOARD_HAS_*`, `HAS_*`),
 винесені з `platformio.ini` в `src-<env>/environment.h`, підключений через
@@ -32,7 +32,7 @@ serial commander, light sensor, gmail sender) — спільна для всіх
 
 Сьома колонка таблиці нижче — єдина плата **без екрана** (`esp32-c3`). Вона перевіряється
 не за `BOARD_*`, а за `BOARD_HAS_DISPLAY=0`, і ця перевірка стоїть **першою** в
-`src/TftInstance.h`, тобто перекриває будь-який `BOARD_*`.
+`lib/Display/DisplayDriver.hpp`, тобто перекриває будь-який `BOARD_*`.
 
 | env | MCU / плата | `BOARD_*` flag | Дисплей (контролер, графічна бібліотека) | Flash / PSRAM |
 | :--- | :--- | :--- | :--- | :--- |
@@ -189,19 +189,19 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
   Ефект (free / largest block): **51/16 КБ → 159/123 КБ**, фрагментація 69 % → 14 %.
 
 ¹⁰ `esp32-c3` (SuperMini) — **єдина плата проєкту без екрана**. `BOARD_HAS_DISPLAY=0` перемикає
-  `src/TftInstance.h` на заглушку `include/Setup_Headless.h`: клас із API `TFT_eSPI`, у якого всі
-  методи порожні й inline. Прикладний код (`src/main.cpp`, `src/Display.*`, `src/ntp.h`,
+  `lib/Display/DisplayDriver.hpp` на заглушку `include/Setup_Headless.h`: клас із API `TFT_eSPI`, у якого всі
+  методи порожні й inline. Прикладний код (`src/main.cpp`, `lib/Display/*`, `src/ntp.h`,
   `src/setup.h`) лишається спільним з рештою плат — обвішувати `#if BOARD_HAS_DISPLAY` кілька
   сотень викликів `display.*` у файлі на 4000+ рядків означало б тримати дві гілки одного файлу.
   Замість цього компілятор викидає ці виклики цілком: у прошивці немає ні графічної бібліотеки,
-  ні буферів кадру (`display` — 180 байт, майже все з них — `TLogger`; `tft` — 12 байт).
+  ні буферів кадру (`display` — 168 байт, майже все з них — `TLogger`; `displayDriver` — 20 байт).
 
   Разом із дисплеєм вимкнено все, що від нього залежить: `DISPLAY_SPLIT_COUNT=0` (без спрайта),
   `BACKGROUND_IMAGES_COUNT=0` і жодного `LITTLEFS_BACKGROUND_IMAGE`/`BACKGROUND_PROGMEM_HEADER`,
   `DISPLAY_BUS_YIELD` не заданий (шини дисплея немає), `CLOCK_*`/`DATE_*`
   не задані (блоки годинника й дати стоять під `#if CLOCK_TEXT_FONT && …`, а незаданий макрос у
   `#if` дає 0), `LOAD_FONT*`/`U8G2_FONT_SUPPORT` не задані. `TFT_CS`/`TFT_DC`/`TFT_RST`/`TFT_BL`
-  теж НЕ визначені — `main.cpp` і `Display.cpp` перевіряють їх через `#if defined(…)`, тож робота
+  теж НЕ визначені — `main.cpp` і `TftEspiDriver.cpp` перевіряють їх через `#if defined(…)`, тож робота
   з пінами дисплея зникає зі збірки сама. `FLIP_BUTTON_PIN` не заданий навмисно: уся логіка тієї
   кнопки суто дисплейна (flip, яскравість підсвітки, показ годинника) — на безекранній платі це
   була б cron-задача, що щотика читає GPIO заради no-op. Індикація лишається одна — вбудований
@@ -861,12 +861,13 @@ mbedTLS ядра, який на C6 щойно перевірено робочи�
 ### Платформо-специфічні теки
 
 Кожен env підмішує рівно одну теку через `build_src_filter = +<*> +<../src-<board>/>`. Там живе
-лише те, що не можна тримати спільним — насамперед визначення глобального об'єкта `tft`
-(`TftInstance.cpp`) і реалізації touch-контролерів:
+лише те, що не можна тримати спільним — `environment.h` і реалізації touch-контролерів та
+іншого заліза плати. Об'єкта панелі тут більше немає: ним володіє драйвер дисплея
+(`displayDriver` у `src/main.cpp`, див. «Як обирається графічний бекенд»).
 
-`src-4848s040/` (+ GT911Touch, TouchController) · `src-esp32-s3-lcd147/` · `src-st7789/`
-(+ TouchController) · `src-ttgo-t1/` · `src-esp32-c6/` · `src-esp32-c6-lcd096/` · `src-esp32-c3/`
-· `src-esp8266/` (+ MonoImageExample)
+`src-4848s040/` (+ GT911Touch, TouchController) · `src-esp32-s3-lcd147/` (+ SdMassStorage) ·
+`src-st7789/` (+ TouchController) · `src-ttgo-t1/` · `src-esp32-c6/` (+ touch, IMU) ·
+`src-esp32-c6-lcd096/` · `src-esp32-c3/` · `src-esp8266/` (+ MonoImageExample)
 
 ### Шрифти на платах з Arduino_GFX (обидві C6)
 
@@ -905,7 +906,7 @@ Arduino_GFX під нашою сумісною обгорткою), тому с�
 
 Два різні механізми, не плутати:
 
-1. **Тип `TFT_eSPI`/`TFT_eSprite`** обирає `src/TftInstance.h` — ланцюжком `#if defined(BOARD_*)`,
+1. **Тип `TFT_eSPI`/`TFT_eSprite`** обирає `lib/Display/DisplayDriver.hpp` — ланцюжком `#if defined(BOARD_*)`,
    **не** через `-include`. Зроблено саме так, щоб важкий `<LovyanGFX.hpp>` тягнувся лише туди,
    де він реально потрібен, а не в кожен `.cpp` проєкту й бібліотек:
 
@@ -922,8 +923,21 @@ Arduino_GFX під нашою сумісною обгорткою), тому с�
    `-include`: `esp32-st7789` → `include/Setup_ST7789.h`, `esp32-s3-lcd147` →
    `include/Setup_ST7789_lcd147.h`. `ttgo-t1` користується конфігом самої бібліотеки.
 
-Прикладний код (`src/Display.h`/`.cpp`) однаковий для всіх плат — він знає лише про
-`TFT_eSPI`/`TFT_eSprite`-подібний інтерфейс.
+Над бекендом — два шари (`lib/Display`):
+
+- **`DisplayDriver`** — псевдонім типу драйвера, обраний тим самим ланцюжком (зараз завжди
+  `TftEspiDriver`). Драйвер **володіє** панеллю і спрайтом смуги; глобала `tft` немає, об'єкт
+  один — `displayDriver` у `src/main.cpp`. Усе бекенд-специфічне (`getBuffer()` проти
+  `getPointer()`, порядок байтів спрайта `kCanvasSwapped565`, три гілки `pushImage8bpp()`,
+  підсвітка/контраст у `setBrightness()`) живе тут. Контракт драйвера перелічений у шапці
+  `TftEspiDriver.hpp`. Вибір компіляційний, без `virtual`: примітиви кличуться сотні разів на кадр.
+- **`Display`** (`Display(DisplayDriver&)`) — логіка кадру: смуги `DISPLAY_SPLIT_COUNT`, зсув
+  `dXY()` і відсікання по активній смузі, `ScreenMirror`, `drawBitmapScaled()`. Ні `TFT_eSPI`,
+  ні `BOARD_*` у ньому немає (кольори `TFT_*` приходять із заголовка бекенду).
+
+Зараз `TftEspiDriver` обслуговує всі вісім env, бо фасади `Setup_*.h` приводять до контракту
+TFT_eSPI і LovyanGFX, і Arduino_GFX, і SSD1306. Власний драйвер на бекенд (без фасаду) —
+`docs/tech_debt.md`, розділ 3.
 
 ## Ключові бібліотеки (спільні + платформо-специфічні)
 
@@ -1102,7 +1116,7 @@ EcoFlow-блок і показувалась не та конфігурація 
 - **Тестова таблиця дисплея** (`src/TestGfx.hpp`/`.cpp`, `test-gfx on|off|<pattern>`) — усі
   плати з дисплеєм. Шість патернів (`bars`, `gray`, `gradient`, `frame`, `checker`,
   `primitives`) для звірки панелі з дзеркалом у вкладці Screen: порядок кольору/байтів,
-  яскравість і гама, обидві конвертації `Display::rgb332to565()`, зсуви й ротація, різкість,
+  яскравість і гама, обидві конвертації `rgb332to565()` (`lib/Display/Rgb332.hpp`), зсуви й ротація, різкість,
   шрифти. `test-gfx on` без імені патерну — авто-демо, циклює всі шість що 5 с; явне ім'я
   (`test-gfx frame`) фіксує один патерн і вимикає цикл. Малює лише через `fillRect`/`drawRect`/
   `drawCircle`/`drawBitmapScaled`/шрифти — навмисно без `pushImage()`: цей метод на монохромному
@@ -1157,6 +1171,10 @@ EcoFlow-блок і показувалась не та конфігурація 
 - **`ScreenMirror`** — буфер смуги захоплює `loop()`, віддає chunked-відповідь
   у `async_tcp` (`WebScreenModule`); ⚠ `tick()` звільняє буфер через 4 с
   drain, навіть якщо клієнт ще читає.
+- **`display`/`displayDriver`** (`lib/Display`, об'єкти в `src/main.cpp`) —
+  лише `loop()`: кадр, команди (`CommandQueue` теж виконується в `loop()`),
+  `ScreenMirror::capture()` з `Display::flush()`. Шину на час SD/`setRotation()`
+  віддає `YIELD_DISPLAY_BUS()` через `Display::releaseBus()`/`reacquireBus()`.
 - **`CommandQueue`** — `submit()` з будь-якого таска (під мʼютексом),
   виконання лише в `loop()`.
 - **`Journal`** — `publish()` з будь-якого таска; приймачів кличе помпа без
@@ -1188,6 +1206,13 @@ EcoFlow-блок і показувалась не та конфігурація 
   компілюватись і на ESP8266 — невикликане лінкер викине. Після правки
   `lib/` — `pio run -e esp8266`. (Пропущений крок коштував зламаного
   `env:esp8266` від `73129b1`; полагоджено в `dbbb084`.)
+- **`include/` бібліотекам не видно сам по собі.** PlatformIO кладе його в
+  include path лише для `src/`; для `lib/*` — тільки через `-I include` у
+  `[common] build_flags`. І навіть так LDF шукає залежності бібліотеки
+  лише в її власних файлах, за `#include` всередині `include/*.h` не йде —
+  тому `lib/Display/DisplayDriver.hpp` називає бібліотеку бекенду
+  (`<Arduino_GFX_Library.h>`, `<LovyanGFX.hpp>`, …) ще раз поруч із
+  `Setup_*.h`.
 - **`board_build.filesystem = littlefs` — явно в кожному env.** Дефолт
   espressif32 — `spiffs`: `uploadfs` заллє SPIFFS-образ, а
   `LittleFS.begin(true)` його відформатує.
@@ -1337,6 +1362,15 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-02 — **`Display` переїхав у `lib/Display` і отримує драйвер у
+  конструкторі.** `src/Display.*` → `lib/Display/Display.*`, `src/TftInstance.h`
+  → `lib/Display/DisplayDriver.hpp` (вибір бекенду + `using DisplayDriver`),
+  новий `TftEspiDriver` володіє панеллю й спрайтом і забрав усі `BOARD_*` з
+  `Display`; вісім `src-<board>/TftInstance.cpp` і глобал `tft` прибрані.
+  `src/features.h` → `include/features.h`, `rgb332to565()` →
+  `lib/Display/Rgb332.hpp`. Щоб `lib/` бачив `include/` — `-I include` у
+  `[common]`. На `esp32-c6`: RAM +8 Б, Flash −402 Б. Наступний крок
+  (драйвер на бекенд без фасадів) — `docs/tech_debt.md`, розділ 3.
 - 2026-09-22/24 — **MQTT JSON API (SAPI) — паралельний, повністю read-only
   канал доступу до даних веб-порталу без HTTP**, поверх нового топік-
   простору `devices/<client-id>/api/<cmd>`/`.../reply` (`docs/mqtt-topics.md`).

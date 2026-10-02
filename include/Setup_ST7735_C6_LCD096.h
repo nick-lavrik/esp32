@@ -64,7 +64,7 @@
 // (LCD), DC=15, RST=21, підсвітка (через транзисторний ключ) = GPIO3.
 //
 // Підсвітку (analogWrite(TFT_BL,...)) і pinMode(TFT_BL, OUTPUT) робить
-// спільний код (src/Display.cpp, src/setup.h) — тут лише #define TFT_BL,
+// спільний код (lib/Display/TftEspiDriver.cpp, src/setup.h) — тут лише #define TFT_BL,
 // власного PWM-коду не потрібно.
 //
 // TFT_ROTATION / фінальна орієнтація — НЕ перевірені на реальному
@@ -107,7 +107,7 @@
 #define TFT_DARKGREY 0x7BEF
 #define TFT_LIGHTGREY 0xC618
 
-// Датуми тексту (підмножина TFT_eSPI, якої вистачає src/Display.cpp)
+// Датуми тексту (підмножина TFT_eSPI, якої вистачає lib/Display/TftEspiDriver.cpp)
 #define TL_DATUM 0
 #define MC_DATUM 4
 
@@ -125,7 +125,7 @@
 // ST7735-init бібліотеки, не критично що саме) і ПЕРЕД setRotation()
 // (0x36 тут навмисно = 0xA8, тимчасовий - фінальний MADCTL все одно
 // перезаписує бібліотечний Arduino_ST7735::setRotation(), викликаний з
-// src/Display.cpp одразу після init()).
+// lib/Display/TftEspiDriver.cpp одразу після init()).
 //
 // НЕ перенесено з оригіналу: початкове CASET(0x2A)/RASET(0x2B) вікно
 // (0,0)-(159,79) з окремими хардкод-офсетами (+2/+3) одразу після
@@ -180,7 +180,7 @@ static const uint8_t st7735_reg_init_operations[] = {
     END_WRITE};
 
 // "Пристрій" - фізичний ST7735S дисплей. Публічний API, яким користується
-// src/Display.h/.cpp (init/setRotation/getRotation/width/height/
+// lib/Display/TftEspiDriver (init/setRotation/getRotation/width/height/
 // startWrite/endWrite/fillScreen/setCursor/print/...), успадкований від
 // Arduino_ST7735/Arduino_GFX без змін; тут додається лише те, чого немає.
 //
@@ -223,7 +223,7 @@ class TFT_eSPI : public Arduino_ST7735 {
   }
 
   // Arduino_GFX сам керує порядком байтів при передачі RGB565 по SPI -
-  // no-op, лишений лише для сумісності сигнатури з src/Display.h.
+  // no-op, лишений лише для сумісності сигнатури з lib/Display/TftEspiDriver.hpp.
   void setSwapBytes(bool) {}
 
   // Висота рядка ПОТОЧНОГО шрифту (див. ArduinoGfxFonts.h). Хардкод 8
@@ -263,12 +263,6 @@ class TFT_eSPI : public Arduino_ST7735 {
   // Setup_JD9853_C6.h).
   Arduino_DataBus *_bus;
 };
-
-/**
- * єдиний глобальний екземпляр, визначений в
- * @see file://./../src-esp32-c6-lcd096/TftInstance.cpp
- */
-extern TFT_eSPI tft;
 
 // "Спрайт" - TFT_eSprite-сумісна обгортка над Arduino_Canvas (offscreen
 // framebuffer Arduino_GFX). Ідентична до TFT_eSprite з Setup_JD9853_C6.h
@@ -312,7 +306,7 @@ class TFT_eSprite {
 
   // Прямий доступ до пікселів канви (RGB565, рідний порядок байтів) -
   // потрібен дзеркалу екрана у веб-порталі (lib/ScreenMirror). Ім'я збігається
-  // з TFT_eSprite::getPointer() справжнього TFT_eSPI, тому Display.cpp не
+  // з TFT_eSprite::getPointer() справжнього TFT_eSPI, тому TftEspiDriver не
   // розгалужується на бекенди.
   void *getPointer() { return _canvas ? static_cast<void *>(_canvas->getFramebuffer()) : nullptr; }
 

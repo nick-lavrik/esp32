@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "Display.h"
+#include <Display.hpp>
 #include "JpegImage.hpp"
 
 // Самі дані зображень (76800 = 240*320 пікселів, RGB565) визначені

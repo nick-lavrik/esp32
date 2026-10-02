@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <string.h>
 
-#include "Display.h"
+#include <Display.hpp>
 
 extern Display display;
 
@@ -66,8 +66,8 @@ uint16_t gradientRampAt(int col, int row) {
 }
 
 // Повна палітра RGB332 (256 кольорів) сіткою 16x16 - та сама конвертація,
-// що pushImage8bpp() використовує для фонових зображень (Display::rgb332to565).
-uint16_t paletteAt(int col, int row) { return Display::rgb332to565((uint8_t)(row * 16 + col)); }
+// що pushImage8bpp() використовує для фонових зображень (rgb332to565).
+uint16_t paletteAt(int col, int row) { return rgb332to565((uint8_t)(row * 16 + col)); }
 
 uint16_t checkerAt(int col, int row) { return ((col + row) & 1) ? TFT_WHITE : TFT_BLACK; }
 

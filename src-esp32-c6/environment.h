@@ -133,7 +133,7 @@
 
 // DISPLAY_SPLIT_COUNT ділить height() ПІСЛЯ ротації, а не фізичну висоту
 // панелі. В landscape-орієнтації (TFT_ROTATION=1) height() повертає 172, не
-// 320 (src/Display.h ротує _width/_height місцями). 172 = 4 * 43 - ділиться
+// 320 (Display ротує _width/_height місцями). 172 = 4 * 43 - ділиться
 // без залишку тільки на 1/2/4/43/86/172. Був DISPLAY_SPLIT_COUNT=8 ->
 // 172/8=21.5 -> 4 рядки знизу не потрапляли в жоден спліт -> смуга сміття.
 #define DISPLAY_SPLIT_COUNT 4

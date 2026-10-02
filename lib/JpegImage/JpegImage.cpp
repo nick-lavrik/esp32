@@ -190,7 +190,7 @@ bool JpegImage::loadFromLittleFS(const char *path, JpegColorDepth depth) {
   TJpgDec.setJpgScale(1);
   // RGB565 -> потрібен swap байтів для коректного порядку на ST7789
   // RGB332 -> конвертуємо самі з "чистого" RGB565, swap не потрібен
-  // TJpgDec.setSwapBytes(depth == JpegColorDepth::RGB565); // ми вже робимо swap в Display.cpp
+  // TJpgDec.setSwapBytes(depth == JpegColorDepth::RGB565); // ми вже робимо swap у TftEspiDriver (setSwapBytes)
   TJpgDec.setCallback(JpegImage::jpegOutputCallback);
 
   JRESULT decodeResult = TJpgDec.drawJpg(0, 0, jpegData, fileSize);

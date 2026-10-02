@@ -3,7 +3,7 @@
 
 #include <BackgroundImages.hpp>
 
-#include "Display.h"
+#include <Display.hpp>
 
 // Запечений фон під конкретну плату: шлях задає -D BACKGROUND_PROGMEM_HEADER
 // (див. platformio.ini). Хедер приносить із собою HAS_BACKGROUND_PROGMEM_RGB565

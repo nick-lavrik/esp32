@@ -4,7 +4,7 @@
 // bodmer/TFT_eSPI НЕ підтримує RGB/DPI-паралельний інтерфейс (DE/VSYNC/HSYNC/PCLK),
 // тому тут використовується LovyanGFX із сумісним шаром LGFX_TFT_eSPI.hpp,
 // який надає клас під іменем TFT_eSPI з тим самим API — щоб прикладний код
-// (Display.h / Display.cpp) не відрізнявся між env.
+// (lib/Display/TftEspiDriver) не відрізнявся між env.
 //
 // Підключається через build_flags у platformio.ini:
 //   -DLGFX_USE_V1
@@ -122,6 +122,6 @@ public:
 //   tft.setColorDepth(16);
 //   tft.invertDisplay(true);
 
-// Сам глобальний об'єкт "tft" тепер створюється в src/TftInstance_4848S040.cpp,
+// Сам об'єкт панелі створюється всередині драйвера (lib/Display/TftEspiDriver.hpp),
 // а не тут — щоб цей файл можна було включати лише туди, де він дійсно
 // потрібен, а не в кожен файл проєкту через build_flags -include.

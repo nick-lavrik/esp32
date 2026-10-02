@@ -623,8 +623,7 @@ JSON) і власний збирач у браузері замість `fetch`.
 (172x320, split=4) це 13 КБ на запит замість 110 КБ на кадр.
 
 Механіка знімка живе в `lib/ScreenMirror`, а не в модулі порталу: її годує
-`src/Display.cpp`, а заголовок із `src/` у бібліотеку не заінклюдиш (те саме
-правило DRY, через яке колись народилась друга копія `WiFi_getAuthTypeName()`).
+`Display::flush()` (`lib/Display`), а модуль порталу лише читає готову смугу.
 Модуль `WebScreenModule` — лише транспорт.
 
 **Хто кого кличе.**
@@ -734,7 +733,7 @@ TFT_eSPI і Arduino_GFX — рідний little-endian), тому він не п
 дозволяє не мати: немає запиту - немає знімка, немає ні роботи, ні виділення
 пам'яті. Backpressure тут безкоштовний саме тому, що ініціатива в клієнта.
 
-**Де розділу немає.** `HAS_SCREEN_MIRROR` виводиться в `src/features.h` з
+**Де розділу немає.** `HAS_SCREEN_MIRROR` виводиться в `include/features.h` з
 `DISPLAY_SPLIT_COUNT > 0 && SPRITE_COLOR_DEPTH == 16`, а не задається в
 `build_flags`: інакше його довелось би дублювати в кожному env. На `esp32-c3`
 спрайта немає взагалі (там і фізичного дисплея немає — `BOARD_HAS_DISPLAY=0`);
@@ -1027,7 +1026,7 @@ Payload — `{"board","revision","features","commands"}`:
 - `revision` — короткий git-sha (`GIT_REVISION`, `tools/gen_sapi_revision.py`
   + `tools/pio_sapi_revision.py`), стемпиться і в прошивку, і в окремий
   `sapi/revision.js` — SAPI звіряє точний збіг коміту.
-- `features` — дзеркало активних `HAS_*`/`BOARD_HAS_*` з `src/features.h`
+- `features` — дзеркало активних `HAS_*`/`BOARD_HAS_*` з `include/features.h`
   (повний каталог усіх прапорців проєкту, генерується компілятором з
   X-macro, без окремого Python-кроку).
 - `commands` — імена зареєстрованих JSON API команд, джерело —

@@ -2,7 +2,7 @@
 
 #if HAS_DINO_GAME
 
-#include "Display.h"
+#include <Display.hpp>
 
 extern Display display;
 
