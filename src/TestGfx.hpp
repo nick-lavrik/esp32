@@ -5,7 +5,7 @@
 // Тестова таблиця дисплея: набір статичних патернів для звірки панелі з
 // вкладкою Screen (порядок кольору/байтів, яскравість і гама, зсуви й
 // ротація, різкість, шрифти) - режим, що заміщає звичайну сцену тим самим
-// способом, що dino test/background (див. src/main.cpp::loop()).
+// способом, що dino test/background (екран test-gfx, src/Screen/TestGfxScreen.hpp).
 // Історія й опис патернів - docs/architecture.md, Changelog 2026-09-16
 // ("тестова таблиця дисплея"); куди розширювати - docs/tech_debt.md,
 // розділ 7, "test-gfx: розширити".
@@ -27,7 +27,7 @@ bool testGfxPatternFromName(const char* name, TestGfxPattern* out);
 
 // Наступний патерн у демонстраційному циклі (за порядком enum, з переходом
 // з Primitives назад на Bars). Використовує "test-gfx on" без явного імені
-// патерну - див. src/main.cpp::loop().
+// патерну - див. TestGfxScreen::update().
 TestGfxPattern testGfxNextPattern(TestGfxPattern p);
 
 // Малює ОДНУ ітерацію (== одну активну смугу) обраного патерну. Візерунок

@@ -418,15 +418,18 @@ CSI. RSSI — одне число (сумарна потужність), над�
 | Що | Звідки зараз | Що треба для двох плат |
 | :--- | :--- | :--- |
 | префікс топіків | `MQTT_TOPIC_PREFIX`, override у NVS `mqtt.prefix` (команда `mqtt-prefix`, діє після reboot) | **є.** Лише через слеш: `mykola-lavryk/rx` — ACL на rpi5 дозволяє `mykola-lavryk/#`, а `mykola-lavryk-rx` вийде за його межі, і брокер мовчки відхилить підписки |
-| client id | `MQTT_CLIENT_ID = "mqtt-${PIOENV}"`, лише компіляція | **бракує.** Однаковий client id на двох платах = брокер вибиває їх одна одною по колу. Додати override у NVS (`mqtt.client-id`) тим самим механізмом, що й префікс — один шлях на обидва |
-| hostname | `net general hostname` | є (⚠ звірити, що зберігається в NVS) |
+| client id | `MQTT_CLIENT_ID = "mqtt-${PIOENV}"`, лише компіляція | **бракує.** Однаковий client id на двох платах = брокер вибиває їх одна одною по колу. Макрос вклеєний у ~12 топіків літералом (`docs/architecture.md`, «MQTT topic-префікс»), тому повний перехід на runtime — не мала зміна. **Мінімум:** override у NVS (`mqtt.client-id`) лише для client id **підключення** (`config.clientId`, `src/App/AppGlobals.cpp`); сегмент `<id>` у топіках лишається `mqtt-esp32-c3-csi`, а топіки двох плат розводить префікс |
+| hostname | `net general hostname` | є, переживає ребут (`saveConfig()`) |
 | роль `tx`/`rx` | — | нова, NVS `csi.role` |
 | акаунт на rpi5 | один `user` на env | один спільний акаунт на обидві плати — достатньо, ACL і так за префіксом |
 
 - **Одна команда на всю ідентичність**: `csi setup <tx|rx>` пише
-  роль, префікс `mykola-lavryk/<name>`, client id `mqtt-esp32-c3-csi-<name>`
-  і hostname, потім reboot. Чотири окремі ручні кроки на кожну плату — це
+  роль, префікс `mykola-lavryk/<name>`, client id підключення
+  `mqtt-esp32-c3-csi-<name>` і hostname, потім reboot. Чотири окремі ручні кроки на кожну плату — це
   гарантія, що на одній із них якийсь забудуть.
+  Загальна serial-команда `nvs set` (`docs/tech_debt.md`, «Читання й
+  запис NVS з shell») цього не замінює, а доповнює: нею зручно звірити
+  чи поправити окремий ключ з shell через `./esp`.
 - **Захист від забутого кроку**: поки `csi setup` не виконано, плата не
   вмикає ні MQTT, ні CSI, а пише `[W] csi: identity not set, run 'csi setup'`
   і показує це на порталі. Так «забута» плата видна одразу, а не по

@@ -257,6 +257,10 @@ Display display(displayDriver);
 
 TouchScreenConfig displayConfig = makeTouchScreenConfig();
 
+#if BOARD_HAS_LIGHT_SENSOR
+AnalogSensor lightSensor(LIGHT_SENSOR_PIN, 0, 1855, 100, 0, 5);
+#endif
+
 #if BOARD_HAS_TOUCHSCREEN
 TouchPointMapper mapper(displayConfig);
 TouchEvents touch(displayConfig);

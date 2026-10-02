@@ -992,6 +992,24 @@ thermal/invert/threshold/dithering/box-blur — усе in-place, без копі
   (`src/main.cpp::setupMqttClient()`). Serial-команда `mqtt-prefix [prefix]` —
   переглянути/змінити й зберегти в NVS; **зміна вимагає reboot** (топіки вже
   засабскрайблені зі старим префіксом).
+- **Ідентичність плати в MQTT — з `PIOENV`, на етапі компіляції.**
+  `secrets.ini`: `mqtt_client_id = "mqtt-${PIOENV}"` → `-D MQTT_CLIENT_ID`.
+  Макрос вклеєний літералом у ~12 місцях: client id підключення
+  (`src/App/AppGlobals.cpp`, і `MQTT_CLIENT_ID "-ecoflow"` для EcoFlow),
+  `ConsoleMqtt` (`"console/" MQTT_CLIENT_ID`), `command/<id>` і `/reply`
+  (`src/main.cpp`), `devices/<id>/discovery` (`src/Mqtt/Discovery.cpp`),
+  `devices/<id>/api/…` (`src/Mqtt/JsonApi.cpp`), `…/light-sensor`,
+  `…/ecoflow/<sn>/grid` (`src/Ecoflow/EcoflowSetup.cpp`). Runtime-override є
+  лише в префікса. Тобто дві плати з однаковим env розводяться префіксом,
+  але client id підключення в них однаковий — брокер вибиває одну іншою.
+- **ACL на rpi5 — `readwrite mykola-lavryk/#`** (`docs/ecoflow_mqtt_proxy_setup.md`,
+  «Реєстрація нової плати»). Override префікса мусить лишатись під ним:
+  `mykola-lavryk/<x>` (через слеш), а не `mykola-lavryk-<x>` — інакше
+  публікації й підписки мовчки відхиляються.
+- SAPI (`sapi/index.html`) бере префікс з форми з'єднання (дефолт
+  `mykola-lavryk`), тож плата з іншим префіксом доступна, якщо його ввести.
+- DHCP hostname — runtime, у конфігу `NetworkSupervisor`
+  (`net general hostname` → `saveConfig()`), переживає ребут.
 
 ### MQTT поверх TLS і пауза сесії (`MqttClient`, PicoMQTT-гілка)
 
@@ -1210,6 +1228,10 @@ EcoFlow-блок і показувалась не та конфігурація 
 | `src/App/ConfigKeys.hpp` | ключі NVS `CFG_*`, дефолт `WATCHDOG_ENABLED` | — |
 | `src/Screen/Background.{hpp,cpp}` | `setupBackgroundImage()`; `registerBackgroundCommands()` — ефекти фону (`blur`…`dither`), `background`, `bg-dump`; без `LITTLEFS_BACKGROUND_IMAGE` команд немає | `setup()`, `setupSerialCommander()` |
 | `src/BackgroundImages.{hpp,cpp}` | малювання фону (`drawBackgroundImage()`), вшиті/PROGMEM-зображення | `loop()` |
+| `src/Screen/Screen.hpp` | інтерфейс режиму екрана: `drawStrip()`, `update()`, `enter()`/`leave()`, `realtime()` (без `doPing()`/`ecoflow.loop()`), `overlays()` (іконка WiFi, debug-рамка), кнопка й тач; довге утримання кнопки за замовчуванням → `main` | — |
+| `src/Screen/ScreenManager.{hpp,cpp}` | `screens`: один активний екран, перший доданий — основний. `request()` лише запам'ятовує (малювати з команди — дедлок SPI), перемикання й очищення смуг — у `loop()`. Реєстр екранів плати й маршрутизація тачу — `setupScreens()`; команда `screen` | `loop()` → `screens.loop()`; кнопка — cron `setupFlipButton()` |
+| `src/Screen/MainScreen.*`, `DinoScreen.*`, `DinoSpritesScreen.hpp`, `TestGfxScreen.*` | екрани `main` (фон + інфо + годинник; `drawSystemInfo()`/`drawTime()` поки в `main.cpp`), `dino` (рендерер, `setupDinoGame()`, команда `dino`), `dino-sprites`, `test-gfx` (команда `test-gfx`) | `screens` |
+| `src/Screen/ScreenControl.{hpp,cpp}` | `showClock`, `isAutoBrightness`, `display_brightness()`/`_apply()`, `display_flip()`, `show_clock()`; команди `flip`, `clock`, `brightness` | будь-який екран, `loadConfig()` |
 | `src/Sd/*` | SD-картка: `Sd.hpp` (публічний API), `SdBus.hpp` (шина, `activeSd()`), `SdCard`/`SdProbe`/`SdReader`/`SdImage`/`SdMsc` — див. «SD-картка: усі команди й місця» нижче | `setup()`, `setupSerialCommander()`, `loop()` (`sdimg`, MSC-remount) |
 | `src/Screen/DisplayBusYield.hpp` | `YIELD_DISPLAY_BUS()` — тимчасово віддати SPI-шину дисплея з-під кадру | SD, `display_flip()` |
 | `src/Ecoflow/EcoflowSetup.{hpp,cpp}` | `setupEcoflow()`: колбеки `EcoflowClient`/`EcoflowDeviceRegistry` (лог, retained `devices/<id>/ecoflow/<sn>/grid`), cron-задачі (live-чекпоінт, `expireStale()`, REST → MQTT на старті, `ecoflow` раз на хвилину), команди `ecoflow*` | `setup()`, після `setupMqttClient()` |
@@ -1341,6 +1363,9 @@ SPI на частині плат спільна з дисплеєм.
   лінії на open, імовірно ресет; не звірено.
 - `./compiledb` → `tools/abs_compiledb.py` — ⚠ `-include src-<env>/environment.h`
   лишається відносним.
+- `./esp <env>` — тип порту (`ttyACM`/`ttyUSB`) за рядком `board =` у
+  тексті самої секції `[env:…]` (`port_for_env()`); ⚠ env з `extends` без
+  власного `board =` не розпізнається.
 
 ### Де подробиці
 
@@ -1444,6 +1469,19 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **Режими екрана: `Screen` + `ScreenManager` (крок 3.1
+  рефакторингу).** Чотири прапорці (`dinoActive`, `dinoTestMode`,
+  `testGfxActive` з пріоритетом, зашитим у `loop()`) і шість перевірок
+  `if (dinoActive)` по кнопці/тачу/накладках → один активний екран; новий
+  екран = клас + рядок у `setupScreens()`. Нова команда `screen
+  [list|next|home|<name>]`; `dino`/`test-gfx` лишились. Зміни поведінки:
+  довге утримання кнопки (3 с) на `test-gfx`/`dino-sprites` тепер повертає на
+  `main` (раніше гасило екран); коротке натискання там більше не перемикає
+  невидимий годинник; на `test-gfx` немає іконки WiFi; `dino on` поверх
+  `test-gfx` більше не повертає таблицю після `dino off`. Дубль запису
+  автояскравості в NVS на свайп прибрано. RAM: `esp32-c6` +224 Б,
+  `esp8266` +588 Б (vtable-и й рядки — у DRAM, борг «ESP8266: .rodata у
+  DRAM»); Flash ≈ +4 КБ. `main.cpp`: 2615 → 2197 рядків.
 - 2026-10-03 — **`src/main.cpp` → `src/Sd/*` + нові прапорці `HAS_SD_WORKBENCH`,
   `HAS_SD_MSC` (крок 2.4 рефакторингу).** SD розкладено за доменами: базове
   (`SdCard`, `BOARD_HAS_SD`), SD_PROBE/SD_READER/SD_IMAGE (`HAS_SD_WORKBENCH`),

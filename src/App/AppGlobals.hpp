@@ -28,6 +28,9 @@
 #include <NtpService.hpp>
 #include <SerialCommander.hpp>
 #include <TaskController.hpp>
+#if BOARD_HAS_LIGHT_SENSOR
+#include <AnalogSensor.hpp>
+#endif
 
 #include "ConfigKeys.hpp"
 #include "features.h"
@@ -140,6 +143,12 @@ extern DisplayDriver displayDriver;
 extern Display display;
 
 extern TouchScreenConfig displayConfig;
+
+#if BOARD_HAS_LIGHT_SENSOR
+// Датчик освітленості: автояскравість (src/Screen/ScreenControl.cpp), MQTT
+// devices/<id>/light-sensor, рядок на основному екрані.
+extern AnalogSensor lightSensor;
+#endif
 
 #if BOARD_HAS_TOUCHSCREEN
 extern TouchPointMapper mapper;

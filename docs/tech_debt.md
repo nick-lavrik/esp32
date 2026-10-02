@@ -568,6 +568,55 @@ flash/мережі) і дорогим - для `/api/system/info` можна; ф
 
 ## 3. Прошивка й дисплей
 
+### Читання й запис NVS з shell: serial-команда `nvs`
+
+**Навіщо.** Ідентичність плати в NVS (`mqtt.prefix`, а для CSI-плат —
+client id, роль; `docs/ml_plan.md`, 3.0) і будь-який ключ `CFG_*` зараз
+можна задати лише окремою командою під цей ключ (`mqtt-prefix`) або через
+вкладку NVS порталу. Потрібне для скриптів: налаштувати свіжу плату одним
+shell-рядком, звірити ключі на кількох платах, зберегти/відновити набір.
+
+**Що вже є — окремого скрипта не треба.** `./esp` надсилає будь-яку
+serial-команду без ресету плати, тобто «скрипт» — це `./esp nvs set …`, щойно
+на платі з'явиться команда. Мережевий шлях теж уже є — HTTP API порталу
+(`docs/web_portal.md`: `GET /api/nvs/list`, `POST`/`DELETE /api/nvs/entry`,
+через `curl` з `web auth`) і SAPI `nvs-list`/`nvs-blob` (лише читання).
+Бракує одного — serial-команди.
+
+**Що зробити:**
+
+- Команда `nvs` (`registerNvsCommands()`), рівною табличкою для `list`:
+  - `nvs list [namespace]` — ключ, тип, значення (`%-15s` — `MAX_KEY_LENGTH`
+    у `ConfigStorage` = 15);
+  - `nvs get <key>`;
+  - `nvs set <key> <str|int|bool> <value>` — ті самі три типи, що й у
+    порталі;
+  - `nvs del <key>`.
+- **DRY: один шлях запису.** Розбір типу й значення, перевірка «ключ уже
+  існує з іншим типом» живуть зараз у `WebNvsModule` (`targetType()`,
+  локальний `parseBool()`, `_saveJob()`). Винести в `ConfigStorage` (напр.
+  `setFromString(key, type, value)` → рядок помилки), портал і serial
+  кличуть його. Локальний `parseBool()` у `WebNvsModule` — заодно
+  замінити на спільний `parseBool()` з `CommandArgs.hpp`.
+- **Секрети.** Будь-який вивід команди йде в журнал, а журнал
+  дзеркалиться в MQTT (`ConsoleMqtt`, `devices/<env>/console`):
+  - `nvs set ecoflow.pass str …` — луна команди: дописати правило в
+    `maskCommandSecrets()` (значення `nvs set` для секретних ключів);
+  - `nvs list`/`get` — маскувати значення секретних ключів (`ecoflow.pass`,
+    `nm_conn`, `ap.passwd`, облікові дані MQTT). Перелік секретних ключів —
+    один на serial, портал і SAPI; це заодно закриває пункт «SAPI
+    `nvs-list`/`nvs-blob` віддають секрети в MQTT» (розділ 1).
+- Виконується в `loop()` (як усі команди `CommandQueue`) — запис flash там
+  дозволений.
+- ESP8266: `ConfigStorage` там на LittleFS з тим самим API — команда має
+  працювати і там (див. «LDF компілює `lib/*` на всіх env»).
+
+**Варіант для плати без прошивки** (свіжа плата, ще не підключена до
+Wi-Fi): образ розділу з CSV через `nvs_partition_gen.py` з ESP-IDF і
+`esptool write_flash` на адресу розділу `nvs`. Стирає **весь** розділ (і
+WiFi-профілі), тож лише для першого налаштування; робити, тільки якщо
+serial-команди виявиться мало.
+
 ### Єдиний монітор стану системи (loop rate, RAM, ping, WiFi, …)
 
 Дата: 03.10.2026. Назва ще не вибрана: `SystemHealth`, `HealthMonitor`,
@@ -1459,6 +1508,13 @@ RF cal 16 КБ.
   навмисно: вони показують, як користуватись бібліотекою поза цим проєктом.
 
 ## 6. Дрібне, що варто прибрати принагідно
+
+- `./esp <env>`: `port_for_env()` шукає `board =` awk-ом лише в тексті
+  секції `[env:<name>]`, тож env з `extends` (без власного `board =`)
+  повертає порожній тип порту — `./esp` такий env не знайде. Перший такий
+  env буде `esp32-c3-csi` (`docs/ml_plan.md`, 3.0). Варіанти: брати `board`
+  з `pio project config --json-output`, або повторювати `board =` у секції
+  нового env з коментарем чому.
 
 - `MqttClient::resubscribeAll()` (PicoMQTT-гілка) зараховує в
   `subscribeDeniedCount()` і логує `subscribe <topic> denied` **будь-яку**
