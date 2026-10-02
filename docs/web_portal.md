@@ -232,6 +232,14 @@ web auth off                # вимкнути автентифікацію
   флеш-чипа, таблиця розділів), NVS (used/free/total entries, кількість
   namespace'ів) — усі одним `GET /api/system/info`
   (`lib/WebPortal/WebSystemModule.{hpp,cpp}`).
+- **Бари використання.** Під `dl` карток Memory, LittleFS, SD і NVS — бар
+  «використано / вільно» (`heapBarHtml()`/`usageBarHtml()` у `index.html`,
+  стилі `.heap-bar*`; той самий бар — під таблицею вкладки Files). У Memory
+  три сегменти (Used / Largest free block / фрагментований залишок) і маркер
+  Min free ever; в решти — Used / Free, NVS рахує записи, не байти. `dl` над
+  баром має клас `.dl-bar` (мінімум 6 рядків заввишки), щоб бари сусідніх
+  карток стояли на одній лінії. Копія логіки в `sapi/render.js` свідома:
+  портал і SAPI не діляться кодом.
 
 **Паспорт чипа (18-20.09.2026).** `ESP.getChipModel()`/`getChipRevision()`/
 `getChipCores()`/`getCpuFreqMHz()`/PSRAM — та сама інформація, що вже друкує
@@ -962,12 +970,16 @@ ACL для нових плат можна забути додати мовчки
 
 | `<cmd>` | Джерело | Умова збірки |
 |---|---|---|
-| `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()` + `WebPortal::statusJson()` (поле `"portal"` — env/revision/uptime/auth/pendingJobs/modules) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `system-info` | `WebSystemModule::chipInfoJson()`/`heapStatsJson()`/`flashStatsJson()`/`nvsStatsJson()`/`partitionsJson()`/`littleFsJson()`/`sdJson()` + `WebPortal::statusJson()` (поле `"portal"` — env/revision/uptime/auth/pendingJobs/modules) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `wifi-status` | `WebWifiModule::portalStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` (без сирого `params`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `ecoflow-journal` | `WebEcoflowModule::journalJson()` — окремий запит, не розширення `ecoflow-status`; той самий провайдер, що `/api/ecoflow/journal` вище (`EcoflowJournalView.hpp`); перша команда фази 1 з реальним `args` у тілі (`{"target":"all"\|"<sn>"}`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (той самий, що й `/api/mqtt/status` вище) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
-| `commands-list` | перелік зареєстрованих serial-команд (`commandHandler`), те саме, що й `/api/commands/list` | `HAS_MQTT_CLIENT && !ESP8266` — **єдина з шести, не залежить від `HAS_WEB_PORTAL`** (`commandHandler` завжди доступний; решта п'ять читають provider-об'єкти порталу, оголошені лише під `HAS_WEB_PORTAL` — відкритий борг, `docs/tech_debt.md`) |
+| `wifi-connections` | `WebWifiModule::portalConnectionsJson()` — збережені профілі (`/api/wifi/connections`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `fs-list` | `WebFilesModule::listJson()` (= `/api/fs/list`) — один каталог LittleFS + місткість; `args.path` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `fs-read` | `WebFilesModule::readJson()` — шматок файла до 3 КБ у base64 (`args.path`, `args.offset`), клієнт добирає до `eof` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `nvs-list` / `nvs-blob` | `WebNvsModule::listJson()`/`blobJson()` (= `/api/nvs/list`, `/api/nvs/blob`); **віддають секрети** — `docs/tech_debt.md` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `commands-list` | перелік зареєстрованих serial-команд (`commandHandler`), те саме, що й `/api/commands/list` | `HAS_MQTT_CLIENT && !ESP8266` — **єдина з одинадцяти, не залежить від `HAS_WEB_PORTAL`** (`commandHandler` завжди доступний; решта десять читають provider-об'єкти порталу, оголошені лише під `HAS_WEB_PORTAL` — відкритий борг, `docs/tech_debt.md`) |
 
 **`ecoflow-params/<sn>` — окремий drill-down на "params" ОДНОГО пристрою**
 (`devices/<client-id>/api/ecoflow-params/<sn>`, `WebEcoflowModule::
