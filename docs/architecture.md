@@ -1193,6 +1193,20 @@ EcoFlow-блок і показувалась не та конфігурація 
   `JournalSubId` — `uint32_t` (на `uint16_t` переповнювався за ~7,5 доби
   MQTT-команд і знімав `SerialSink`).
 
+### Модулі `src/`: де що лежить
+
+`src/main.cpp` поступово розноситься по модулях за фічею (план —
+рефакторинг `main.cpp`, кроки 2–4). Модуль = фіча: її `setupXxx()`,
+`registerXxxCommands(SerialCommander&)` і власний стан разом, а `#if` фічі
+обгортає файл один раз, а не кожен виклик.
+
+| Модуль | Що | Звідки викликається |
+| :--- | :--- | :--- |
+| `src/App/AppGlobals.{hpp,cpp}` | спільні глобали (див. «Спільний стан» вище) | — |
+| `src/App/ConfigKeys.hpp` | ключі NVS `CFG_*`, дефолт `WATCHDOG_ENABLED` | — |
+| `src/Screen/Background.{hpp,cpp}` | `setupBackgroundImage()`; `registerBackgroundCommands()` — ефекти фону (`blur`…`dither`), `background`, `bg-dump`; без `LITTLEFS_BACKGROUND_IMAGE` команд немає | `setup()`, `setupSerialCommander()` |
+| `src/BackgroundImages.{hpp,cpp}` | малювання фону (`drawBackgroundImage()`), вшиті/PROGMEM-зображення | `loop()` |
+
 ### MQTT-підписки PicoMQTT: як насправді
 
 - **Root-фільтр іде на брокер.** `MqttConfig::rootSubscribeTopic`
@@ -1373,6 +1387,13 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **`src/main.cpp` → `src/Screen/Background.{hpp,cpp}` (крок 2.1
+  рефакторингу).** `setupBackgroundImage()` і всі команди фону (~25 ефектів,
+  `background`, `bg-dump` з `rawPrintf()`) — один модуль; 25 окремих
+  `#if defined(LITTLEFS_BACKGROUND_IMAGE)` навколо кожної команди → один на
+  файл. `bg-dump` у `list` тепер стоїть поруч з рештою команд фону. Зникло
+  попередження `rawPrintf() defined but not used` на платах без фону з
+  LittleFS. `main.cpp`: 5931 → 5325 рядків; `esp32-c6` Flash +92 Б.
 - 2026-10-03 — **`src/main.cpp`: глобали й ключі NVS — в окремі файли
   (кроки 0–1 рефакторингу).** Спільні об'єкти означені в
   `src/App/AppGlobals.cpp` (оголошення — `AppGlobals.hpp`, замість
