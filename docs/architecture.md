@@ -1206,6 +1206,7 @@ EcoFlow-блок і показувалась не та конфігурація 
 | `src/App/ConfigKeys.hpp` | ключі NVS `CFG_*`, дефолт `WATCHDOG_ENABLED` | — |
 | `src/Screen/Background.{hpp,cpp}` | `setupBackgroundImage()`; `registerBackgroundCommands()` — ефекти фону (`blur`…`dither`), `background`, `bg-dump`; без `LITTLEFS_BACKGROUND_IMAGE` команд немає | `setup()`, `setupSerialCommander()` |
 | `src/BackgroundImages.{hpp,cpp}` | малювання фону (`drawBackgroundImage()`), вшиті/PROGMEM-зображення | `loop()` |
+| `src/Ecoflow/EcoflowSetup.{hpp,cpp}` | `setupEcoflow()`: колбеки `EcoflowClient`/`EcoflowDeviceRegistry` (лог, retained `devices/<id>/ecoflow/<sn>/grid`), cron-задачі (live-чекпоінт, `expireStale()`, REST → MQTT на старті, `ecoflow` раз на хвилину), команди `ecoflow*` | `setup()`, після `setupMqttClient()` |
 | `src/Mqtt/JsonApi.{hpp,cpp}` | SAPI: реєстр і диспетчеризація `devices/<id>/api/<cmd>`, усі записи (`commands-list` завжди; решта — лише з `HAS_WEB_PORTAL`); `jsonApiCommandName()` для discovery | `setupMqttClient()` → `registerJsonApiCommands()` |
 | `src/Mqtt/Discovery.{hpp,cpp}` | `publishDiscovery()`: retained `devices/<id>/discovery`, `board` = `BOARD_NAME` з `environment.h` | `onConnect`-колбек у `setupMqttClient()` (таск `mqtt-net`) |
 
@@ -1394,6 +1395,11 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **`src/main.cpp` → `src/Ecoflow/EcoflowSetup.{hpp,cpp}` (крок
+  2.3 рефакторингу).** `setupEcoflow()` з усіма колбеками, cron-задачами й
+  ~15 командами `ecoflow*`; `ecoflowVerbose` — стан модуля. Обгортку
+  `queueCommand()` прибрано: вона дублювала `CommandQueue::submit()` з тим
+  самим дефолтним `reply`, 4 виклики тепер ідуть напряму.
 - 2026-10-03 — **`src/main.cpp` → `src/Mqtt/JsonApi.*` + `Discovery.*` (крок
   2.2 рефакторингу).** SAPI-реєстр, усі записи й блок реєстрації з
   `setupMqttClient()` — `registerJsonApiCommands()`; `publishDiscovery()`
