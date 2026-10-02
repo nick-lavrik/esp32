@@ -1119,6 +1119,131 @@ EcoFlow-блок і показувалась не та конфігурація 
 - **Погодного функціоналу (Open-Meteo) в поточному коді немає** — це не реалізовано
   (якщо планується — потрібно додавати як нову фічу, а не "відновлювати")
 
+## Карта коду: хто що виконує, хто чим володіє, де що лежить
+
+Довідка, щоб не досліджувати те саме знову (зведено з code review
+2026-10-02 і звірено з кодом). Правило актуальності — CLAUDE.md, «Карта
+коду — тримати актуальною».
+
+- Посилання — на **файл і символ**, не на номер рядка: номери з'їжджають
+  за тиждень (саме так застаріли посилання в `docs/mqtt-topics.md`).
+- Тут — як працює зараз. Невиправлені баги, знайдені поруч, живуть у
+  `docs/tech_debt.md`; тут на них лише вказівка «⚠».
+
+### Потоки виконання (ESP32)
+
+| Таск | Хто створює | Стек | Що виконує | Обмеження |
+| :--- | :--- | ---: | :--- | :--- |
+| `loopTask` (`loop()`) | ядро Arduino | ядра | `CommandQueue::runNext()` (≤ 1 команда за ітерацію), `WebPortal::loop()` → `WebJobQueue`, `MqttClient::loop()` (вхідна черга + колбеки `addListener()`), `EcoflowClient::loop()`, кадр дисплея, `scheduler.loop()` (`TaskController`) | єдине місце для блокуючого: flash, `WiFi.*`, секунди роботи |
+| `mqtt-net`, `ecoflow-net`, `ecoflow-proxy-net` | `MqttClient::begin()`/`resume()`, ім'я — `MqttConfig::taskName` | 8 КБ (`MqttConfig::taskStackSize`), EcoFlow — 16 КБ | connect/loop PicoMQTT, вихідна черга, `onConnect`-колбек (`publishDiscovery()` у `src/main.cpp`) | єдиний власник сокета; таск **видаляється** на `suspend()` (SMTP/TLS) і створюється заново |
+| `NetworkSupervisor` | `NetworkSupervisor::begin()` | 4096 | FSM радіо: скан, перебір кандидатів, `_connectTo()` (блокує до `connectTimeoutMs`), listener-и NS (`NetworkEventLogger`) | стек не зменшувати; ⚠ `end()` вбиває таск `vTaskDelete` посеред роботи |
+| arduino events | `NetworkEvents` фреймворку | — | обробники `WiFi.onEvent`, зокрема `STA_GOT_IP` у NS — бере `_mutex` NS | тому `WiFi.*` під `_mutex` NS = дедлок WiFi-стеку |
+| `async_tcp` | AsyncTCP | `CONFIG_ASYNC_TCP_STACK_SIZE` | хендлери порталу, SSE | не писати flash, не `WiFi.*`, не блокувати; читати знімки. Винятки — `docs/web_portal.md` |
+| `journal` | `Journal::begin()` | 4096 (`JOURNAL_PUMP_STACK`) | доставка записів приймачам (`SerialSink`, `ConsoleMqtt`, `CommandResponse`) | — |
+| `ecoflow-rest` | `EcoflowClient::startRestTask()` | 16 КБ | REST EcoFlow (sync, cert, login), створюється на запит | ⚠ пише в `EcoflowDeviceRegistry` паралельно з `loop()` |
+| TinyUSB (s3-lcd147, `sdmsc`) | `USBMSC` | — | `onRead()` → `mscBulkReader` (`src-esp32-s3-lcd147/SdMassStorage.cpp`) | remount робить `loop()` за прапорцем; ⚠ без замка проти `onRead()` |
+| lwIP/SNTP | ESP-IDF | — | колбеки `NtpService` | — |
+
+### Спільний стан: хто пише
+
+- **`NetworkSupervisor::_connections`** — FSM, arduino events, `loop()`
+  (`src/netcli.h`, `WebWifiModule`). `connections()` і `getConnection()`
+  віддають посилання/вказівник **без замка**; ⚠ записи через них з `loop()`
+  і FSM, що тримає вказівники під час `_connectTo()`, — відома гонка.
+  Новий код — через методи NS.
+- **`EcoflowDeviceRegistry`** — `loop()` (`applyQuota()` з MQTT-колбеку) і
+  ⚠ REST-таск (`applySnapshot()`). Портал читає копію:
+  `WebEcoflowModule::_refreshSnapshot()` раз на 1 с.
+- **`ScreenMirror`** — буфер смуги захоплює `loop()`, віддає chunked-відповідь
+  у `async_tcp` (`WebScreenModule`); ⚠ `tick()` звільняє буфер через 4 с
+  drain, навіть якщо клієнт ще читає.
+- **`CommandQueue`** — `submit()` з будь-якого таска (під мʼютексом),
+  виконання лише в `loop()`.
+- **`Journal`** — `publish()` з будь-якого таска; приймачів кличе помпа без
+  замка журналу, тому `unsubscribe()` спершу чекає `_pumpGate`.
+  `JournalSubId` — `uint32_t` (на `uint16_t` переповнювався за ~7,5 доби
+  MQTT-команд і знімав `SerialSink`).
+
+### MQTT-підписки PicoMQTT: як насправді
+
+- **Root-фільтр іде на брокер.** `MqttConfig::rootSubscribeTopic`
+  реєструється через `SubscribedMessageListener::subscribe()`, а
+  `PicoMQTT::Client::loop()` після кожного CONNACK підписує на брокері всі
+  записи своєї мапи `subscriptions`. Отже загальний клієнт отримує весь
+  трафік під префіксом (`mykola-lavryk/#`), а на прямому EcoFlow root-wildcard
+  отримує SUBACK 0x80. Коментарі «локальний фільтр» — неправда.
+- **`addListener()` після конекту** кладе окремий запис у ту саму мапу з
+  лімітом 2 КБ. Диспетчер PicoMQTT бере ПЕРШИЙ збіг у `std::map` (порядок
+  `strcmp`), тож для таких топіків ліміт root (`rootSubscribeBufferSize`) не
+  діє; більші повідомлення губляться без лічильника.
+- **SUBACK 0x80** перевіряється лише в `MqttClient::resubscribeAll()` →
+  `subscribeDeniedCount()`; підписки після конекту туди не потрапляють.
+- ACL EcoFlow приймає лише точні топіки — `docs/ecoflow.md`.
+
+### Збірка: неочевидне
+
+- **LDF компілює `lib/*` на всіх env**, де заголовок згаданий у
+  `src/main.cpp`, незалежно від `#if HAS_*` навколо `#include` (режим LDF
+  `chain` препроцесор не обчислює). Тож код бібліотеки мусить
+  компілюватись і на ESP8266 — невикликане лінкер викине. Після правки
+  `lib/` — `pio run -e esp8266`. (Пропущений крок коштував зламаного
+  `env:esp8266` від `73129b1`; полагоджено в `dbbb084`.)
+- **`board_build.filesystem = littlefs` — явно в кожному env.** Дефолт
+  espressif32 — `spiffs`: `uploadfs` заллє SPIFFS-образ, а
+  `LittleFS.begin(true)` його відформатує.
+- **Шрифти — дві різні семантики.** TFT_eSPI перевіряє `#ifdef LOAD_FONTx`:
+  вимкнути можна лише прибравши рядок, `#define LOAD_FONTx 0` шрифт лишає.
+  Arduino_GFX (`include/ArduinoGfxFonts.h`) перевіряє `defined(X) && X` —
+  там `0` вимикає.
+- **`CONFIG_*` в `environment.h` нічого не міняють**: sdkconfig фреймворку
+  прекомпільований (`framework-arduinoespressif32-libs/<chip>/sdkconfig`).
+- **`-include` проти `-D`**: GCC обробляє `-include` після всіх `-D`
+  командного рядка. Безумовний `#define` в `environment.h` перебив би `-D`
+  з board-маніфесту (з warning), не спрацьовує лише `#ifndef`-варіант.
+  Висновок «такі прапорці лишаються в ini» від цього не міняється.
+- **Task watchdog фреймворку вже ввімкнений**: у sdkconfig усіх
+  ESP32-чипів `CONFIG_ESP_TASK_WDT_INIT=y`, `TIMEOUT_S=5`, `PANIC=y`.
+  `esp_task_wdt_init()` у `Watchdog::begin()` тому повертає
+  `ESP_ERR_INVALID_STATE`, і власний таймаут (60 с), імовірно, не
+  застосовується. ⚠ На залізі не звірено.
+
+### Команди й вивід: спільні хелпери
+
+| Задача | Де | Нотатка |
+| :--- | :--- | :--- |
+| розбір `on/off` | `parseBool()`, `lib/SerialCommander/CommandArgs.hpp` | невідомий аргумент → `use: ...`, не «вимкнути» |
+| секрети в луні команди | `maskCommandSecrets()`, `lib/CommandQueue/CommandMask.hpp` | маскує токен після `password`, `...psk`, 4-й токен `web auth`; новий секретний аргумент — під це правило або дописати правило |
+| луна й кінець команди | `CommandQueue::runNow()` | `> cmd` / `< cmd (N ms)`; портал (`sameCommand()`) і SAPI ловлять кінець по ньому |
+| назви автентифікації WiFi | `wifiAuthTypeName()`, `lib/NetworkSupervisor` | коди платформні: ESP32 `WIFI_AUTH_*`, ESP8266 `ENC_TYPE_*` |
+| розмір у байтах | `src/SizeFormatter.hpp` | KiB/MiB; бібліотекам недоступний (копія в `Ext4SuperblockInspector`) |
+| причина ресету | `SystemReset::getLastResetReason()` | включно з `ESP_RST_USB`/`JTAG` |
+| вимір небезпечного кроку | `withTrace()`, `lib/Logger/Trace.hpp` | не писати свій `millis()`/`getFreeHeap()` |
+
+**Будь-який рядок логу публічний для читачів брокера**: `ConsoleMqtt`
+дзеркалить журнал у `devices/<env>/console`. Що не можна показувати там —
+не логувати (або маскувати).
+
+### Інструменти: що вони роблять з платою
+
+- `./esp` — DTR/RTS не чіпає, плата не ресетиться. Порт за env: `ttyACM` для
+  C3/C6/S3/H2, крім `esp32-4848s040` (CH340 → `ttyUSB`); кілька кандидатів —
+  попередження в stderr.
+- `detect.sh` — `esptool chip-id` смикає DTR/RTS, тобто **ресетить** плату
+  (C6 втрачає RAM-стан).
+- `tools/capture_boot.py` — ⚠ `dtr=None`/`rts=None` у pyserial 3.5 знімає
+  лінії на open, імовірно ресет; не звірено.
+- `./compiledb` → `tools/abs_compiledb.py` — ⚠ `-include src-<env>/environment.h`
+  лишається відносним.
+
+### Де подробиці
+
+- веб-портал — `docs/web_portal.md`, skill `web-portal`;
+- SAPI — `sapi/README.md` (зокрема блок зі зміною висоти);
+- MQTT-топіки — `docs/mqtt-topics.md`;
+- журнал і вивід — `docs/journal_plan.md` та розділ «Журнал» вище;
+- EcoFlow — `docs/ecoflow.md`;
+- борг і відкриті питання — `docs/tech_debt.md`.
+
 ## Рішення, яких варто триматись
 
 - **Весь runtime-вивід — англійською.** Логер, `Serial.print*`, описи команд

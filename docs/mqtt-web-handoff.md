@@ -1973,7 +1973,10 @@ Log-вкладка, System/Wi-Fi/EcoFlow лишаються звичайним `
 сторінкою, скрол з'являється на самій сторінці, не всередині `#log`.
 
 **Pretty JSON-блок - розтягується мишею/тачем/пером, максимум обмежений
-вмістом.** Ручка (`.log-pretty-resize`) - Pointer Events (`pointerdown`/
+вмістом.** (З 2026-10-02 механізм спільний для всієї сторінки: класи
+`.resizable`/`.resizable-body`/`.resize-handle`, `.log-pretty-resize`
+перейменовано — як підключати до нового блока, `sapi/README.md`, «Правило:
+блок зі зміною висоти».) Ручка (`.log-pretty-resize`) - Pointer Events (`pointerdown`/
 `pointermove`/`pointerup` + `setPointerCapture`), не нативний CSS `resize`
 (той на iOS Safari не працює тачем узагалі). Дві ітерації позиціювання
 ручки:
