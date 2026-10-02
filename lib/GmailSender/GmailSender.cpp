@@ -102,6 +102,9 @@ bool GmailSender::sendEmail(const char* recipientEmail, const char* subject, con
   // бібліотека це й перевіряє - локальний SMTPMessage дає помилку -109
   // (SMTP_ERROR_UNINITIALIZE_LOCAL_SMTP_MESSAGE).
   SMTPMessage& msg = _smtp.getMessage();
+  // ReadyMail чистить повідомлення лише після УСПІШНОЇ відправки: після
+  // невдалої наступний лист успадкував би тему й накопичував отримувачів.
+  msg.clear();
   msg.headers.add(rfc822_subject, subject);
   msg.headers.add(rfc822_from, _senderName + " <" + _senderEmail + ">");
   msg.headers.add(rfc822_to, String(recipientEmail));

@@ -1,5 +1,7 @@
 #include "CommandQueue.hpp"
 
+#include "CommandMask.hpp"
+
 #include <cstring>
 
 #if defined(ESP32)
@@ -117,11 +119,14 @@ void CommandQueue::runJsonNow(const Slot& slot) {
 
 void CommandQueue::runNow(const char* line, std::shared_ptr<ResponseTarget> reply) {
   if (!_executor) {
-    _logger.error("no executor - '%s' dropped", line != nullptr ? line : "");
+    _logger.error("no executor - '%s' dropped", maskCommandSecrets(line).c_str());
     return;
   }
 
   const uint32_t startedMs = millis();
+  // Для логу - лише замаскована копія: пароль з 'password <p>' не має
+  // потрапити в журнал (див. CommandMask.hpp).
+  const String shown = maskCommandSecrets(line);
 
   if (!reply) {
     _executor(line);
@@ -131,13 +136,13 @@ void CommandQueue::runNow(const char* line, std::shared_ptr<ResponseTarget> repl
     // таска (див. lib/CommandResponse).
     CommandResponse response(std::move(reply));
     if (!response.attach()) {
-      _logger.error("no free journal slot - '%s' runs without a reply", line);
+      _logger.error("no free journal slot - '%s' runs without a reply", shown.c_str());
     }
 
     // Луна команди - вже ПІСЛЯ підписки, щоб потрапила і в консоль, і у
     // відповідь: підписник reply-топіка бачить лише вивід і без неї не знав би,
     // на що саме цей вивід.
-    _logger.info("> %s", line);
+    _logger.info("> %s", shown.c_str());
     _executor(line);
 
     response.finish();
@@ -151,7 +156,7 @@ void CommandQueue::runNow(const char* line, std::shared_ptr<ResponseTarget> repl
   //
   // ПІСЛЯ response.finish() навмисно: у відповідь на MQTT чи в лист має піти
   // рівно вивід команди, без нашої службової позначки.
-  _doneLogger.info("< %s (%u ms)", line, (unsigned)(millis() - startedMs));
+  _doneLogger.info("< %s (%u ms)", shown.c_str(), (unsigned)(millis() - startedMs));
 }
 
 size_t CommandQueue::pending() const {

@@ -31,7 +31,7 @@
 // HAS_PING/HAS_GMAIL_SENDER (CLAUDE.md, src/ping.h) - компілятор і
 // IDE-індексатор мають бачити ОДНЕ й те саме значення.
 #ifndef HAS_CONSOLE_MQTT
-#error "HAS_CONSOLE_MQTT не визначено - додай #define HAS_CONSOLE_MQTT 0/1 у environment.h цього env"
+#error "HAS_CONSOLE_MQTT is not defined - add #define HAS_CONSOLE_MQTT 0/1 to this env's environment.h"
 #endif
 
 // Прив'язка до ESP32+PicoMQTT не косметична, тому перевіряється так само
@@ -41,7 +41,7 @@
 // publish() пише в сокет СИНХРОННО: кожен рядок логу став би мережевим I/O в
 // помпі, а помпи як окремого таска там і немає - вона крутиться в loop().
 #if HAS_CONSOLE_MQTT && !(defined(ESP32) && HAS_MQTT_CLIENT && __has_include(<PicoMQTT.h>))
-#error "HAS_CONSOLE_MQTT=1, але платформа не ESP32+PicoMQTT - вимкни прапорець у environment.h цього env"
+#error "HAS_CONSOLE_MQTT=1 requires ESP32+PicoMQTT - disable the flag in this env's environment.h"
 #endif
 
 #if HAS_CONSOLE_MQTT

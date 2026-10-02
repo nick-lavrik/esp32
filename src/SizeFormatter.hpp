@@ -62,7 +62,7 @@ public:
       precision = 6;
     }
 
-    static constexpr const char* kBinaryUnits[] = {"B", "Kb", "Mb", "Gb", "Tb", "Pb", "Eb"};
+    static constexpr const char* kBinaryUnits[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
     static constexpr const char* kDecimalUnits[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
     static constexpr int kUnitCount = 7;
 

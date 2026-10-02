@@ -142,6 +142,9 @@ void MqttClient::loop() {
 #else
   // ESP8266: без змін, кооперативний однопотоковий loop().
   if (!_mqttClient.connected()) {
+    // Розрив PubSubClient помічає сам, а _connected (isConnected(), портал,
+    // лічильники) без цього лишався б true назавжди після першого конекту.
+    _connected.store(false, std::memory_order_relaxed);
     uint32_t now = millis();
     if (now - _lastReconnectAttempt >= _config.reconnectIntervalMs) {
       _lastReconnectAttempt = now;

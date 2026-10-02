@@ -22,6 +22,10 @@ void SerialCommander::update() {
     if (c == terminator_) {
       String line = trim(buffer_);
       buffer_ = "";
+      if (discarding_) {
+        discarding_ = false;
+        continue;
+      }
       if (line.length() > 0) {
         if (lineHandler_) {
           lineHandler_(line);
@@ -36,12 +40,13 @@ void SerialCommander::update() {
     } else if (c == '\r') {
       // ігноруємо CR, чекаємо на LF (або окремий CR як термінатор)
       continue;
-    } else {
+    } else if (!discarding_) {
       buffer_ += c;
       if (buffer_.length() > maxLineLength_) {
         // захист від переповнення буфера, якщо термінатор не прийшов
-        _logger.warn("command too long, buffer vanished");
+        _logger.warn("command too long (> %u chars), line dropped", (unsigned)maxLineLength_);
         buffer_ = "";
+        discarding_ = true;
       }
     }
   }

@@ -1,10 +1,32 @@
 #include "WebFilesModule.hpp"
 
 #include <ESPAsyncWebServer.h>
+#if defined(ESP32)
 #include <mbedtls/base64.h>
+#else
+#include <base64.h>
+#endif
 
 #include "WebJson.hpp"
 #include "WebPortal.hpp"
+
+// base64 у dst (ємність cap). На ESP32 - mbedtls, на ESP8266 його в ядрі
+// немає, зате є base64::encode().
+//
+// Навіщо гілка ESP8266, якщо порталу там немає (HAS_WEB_PORTAL 0): LDF
+// компілює lib/WebPortal на всіх env, бо не обчислює #if у src/main.cpp, і
+// без неї env:esp8266 не збирався взагалі (з 73129b1). Виклику на ESP8266
+// немає, тож лінкер цю функцію викидає - пам'яті вона там не коштує.
+static void encodeBase64(unsigned char* dst, size_t cap, size_t* outLen, const uint8_t* src,
+                         size_t n) {
+#if defined(ESP32)
+  mbedtls_base64_encode(dst, cap, outLen, src, n);
+#else
+  const String encoded = base64::encode(src, n, false);
+  *outLen = encoded.length() < cap ? encoded.length() : 0;
+  memcpy(dst, encoded.c_str(), *outLen);
+#endif
+}
 
 bool WebFilesModule::isSafePath(const String& path) {
   if (path.length() == 0 || path.length() > kMaxPath) return false;
@@ -40,7 +62,7 @@ String WebFilesModule::readJson(const String& path, uint32_t offset) {
   size_t b64Len = 0;
   if (raw && b64 && offset <= size && f.seek(offset)) {
     length = f.read(raw, kReadChunk);
-    mbedtls_base64_encode(b64, b64Cap, &b64Len, raw, length);
+    encodeBase64(b64, b64Cap, &b64Len, raw, length);
   } else if (!raw || !b64) {
     f.close();
     free(raw);

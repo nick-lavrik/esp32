@@ -288,7 +288,7 @@ void EcoflowClient::runRestJob(RestJob job, const String &serialNumber) {
                   (unsigned)credentials.port, credentials.protocol.c_str());
       logger.info("account  = %s", credentials.certificateAccount.c_str());
       logger.info("password = %s", credentials.certificatePassword.c_str());
-      logger.info("user id  = %s  <- потрібен для clientId ANDROID_..._<userId>",
+      logger.info("user id  = %s  <- needed for clientId ANDROID_..._<userId>",
                   appAuth.userId().c_str());
       if (_appCredentialsCallback) {
         _appCredentialsCallback(credentials, appAuth.userId());

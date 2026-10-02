@@ -43,5 +43,5 @@ void setupNtpService() {
 
   ntp.beginTz("EET-2EEST,M3.5.0/3,M10.5.0/4",  // Europe/Kyiv
               "pool.ntp.org", "ua.pool.ntp.org", "time.cloudflare.com",
-              6000000);  // 600 sec - (default: 3_600_000)
+              6000000);  // 6000 с = 100 хв (дефолт NtpService - 60000, тобто 1 хв)
 }

@@ -86,7 +86,11 @@
 #define JOURNAL_RULE_TAG_SIZE 24
 #endif
 
-using JournalSubId = uint16_t;
+// uint32, а не uint16: CommandResponse бере новий id на КОЖНУ MQTT-команду з
+// відповіддю, і 65 535 при опитуванні раз на 10 с - це ~7,5 доби аптайму.
+// Після переходу через нуль id дублювались би, і unsubscribe() старого
+// власника знімав би чужий приймач (зокрема SerialSink з id 1).
+using JournalSubId = uint32_t;
 constexpr JournalSubId kInvalidJournalSub = 0;
 
 class Journal {

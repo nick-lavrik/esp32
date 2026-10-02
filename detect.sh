@@ -14,7 +14,7 @@ echo "=================================================="
 found=0
 
 # Цикл проходит по обоим типам портов: ttyUSB и ttyACM
-for port in /dev/ttyUSB* /dev/dev/ttyACM*; do
+for port in /dev/ttyUSB* /dev/ttyACM*; do
     # Проверяем, существует ли файл устройства в реальности
     if [ -e "$port" ]; then
         found=1
@@ -25,12 +25,13 @@ for port in /dev/ttyUSB* /dev/dev/ttyACM*; do
         OUTPUT=$(esptool --port "$port" --baud 115200 chip-id 2>&1)
         
         # Извлекаем строку с типом чипа и MAC-адресом
-        CHIP=$(echo "$OUTPUT" | grep "Chip is")
-        MAC=$(echo "$OUTPUT" | grep "MAC:")
+        # esptool v4 друкує "Chip is ...", v5 - "Chip type: ..."
+        CHIP=$(echo "$OUTPUT" | grep -E "Chip is|Chip type:" | head -1)
+        MAC=$(echo "$OUTPUT" | grep "MAC:" | head -1)
         
         if [ ! -z "$CHIP" ]; then
             # Очищаем вывод от лишних пробелов и выводим красиво
-            CHIP_CLEAN=$(echo "$CHIP" | sed 's/Chip is //')
+            CHIP_CLEAN=$(echo "$CHIP" | sed -E 's/Chip is |Chip type: *//')
             MAC_CLEAN=$(echo "$MAC" | sed 's/MAC: //')
             
             echo -e " ✅ Найдено: \033[1;32mESP-$CHIP_CLEAN\033[0m"

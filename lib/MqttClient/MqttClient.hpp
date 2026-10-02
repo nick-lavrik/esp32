@@ -5,7 +5,7 @@
 // HAS_PING/HAS_GMAIL_SENDER (CLAUDE.md, src/ping.h) - компілятор і
 // IDE-індексатор мають бачити ОДНЕ й те саме значення.
 #ifndef HAS_MQTT_CLIENT
-#error "HAS_MQTT_CLIENT не визначено - додай #define HAS_MQTT_CLIENT 0/1 у environment.h цього env"
+#error "HAS_MQTT_CLIENT is not defined - add #define HAS_MQTT_CLIENT 0/1 to this env's environment.h"
 #endif
 
 // Наявність бібліотеки все одно перевіряється - якщо хтось виставить
@@ -13,7 +13,7 @@
 // прибрати прапорець при вимкненні обох), збірка провалюється явно (#error),
 // а не мовчки згасить увесь MQTT-шар у рантаймі.
 #if HAS_MQTT_CLIENT && !(__has_include(<PubSubClient.h>) || __has_include(<PicoMQTT.h>))
-#error "HAS_MQTT_CLIENT=1, але ні PubSubClient.h, ні PicoMQTT.h не доступні - додай залежність у lib_deps цього env"
+#error "HAS_MQTT_CLIENT=1, but neither PubSubClient.h nor PicoMQTT.h is available - add one to this env's lib_deps"
 #endif
 
 #if HAS_MQTT_CLIENT

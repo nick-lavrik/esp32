@@ -142,7 +142,7 @@ bool SDImageServer::begin() {
   _server.setNoDelay(true);
   _isActive = true;
 
-  logger.info("сервер піднято: http://%s:%u/sd.img", WiFi.localIP().toString().c_str(),
+  logger.info("server up: http://%s:%u/sd.img", WiFi.localIP().toString().c_str(),
               (unsigned)_config.port);
   logger.info("image size: %llu bytes (%llu sectors)",
               (unsigned long long)totalBytes(), (unsigned long long)_totalSectors);
@@ -277,7 +277,15 @@ SDImageServer::Request SDImageServer::readRequest(WiFiClient &client) {
       // (кілька діапазонів через кому) не підтримуємо - ні qemu-nbd, ні curl
       // його для блочного доступу не використовують.
       const char *value = strchr(line, '=');
-      if (value != nullptr) {
+      if (value != nullptr && value[1] == '-') {
+        // Суфіксний діапазон "bytes=-N" - останні N байтів. Без окремої гілки
+        // strtoull("-N") мовчки повертає 2^64 - N.
+        const uint64_t suffix = strtoull(value + 2, nullptr, 10);
+        const uint64_t total = totalBytes();
+        request.hasRange = true;
+        request.rangeStart = suffix < total ? total - suffix : 0;
+        request.rangeEnd = total > 0 ? total - 1 : 0;
+      } else if (value != nullptr) {
         ++value;
         char *endPtr = nullptr;
         const uint64_t start = strtoull(value, &endPtr, 10);
@@ -388,7 +396,9 @@ void SDImageServer::serveImage(WiFiClient &client, const Request &request) {
     firstByte = request.rangeStart;
     lastByte = request.rangeEnd;
 
-    if (firstByte >= total) {
+    // end < start (bytes=500-100) - теж 416: інакше length нижче
+    // переповнився б до ~2^64.
+    if (firstByte >= total || lastByte < firstByte) {
       // 416 обов'язковий за RFC: без нього qemu вважатиме, що прочитав нулі
       // за межею образу, і зіпсує собі кеш.
       char header[160];

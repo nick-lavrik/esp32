@@ -64,6 +64,9 @@ private:
   char terminator_;
   String buffer_;
   size_t maxLineLength_ = 128;
+  // Після переповнення - пропускати все до термінатора: інакше хвіст
+  // задовгого рядка виконався б як окрема команда.
+  bool discarding_ = false;
   std::vector<Command> commands_;
   LineHandler lineHandler_;
 

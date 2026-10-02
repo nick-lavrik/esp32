@@ -1979,6 +1979,17 @@ const CAPTURE_TIMEOUT_MS = 60000;
 // Рядок журналу: "[I][cmd    ] < heap (12 ms)".
 const END_MARKER = /^\[.\]\[[^\]]*\] < (.*) \((\d+) ms\)$/;
 
+// Пристрій у позначці кінця маскує секрети ('password <p>' -> 'password ***')
+// і схлопує пробіли (lib/CommandQueue/CommandMask.hpp). Тому звіряємо по
+// токенах: замаскований токен збігається з будь-яким. Саме правило "що
+// маскувати" тут навмисно не повторене - лише заглушка.
+const MASKED_TOKEN = "***";
+
+function sameCommand(marker, cmd) {
+  const a = marker.split(/\s+/), b = cmd.split(/\s+/);
+  return a.length === b.length && a.every((t, i) => t === b[i] || t === MASKED_TOKEN);
+}
+
 let captureOutput = false;
 let captureCmd = "";
 let captureTimer = null;
@@ -2711,7 +2722,7 @@ function appendLog(lines) {
   for (const line of lines) {
     mine.push(line);
     const m = END_MARKER.exec(line);
-    if (m && m[1] === captureCmd) { doneMs = m[2]; break; }
+    if (m && sameCommand(m[1], captureCmd)) { doneMs = m[2]; break; }
   }
 
   appendTo($("#run-out"), mine, 200);

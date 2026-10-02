@@ -64,7 +64,9 @@ String deviceJson(const WebEcoflowDeviceSnapshot& snap, uint32_t nowMs, time_t n
   json += ",\"gridForMs\":" +
           (snap.gridSinceEpoch == 0 || nowEpoch < snap.gridSinceEpoch
                ? String("null")
-               : String((uint32_t)(nowEpoch - snap.gridSinceEpoch) * 1000UL));
+               // uint64: у мс uint32 переповнюється вже за 49,7 доби, а місяць
+               // на мережі - звичайний стан.
+               : String((uint64_t)(nowEpoch - snap.gridSinceEpoch) * 1000ULL));
   // "Попередній стан"/"тривалість попереднього" тепер живуть лише в самому
   // журналі (кільце переходів) - показ одного останнього запису тут означав
   // би ще один транзитний NVS-запит на КОЖЕН пристрій КОЖНОГО опитування

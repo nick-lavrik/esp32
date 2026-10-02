@@ -28,6 +28,7 @@
 
 #include <NetworkSupervisor.hpp>
 #include <NmConnectionIni.hpp>
+#include <CommandArgs.hpp>
 #include <SerialCommander.hpp>
 #include <TLogger.hpp>
 #include <string>
@@ -180,20 +181,6 @@ static String namedArg(const std::vector<String>& args, size_t from, const char*
     }
   }
   return String();
-}
-
-static bool parseBool(const String& v, bool& out) {
-  if (v.equalsIgnoreCase("yes") || v.equalsIgnoreCase("on") || v.equalsIgnoreCase("true") ||
-      v == "1") {
-    out = true;
-    return true;
-  }
-  if (v.equalsIgnoreCase("no") || v.equalsIgnoreCase("off") || v.equalsIgnoreCase("false") ||
-      v == "0") {
-    out = false;
-    return true;
-  }
-  return false;
 }
 
 // ---------------------------------------------------------------------------

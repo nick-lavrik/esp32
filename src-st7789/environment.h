@@ -98,12 +98,17 @@
 #define TFT_INVERSION_OFF 1
 #define SPI_FREQUENCY 40000000  // 20000000 / 27000000 / 40000000
 
-#define LOAD_GLCD 0  // 1
+// TFT_eSPI перевіряє шрифти через #ifdef, тож "#define LOAD_FONT4 0" шрифт
+// НЕ вимикає - вимкнути можна лише прибравши рядок. Колишні "0" нижче нічого
+// не міняли (і заміри heap поруч з ними - теж: шрифти лежать у flash, не в
+// heap), тому тут записано фактичний стан. Прибирати рядок - лише разом із
+// перевіркою, що цей шрифт ніде не малюється (drawSystemInfo() - setTextFont(1)).
+#define LOAD_GLCD 1
 #define LOAD_FONT2 1
-#define LOAD_FONT4 0  // 1 - 60540 => free heap before read: 60716
-#define LOAD_FONT6 0  // 1
-#define LOAD_FONT7 1  // 1 - 60716
-#define LOAD_FONT8 0  // 1
+#define LOAD_FONT4 1
+#define LOAD_FONT6 1
+#define LOAD_FONT7 1
+#define LOAD_FONT8 1
 
 #define SPRITE_COLOR_DEPTH 16  // 8 => кольорово але убого
 // #define DISPLAY_SPLIT_COUNT 6  // 240 / 6 = 40

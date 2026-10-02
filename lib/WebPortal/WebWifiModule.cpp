@@ -248,7 +248,15 @@ String WebWifiModule::portalStatusJson(const WebWifiStatus& s) {
   status += ",\"clients\":";
   status += s.apClients;
   status += ",\"security\":";
-  status += webjson::quote(s.apOpen ? "open" : "WPA2");
+  // Ті самі назви, що в скані (wifiAuthTypeName()). WPA2_PSK - дефолт
+  // WiFi.softAP() з паролем (NetworkSupervisor::_startApInternal()).
+  // Коди платформні: на ESP8266 wifiAuthTypeName() приймає ENC_TYPE_*.
+#if defined(ESP32)
+  const uint8_t apAuth = s.apOpen ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+#else
+  const uint8_t apAuth = s.apOpen ? ENC_TYPE_NONE : ENC_TYPE_CCMP;
+#endif
+  status += webjson::quote(wifiAuthTypeName(apAuth));
   status += "}}";
   return status;
 }

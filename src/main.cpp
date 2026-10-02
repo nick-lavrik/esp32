@@ -1111,7 +1111,7 @@ static constexpr const char* kDiscoveryBoard = "esp32-st7789";
 #elif defined(BOARD_TTGO_T1)
 static constexpr const char* kDiscoveryBoard = "ttgo-t1";
 #else
-#error "Невідома плата: додай запис kDiscoveryBoard у src/main.cpp"
+#error "Unknown board: add a kDiscoveryBoard entry in src/main.cpp"
 #endif
 
 // features - пряме дзеркало активних BOARD_HAS_*/HAS_* з src/features.h
@@ -1976,7 +1976,11 @@ void setupEcoflow() {
         return;
       }
 
-      const bool enable = (mode == "on" || mode == "1" || mode == "true");
+      bool enable = false;
+      if (!parseBool(mode, enable)) {
+        _logger.warn("use: ecoflow-capture <on|off> [sn|index|all]");
+        return;
+      }
       // Порожній serial у setCaptureAll() означає "усі пристрої".
       String serial;
       if (target.length() > 0 && target != "all") {
@@ -2242,7 +2246,11 @@ void setupEcoflow() {
                      stored.length() > 0 ? "" : " (build-time default)");
         return;
       }
-      const bool on = (value == "on" || value == "1" || value == "true");
+      bool on = false;
+      if (!parseBool(value, on)) {
+        _logger.warn("use: ecoflow-auto [on|off]");
+        return;
+      }
       configStorage.setString(CFG_ECOFLOW_AUTOCONNECT, on ? "1" : "0");
       _logger.info("autoconnect = %s (applies on next boot)", on ? "on" : "off");
     }
@@ -2254,11 +2262,12 @@ void setupEcoflow() {
     [](const String args) {
       String value = args;
       value.trim();
-      if (value.length() > 0) {
-        ecoflowVerbose = (value == "on" || value == "1" || value == "true");
-      } else {
-        ecoflowVerbose = !ecoflowVerbose;
+      bool on = !ecoflowVerbose;
+      if (value.length() > 0 && !parseBool(value, on)) {
+        _logger.warn("use: ecoflow-verbose [on|off]");
+        return;
       }
+      ecoflowVerbose = on;
       _logger.info("verbose = %s", ecoflowVerbose ? "on" : "off");
     }
   );
@@ -2553,12 +2562,7 @@ void setupMqttClient() {
 
 void setupSD() {
 #if BOARD_HAS_SD
-// SD_USE_SDMMC - внутрішній прапорець: SDMMC-режим є лише на платі з таким
-// роз'ємом, і лише якщо його явно не відключили через SD_FORCE_SPI.
-#if defined(BOARD_ESP32_S3_LCD147) && !defined(SD_FORCE_SPI)
-#define SD_USE_SDMMC 1
-#endif
-
+// SD_USE_SDMMC визначено на початку файла, разом з ACTIVE_SD.
 #if defined(SD_USE_SDMMC)
   // SD_MMC (4-bit): піни задаються з build_flags (SD_D0/D1/D2/D3/CLK/CMD).
   if (!SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0, SD_D1, SD_D2, SD_D3)) {
@@ -2797,12 +2801,12 @@ void dumpSDInfo() {
   uint8_t cardType = ACTIVE_SD.cardType();
  
   if (cardType == CARD_NONE) {
-    Logger::info("❌ Card not found (or type not detected).");
+    Logger::info("Card not found (or type not detected).");
     Logger::info("============================================================");
     return;
   }
  
-  Logger::info("✅ Card found!");
+  Logger::info("Card found.");
 
   // Виводимо тип для деталізації
   Logger::info("Card type: %s", sdCardTypeName(cardType));
@@ -2814,10 +2818,10 @@ void dumpSDInfo() {
   // Виводимо розмір картки
   // uint64_t cardSize = ACTIVE_SD.cardSize() / (1024 * 1024);
   // Serial.printf(F("Розмір картки: %llu MB\n"), cardSize);
-  Logger::info("Card size: %s", SizeFormatter::format(ACTIVE_SD.cardSize()));
-  Logger::info("Used: %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.usedBytes()),
+  Logger::info("Card size: %s", SizeFormatter::format(ACTIVE_SD.cardSize()).c_str());
+  Logger::info("Used: %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.usedBytes()).c_str(),
                ACTIVE_SD.usedBytes() * 100.0 / ACTIVE_SD.cardSize());
-  Logger::info("Free:  %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.cardSize() - ACTIVE_SD.usedBytes()),
+  Logger::info("Free:  %s (%.2f%%)", SizeFormatter::format(ACTIVE_SD.cardSize() - ACTIVE_SD.usedBytes()).c_str(),
                (ACTIVE_SD.cardSize() - ACTIVE_SD.usedBytes()) * 100.0 / ACTIVE_SD.cardSize());
  
   Logger::info("============================================================");
@@ -3230,6 +3234,16 @@ void dumpSdCrc(const String& args) {
       const uint32_t take = (remaining < chunkSectors) ? remaining : chunkSectors;
 
       const auto voteStats = crcReader.readSectorsVoted(lba + done, take, buffer, (uint8_t)passes);
+      // Кожен оброблений сектор потрапляє рівно в один з чотирьох лічильників.
+      // Менша сума - readSectorsVoted() вийшла раніше (не вистачило heap чи
+      // рідер не готовий), і CRC по такому буферу був би вигадкою.
+      if (voteStats.sectorsStable + voteStats.sectorsRecovered + voteStats.sectorsUncertain +
+              voteStats.sectorsFailed != take) {
+        logger.error("LBA %lu: voted read aborted (out of heap or reader not ready) - no CRC",
+                     (unsigned long)(lba + done));
+        free(buffer);
+        return;
+      }
 
       total.sectorsStable += voteStats.sectorsStable;
       total.sectorsRecovered += voteStats.sectorsRecovered;
@@ -3495,7 +3509,7 @@ void dumpSdImage(const String& args) {
   logger.info("server     : %s", sdImageServer.isActive() ? "active" : "stopped");
 
   if (sdImageServer.isActive()) {
-    logger.info("адреса     : http://%s:8080/sd.img", WiFi.localIP().toString().c_str());
+    logger.info("address    : http://%s:8080/sd.img", WiFi.localIP().toString().c_str());
   }
 
   logger.info("image      : %llu bytes", (unsigned long long)sdImageServer.totalBytes());
@@ -3687,7 +3701,8 @@ void sdProbe(bool force) {
 // Скан перебирає пари (CS, MISO) при фіксованих SCK/MOSI і шукає ту, на якій
 // CMD0 повертає 0x01.
 //
-// БЕЗПЕКА: перебираються лише GPIO зі списку нижче. Свідомо ВИКЛЮЧЕНІ піни,
+// БЕЗПЕКА: лише ESP32-C6 (на інших чипах sdScan() відмовляє одразу).
+// Перебираються лише GPIO зі списку нижче. Свідомо ВИКЛЮЧЕНІ піни,
 // смикання яких зашкодило б: 12/13 (USB Serial/JTAG - вбило б консоль),
 // 16/17 (UART0), 24..30 (шина SPI-флеша), 8/9 (strapping/boot). Піни, зайняті
 // дисплеєм і самою шиною, відсіюються в рантаймі нижче.
@@ -3732,6 +3747,13 @@ static uint8_t sdScanTry(uint8_t cs, uint8_t miso) {
 }
 
 void sdScan() {
+#if !CONFIG_IDF_TARGET_ESP32C6
+  // Список SD_SCAN_CANDIDATES складено під розводку C6. На класичному ESP32
+  // GPIO6..11 - лінії SPI-флеша модуля, на S3 GPIO19/20 - USB: смикати їх не
+  // можна. Інший чип - окремий перелік, коли він справді знадобиться.
+  Logger::warn("sdscan: the candidate pin list is ESP32-C6 only - refusing on this chip");
+  return;
+#endif
   YIELD_DISPLAY_BUS();
 
   Logger::info("========= SD pin scan ======================================");
@@ -3768,7 +3790,7 @@ void sdScan() {
 
       if (r1 == 0x01) {
         ++found;
-        Logger::info("✅ FOUND: CS=%d MISO=%d -> CMD0 R1=0x01", cs, miso);
+        Logger::info("FOUND: CS=%d MISO=%d -> CMD0 R1=0x01", cs, miso);
       } else if (!(r1 & 0x80)) {
         // Відповідь є, але не idle - теж вартий уваги кандидат.
         Logger::info("?  CS=%d MISO=%d -> CMD0 R1=0x%02X (answered, but not idle)", cs, miso, r1);
@@ -4300,7 +4322,11 @@ void setupSerialCommander() {
                     stored.length() > 0 ? "" : " (build-time default)");
           return;
         }
-        const bool on = (value == "on" || value == "1" || value == "true");
+        bool on = false;
+        if (!parseBool(value, on)) {
+          _log.warn("use: watchdog [on|off]");
+          return;
+        }
         configStorage.setString(CFG_WATCHDOG, on ? "1" : "0");
         _log.info("watchdog = %s (applies on next boot)", on ? "on" : "off");
       });
@@ -4644,6 +4670,10 @@ void setupSerialCommander() {
 #else
       Logger::info(" isAutoBrighness **disabled**");
 #endif
+    } else if (args.toInt() < 0 || args.toInt() > 100 || (args.toInt() == 0 && args != "0")) {
+      // Обрізати до 100 мовчки не можна: uint8_t-параметр перетворив би 300
+      // на 44, а "abc" (toInt() == 0) погасив би екран.
+      Logger::warn("use: brightness 0-100|auto");
     } else {
       display_brightness(args.toInt(), false);
     }
@@ -5166,7 +5196,7 @@ void loadConfig() {
 
   Logger::info("\t- %s = %s", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
   Logger::info("\t- %s = %s", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
-  Logger::info("\t- %s = %d", CFG_DISPLAY_BRIGHTNESS, configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 50));
+  Logger::info("\t- %s = %d", CFG_DISPLAY_BRIGHTNESS, display.brightness());
   Logger::info("");
 }
 
@@ -5289,12 +5319,16 @@ void setupLightSensor() {
   }); */
 
 #if BOARD_HAS_TOUCHSCREEN
+  // Під час гри hold - це стрибок, а не запит автояскравості (той самий
+  // захист, що й у свайпах яскравості в setupTouchScreen()).
   touchController.events().onHold([](TouchPoint p, unsigned long ms) {
+    if (dinoActive) return;
     configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = true);
     display_brightness(lightSensor.value(), isAutoBrightness);
   });
 
   SwipeCallback onSwipe = [](TouchPoint s, TouchPoint e) {
+    if (dinoActive) return;
     configStorage.setBool(CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness = false);
   };
 
@@ -6112,10 +6146,12 @@ void loop() {
   // Режим знімання образу: дисплей навмисно не малюється - SPI-шина спільна
   // з карткою, і будь-яка транзакція панелі посеред читання сектора зіпсувала
   // б і кадр, і дані. Serial-команди обслуговуємо далі, щоб режим можна було
-  // вимкнути ("sdimg off").
+  // вимкнути ("sdimg off"). update() лише кладе рядок у чергу - виконує його
+  // runNext(), без нього "sdimg off" не спрацював би ніколи.
   if (isSdImageModeActive()) {
     sdImageServer.handleClient();
     commandHandler.update();
+    commandQueue.runNext();
     delay(1);
     return;
   }

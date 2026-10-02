@@ -83,6 +83,19 @@ public:
         return "Brownout reset";
       case ESP_RST_SDIO:
         return "SDIO reset";
+      // USB - імовірно, саме він після 'pio upload' на C6/C3/S3 (ресет через
+      // USB Serial/JTAG); раніше він потрапляв у default як "Unknown".
+      // На залізі ще не звірено.
+      case ESP_RST_USB:
+        return "USB peripheral reset";
+      case ESP_RST_JTAG:
+        return "JTAG reset";
+      case ESP_RST_EFUSE:
+        return "eFuse error reset";
+      case ESP_RST_PWR_GLITCH:
+        return "Power glitch reset";
+      case ESP_RST_CPU_LOCKUP:
+        return "CPU lockup reset";
       default:
         return "Unknown reset reason";
     }

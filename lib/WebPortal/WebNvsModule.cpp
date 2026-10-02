@@ -150,8 +150,9 @@ String WebNvsModule::_saveJob(const String& key, const String& type, const Strin
     return webjson::fail("Write failed (NVS partition full?)");
   }
 
-  _logger.info("NVS %s: %s = %s", existing == NVS_TYPE_ANY ? "created" : "updated", key.c_str(),
-               value.c_str());
+  // Значення не логуємо: у NVS лежать паролі (web_pass, nm_conn), а лог іде
+  // в журнал, веб-консоль і через ConsoleMqtt у MQTT.
+  _logger.info("NVS %s: %s", existing == NVS_TYPE_ANY ? "created" : "updated", key.c_str());
   return webjson::ok(existing == NVS_TYPE_ANY ? "Key created" : "Key updated");
 }
 

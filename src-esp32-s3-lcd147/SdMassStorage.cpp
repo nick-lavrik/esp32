@@ -201,6 +201,9 @@ bool sdMassStorageBegin(SdMscSectorReader reader, uint32_t totalSectors) {
 bool sdMassStorageNeedsRecovery() {
   const bool needed = needsCardRecovery;
   needsCardRecovery = false;
+  // Рахуємо тут: true означає, що loop() зараз перемонтує картку
+  // (remountCardIfMscAsked() у src/main.cpp).
+  if (needed) ++cardRecoveries;
   return needed;
 }
 

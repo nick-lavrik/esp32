@@ -1,5 +1,6 @@
 #include "WebCommandsModule.hpp"
 
+#include <CommandMask.hpp>
 #include <ConfigStorage.hpp>
 #include <ESPAsyncWebServer.h>
 
@@ -171,8 +172,8 @@ void WebCommandsModule::registerRoutes(AsyncWebServer& server, WebPortal& portal
     // serial теж: у моніторі видно, що команду запустили з браузера.
     //
     // Логуємо ДО submit(): при повній черзі в стрічці має лишитись слід, що
-    // команду вводили, а не тиша.
-    _logger.info("> %s", cmd.c_str());
+    // команду вводили, а не тиша. Пароль з рядка маскується (CommandMask.hpp).
+    _logger.info("> %s", maskCommandSecrets(cmd.c_str()).c_str());
 
     if (!_submit || !_submit(cmd.c_str())) {
       request->send(503, "application/json", webjson::error("Command queue is full, try again"));

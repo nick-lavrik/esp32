@@ -54,7 +54,7 @@
 // HAS_PING (CLAUDE.md, src/ping.h) - компілятор і IDE-індексатор мають
 // бачити ОДНЕ й те саме значення.
 #ifndef HAS_GMAIL_SENDER
-#error "HAS_GMAIL_SENDER не визначено - додай #define HAS_GMAIL_SENDER 0/1 у environment.h цього env"
+#error "HAS_GMAIL_SENDER is not defined - add #define HAS_GMAIL_SENDER 0/1 to this env's environment.h"
 #endif
 
 // Наявність бібліотеки все одно перевіряється - якщо хтось виставить
@@ -62,7 +62,7 @@
 // прибрати прапорець при вимкненні lib_dep), збірка провалюється явно
 // (#error), а не мовчки згасить пошту в рантаймі.
 #if HAS_GMAIL_SENDER && !__has_include(<ReadyMail.h>)
-#error "HAS_GMAIL_SENDER=1, але mobizt/ReadyMail відсутній у lib_deps цього env"
+#error "HAS_GMAIL_SENDER=1, but mobizt/ReadyMail is missing from this env's lib_deps"
 #endif
 
 #if HAS_GMAIL_SENDER

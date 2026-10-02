@@ -24,7 +24,7 @@ void setup() {
     // Callback викликається при кожній успішній синхронізації.
     ntp.addCallback([](struct timeval* tv) {
         char buf[40];
-        Serial.printf("[NTP] Синхронізовано: %s\n",
+        Serial.printf("[NTP] Synchronized: %s\n",
                       NtpService::ftime("%Y-%m-%d %H:%M:%S.%Q", buf, sizeof(buf), *tv));
     });
 

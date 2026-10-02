@@ -5,7 +5,7 @@
 // HAS_ECOFLOW_CLIENT там (CLAUDE.md) - компілятор і IDE-індексатор мають
 // бачити ОДНЕ й те саме значення.
 #ifndef HAS_PING
-#error "HAS_PING не визначено - додай #define HAS_PING 0/1 у environment.h цього env"
+#error "HAS_PING is not defined - add #define HAS_PING 0/1 to this env's environment.h"
 #endif
 
 // Але сама наявність бібліотеки все одно перевіряється - якщо хтось
@@ -14,11 +14,11 @@
 // (#error) замість мовчазного "ping ніколи не працює" в рантаймі.
 #if defined(BOARD_ESP8266)
 #if HAS_PING && !__has_include(<ESP8266Ping.h>)
-#error "HAS_PING=1, але ESP8266Ping.h недоступний - додай залежність у lib_deps цього env (не вбудований у поточний core, перевірено 2026-09-23)"
+#error "HAS_PING=1, but ESP8266Ping.h is unavailable - add it to this env's lib_deps (not bundled with the current core, checked 2026-09-23)"
 #endif
 #else
 #if HAS_PING && !__has_include(<ESPping.h>)
-#error "HAS_PING=1, але dvarrel/ESPping відсутній у lib_deps цього env"
+#error "HAS_PING=1, but dvarrel/ESPping is missing from this env's lib_deps"
 #endif
 #endif
 
