@@ -697,10 +697,10 @@ static std::shared_ptr<ResponseTarget> mqttReplyTarget() {
 // компілюється, тож ні писати, ні читати цей масив нема кому - без цього
 // гейта registerJsonApiCommandName() лишався б "defined but not used" саме на
 // esp8266 (перевірено збіркою).
-static constexpr size_t kMaxJsonApiCommands = 10;  // 9 наявних (system-info/
+static constexpr size_t kMaxJsonApiCommands = 12;  // 11 наявних (system-info/
                                                     // wifi-status/wifi-connections/
                                                     // ecoflow-status/ecoflow-journal/
-                                                    // mqtt-status/commands-list/fs-list/fs-read) + запас
+                                                    // mqtt-status/commands-list/fs-list/fs-read/nvs-list/nvs-blob) + запас
 static const char* kJsonApiCommandNames[kMaxJsonApiCommands] = {};
 static size_t kJsonApiCommandCount = 0;
 
@@ -905,6 +905,52 @@ static String jsonApiFsReadExecute(const uint8_t* raw) {
 }
 
 static const JsonApiEntry kJsonApiFsRead = {"fs-read", jsonApiFsReadResolve, jsonApiFsReadExecute};
+
+// Дзеркало /api/nvs/list і /api/nvs/blob (WebNvsModule::listJson()/
+// blobJson(), ті самі форматери): записи одного namespace і hex блоба. Лише
+// читання. Імена namespace/ключа - ConfigStorage::isKeyValid() (<=15
+// символів), перевірене в resolve(); порожнє ns = власний namespace.
+struct NvsArgs {
+  char ns[16] = "";
+  char key[16] = "";
+};
+static_assert(sizeof(NvsArgs) <= CommandQueue::kLineSize, "NvsArgs has to fit into Slot.payload");
+
+// needKey=false для nvs-list (ключа нема). Окрема від resolve-функцій, щоб не
+// дублювати копіювання двох коротких рядків.
+static bool nvsResolveArgs(JsonVariantConst args, uint8_t* rawOut, size_t rawCapacity, bool needKey) {
+  if (rawCapacity < sizeof(NvsArgs)) return false;
+  const String ns = args["ns"] | "";
+  const String key = args["key"] | "";
+  if (ns.length() > 0 && !ConfigStorage::isKeyValid(ns.c_str())) return false;
+  if (needKey && !ConfigStorage::isKeyValid(key.c_str())) return false;
+  NvsArgs a;
+  strncpy(a.ns, ns.c_str(), sizeof(a.ns) - 1);
+  strncpy(a.key, key.c_str(), sizeof(a.key) - 1);
+  memcpy(rawOut, &a, sizeof(a));
+  return true;
+}
+
+static bool jsonApiNvsListResolve(JsonVariantConst args, uint8_t* rawOut, size_t rawCapacity) {
+  return nvsResolveArgs(args, rawOut, rawCapacity, false);
+}
+static bool jsonApiNvsBlobResolve(JsonVariantConst args, uint8_t* rawOut, size_t rawCapacity) {
+  return nvsResolveArgs(args, rawOut, rawCapacity, true);
+}
+
+static String jsonApiNvsListExecute(const uint8_t* raw) {
+  NvsArgs args;
+  memcpy(&args, raw, sizeof(args));
+  return webNvsModule.listJson(String(args.ns));
+}
+static String jsonApiNvsBlobExecute(const uint8_t* raw) {
+  NvsArgs args;
+  memcpy(&args, raw, sizeof(args));
+  return webNvsModule.blobJson(String(args.key), String(args.ns));
+}
+
+static const JsonApiEntry kJsonApiNvsList = {"nvs-list", jsonApiNvsListResolve, jsonApiNvsListExecute};
+static const JsonApiEntry kJsonApiNvsBlob = {"nvs-blob", jsonApiNvsBlobResolve, jsonApiNvsBlobExecute};
 
 #if HAS_ECOFLOW_CLIENT
 // Дзеркало /api/ecoflow/status - тут форматер уже інший
@@ -2316,6 +2362,8 @@ void setupMqttClient() {
   registerJsonApiEntry(kJsonApiWifiConnections);
   registerJsonApiEntry(kJsonApiFsList);
   registerJsonApiEntry(kJsonApiFsRead);
+  registerJsonApiEntry(kJsonApiNvsList);
+  registerJsonApiEntry(kJsonApiNvsBlob);
 #if HAS_ECOFLOW_CLIENT
   registerJsonApiEntry(kJsonApiEcoflowStatus);
   registerJsonApiEntry(kJsonApiEcoflowJournal);

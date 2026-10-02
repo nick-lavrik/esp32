@@ -114,6 +114,18 @@ Preview лежить поза DOM — переживає перемальовк�
 робить: заблоковані з `title` (як Connect у Wi-Fi). Refresh перечитує
 поточний каталог.
 
+## NVS — Records + Add or update (disabled) + Value
+
+Вкладка **NVS** — порт `#tab-nvs` порталу: ліворуч Records (select namespace,
+локальний фільтр ключів, таблиця Key/Type/Value + View), праворуч форма
+Add or update (**заблокована**, як Editor у Files; у чужому namespace — лише
+позначка «read-only namespace», як на порталі) і Value-переглядач. Команди:
+`nvs-list` (`args.ns`) і `nvs-blob` (`args.key`, `args.ns`) — блоб показується
+hex-дампом, решта значень беруться зі списку (JSON — з відступами).
+Зміна namespace перезапитує список; фільтр працює по останньому знімку без
+запиту. **Секрети:** значення приходять як є (див. застереження в
+`docs/mqtt-topics.md`).
+
 ## EcoFlow — "Raw parameters" на вимогу (drill-down)
 
 Агрегат `ecoflow-status` свідомо не несе сирі `params` кожного пристрою

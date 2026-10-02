@@ -16,6 +16,7 @@ const { renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatu
         ecoflowSystemDevicesHtml, ecoTableRow, mqttSystemRows, heapBarHtml, ecoParamsTable,
         ecoJournalRow, ecoJournalSection, ecoFinishText, ssidLabel, wifiProfilesTable,
         usageBarHtml, renderFsList,
+        renderNvsList, nvsTableParts, hexToBytes, nvsAsJson,
         fsPreviewFromBytes, hexDump, b64ToBytes, concatBytes, fsIsTextual } = require('../render.js');
 
 const CHIP_FIXTURE = {
@@ -597,6 +598,40 @@ test('b64ToBytes/concatBytes: розкодування шматків і скл�
   assert.equal(new TextDecoder().decode(concatBytes([a, b])), 'abcd');
   assert.equal(fsIsTextual(new Uint8Array([10, 65])), true);
   assert.equal(fsIsTextual(new Uint8Array([0])), false);
+});
+
+const NVS_FIXTURE = { ok: true, namespace: 'esp32', writable: true, truncated: false, namespaces: ['nvs.net80211', 'esp32'],
+  entries: [{ key: 'zeta', type: 'string', value: '<b>x</b>', editable: true },
+            { key: 'alpha', type: 'i32', value: '5', editable: true },
+            { key: 'cal', type: 'blob', value: '(4 bytes)', editable: false }] };
+
+test('renderNvsList: ключі за абеткою, свій namespace перший, форма disabled, View на кожному рядку', () => {
+  const html = renderNvsList(NVS_FIXTURE, '');
+  assert.ok(html.indexOf('>alpha<') < html.indexOf('>cal<') && html.indexOf('>cal<') < html.indexOf('>zeta<'));
+  assert.ok(html.indexOf('<option value="esp32" selected>') < html.indexOf('<option value="nvs.net80211"'));
+  assert.equal((html.match(/data-nvs-view=/g) || []).length, 6); // tr + кнопка x3
+  assert.equal((html.match(/disabled title/g) || []).length, 5); // key, type, Save, Clear, textarea
+  assert.match(html, /Add or update<\/h2><form/);
+  assert.match(html, /<h2>Value /);
+  assert.doesNotMatch(html, /<b>x<\/b>/); // екранування
+});
+
+test('renderNvsList: чужий namespace - без форми, з позначкою read-only; фільтр; ok:false', () => {
+  const ro = renderNvsList({ ...NVS_FIXTURE, writable: false }, '');
+  assert.match(ro, /read-only namespace/);
+  assert.doesNotMatch(ro, /<form/);
+  assert.match(nvsTableParts(NVS_FIXTURE, 'ALP').count, /^1 of 3/);
+  assert.match(nvsTableParts(NVS_FIXTURE, 'qqq').rows, /Nothing matches/);
+  assert.match(nvsTableParts({ ...NVS_FIXTURE, entries: [] }, '').rows, /Namespace is empty/);
+  assert.match(renderNvsList({ ok: false, message: 'Bad' }), /Bad/);
+  assert.match(renderNvsList(null), /Not loaded yet/);
+});
+
+test('hexToBytes/nvsAsJson', () => {
+  assert.deepEqual([...hexToBytes('00ff41')], [0, 255, 65]);
+  assert.deepEqual(nvsAsJson(' {"a":1} '), { a: 1 });
+  assert.equal(nvsAsJson('42'), null);
+  assert.equal(nvsAsJson('{bad'), null);
 });
 
 test('renderFsList: ok:false, порожній і незавантажений стани; ім\'я екранується', () => {

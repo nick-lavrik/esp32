@@ -99,13 +99,17 @@ public:
   const char* name() const override { return "nvs"; }
   void registerRoutes(AsyncWebServer& server, WebPortal& portal) override;
 
+  // Читання, спільне з JSON-командами 'nvs-list'/'nvs-blob' MQTT SAPI
+  // (src/main.cpp) - один форматер на портал і SAPI (CLAUDE.md, DRY).
+  // Виконувати з loop(). Порожнє ns = власний namespace.
+  String listJson(const String& ns);
+  String blobJson(const String& key, const String& ns);
+
 private:
-  // Усі три виконуються з WebJobQueue, тобто в контексті loop().
+  // Решта виконується з WebJobQueue, тобто в контексті loop().
   // Чи це наш namespace (порожнє ім'я = наш). Запис дозволений лише в нього.
   bool _isOwn(const String& ns) const;
 
-  String _listJob(const String& ns);
-  String _blobJob(const String& key, const String& ns);
   String _saveJob(const String& key, const String& type, const String& value);
   String _deleteJob(const String& key);
 

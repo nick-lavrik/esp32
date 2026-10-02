@@ -1089,6 +1089,71 @@ function renderFsList(data) {
   return '<div class="cols"><div class="col">' + files + '</div><div class="col">' + fsEditorHtml() + '</div></div>';
 }
 
+// --- Вкладка NVS: порт Records / Add or update / Value порталу. Лише перегляд:
+// форма Add or update заблокована (як Editor у Files), Edit/Delete немає.
+function nvsAsJson(text) {
+  const t = String(text).trim();
+  if (!t.startsWith('{') && !t.startsWith('[')) return null;
+  try { return JSON.parse(t); } catch (e) { return null; }
+}
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return bytes;
+}
+
+// Рядки таблиці + лічильник - окремо від каркасу, щоб фільтр (локальний, по
+// останньому знімку) перемальовував лише їх і не збивав фокус із поля вводу.
+function nvsTableParts(data, filter) {
+  const q = String(filter || '').trim().toLowerCase();
+  const all = data.entries.slice().sort((a, b) => a.key.localeCompare(b.key));
+  const list = q ? all.filter((e) => e.key.toLowerCase().includes(q)) : all;
+  const count = (q ? `${list.length} of ${all.length}` : `${all.length} key(s)`)
+    + (data.truncated ? ' - list truncated' : '') + (data.writable ? '' : ' · read-only');
+  const rows = list.length === 0
+    ? `<tr><td colspan="4" class="muted">${all.length ? 'Nothing matches.' : 'Namespace is empty.'}</td></tr>`
+    : list.map((e) => `<tr data-nvs-view="${esc(e.key)}"><td>${esc(e.key)}</td>`
+        + `<td class="opt muted">${esc(e.type)}</td>`
+        + `<td class="val" title="${esc(e.value)}">${esc(e.value)}</td>`
+        + `<td class="num"><button class="act ghost" data-nvs-view="${esc(e.key)}">View</button></td></tr>`).join('');
+  return { count, rows };
+}
+
+function renderNvsList(data, filter) {
+  if (!data) return '<p class="muted">Not loaded yet.</p>';
+  if (!data.ok) return `<p class="muted">${esc(data.message || 'Cannot read NVS')}</p>`;
+  const hint = esc(kFsReadOnlyHint);
+  const names = (data.namespaces || []).slice().sort((a, b) =>
+    a === data.namespace ? -1 : b === data.namespace ? 1 : a.localeCompare(b));
+  const parts = nvsTableParts(data, filter);
+  const left = `<h2>Records <span id="nvs-count" class="muted" style="font-size:.75em; font-weight:400">${esc(parts.count)}</span></h2>`
+    + '<div class="row"><select id="nvs-ns">'
+    + names.map((n) => `<option value="${esc(n)}"${n === data.namespace ? ' selected' : ''}>${esc(n)}</option>`).join('')
+    + '</select>'
+    + `<input id="nvs-filter" placeholder="filter keys…" autocomplete="off" class="fill" value="${esc(filter || '')}"></div>`
+    + '<table id="nvs-table"><thead><tr><th>Key</th><th class="opt">Type</th><th>Value</th><th></th></tr></thead>'
+    + `<tbody>${parts.rows}</tbody></table>`;
+  // Як на порталі: у чужому namespace форми нема взагалі, лише позначка.
+  const form = data.writable
+    ? '<form id="nvs-form" onsubmit="return false"><div class="row">'
+      + `<input id="nvs-key" maxlength="15" autocomplete="off" placeholder="key (max 15 chars)" disabled title="${hint}">`
+      + `<select id="nvs-type" disabled title="${hint}"><option>string</option><option>integer</option><option>boolean</option></select>`
+      + '<span class="spacer" style="flex:1"></span><span style="display:inline-flex; gap:8px">'
+      + `<button class="act" type="submit" disabled title="${hint}">Save</button>`
+      + `<button class="act ghost" type="button" disabled title="${hint}">Clear</button></span></div>`
+      + `<textarea id="nvs-value" rows="2" placeholder="value" disabled title="${hint}"></textarea></form>`
+      + '<p class="muted">Editing is not available over MQTT yet (SAPI is read-only). '
+      + 'Blob values are shown as a hex dump with “View”.</p>'
+    : '';
+  const right = '<h2>Add or update'
+    + (data.writable ? '' : ' <span class="muted" style="font-size:.75em; font-weight:400">read-only namespace</span>')
+    + '</h2>' + form
+    + '<h2>Value <span id="nvs-view-meta" class="muted" style="font-size:.75em; font-weight:400"></span></h2>'
+    + '<div id="nvs-view" class="muted">Nothing selected.</div>';
+  return `<div class="cols"><div class="col">${left}</div><div class="col">${right}</div></div>`;
+}
+
 const RENDERERS = {
   'system-info': renderSystemInfo,
   'wifi-status': renderWifiStatus,
@@ -1108,6 +1173,7 @@ if (typeof module !== 'undefined' && module.exports) {
     ecoBrokerText, ecoTransportText, ecoTableRow, ecoDeviceCard, ecoParamsTable,
     ecoJournalRow, ecoJournalSection, ecoFinishText,
     mqttSystemRows, mqttConnectionRows, mqttLwtRows, mqttConsoleMirrorRows, heapBarHtml, usageBarHtml, fsUsageRows, renderFsList,
+    renderNvsList, nvsTableParts, nvsAsJson, hexToBytes,
     fsPreviewFromBytes, fsIsTextual, hexDump, b64ToBytes, concatBytes, fsImageMime, FS_PREVIEW_MAX, FS_IMAGE_MAX,
     renderSystemInfo, renderWifiStatus, renderEcoflowStatus, renderMqttStatus, RENDERERS,
   };

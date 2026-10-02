@@ -54,10 +54,18 @@ Allowlist, не дзеркало всіх serial-команд:
 | `wifi-connections` | `WebWifiModule::portalConnectionsJson()` (той самий, що `/api/wifi/connections` порталу) — збережені профілі, окремо від `wifi-status` (список міняється рідко, не на кожен статус-тик) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `fs-list` | `WebFilesModule::listJson()` (той самий, що `/api/fs/list` порталу) — вміст ОДНОГО каталогу LittleFS + місткість. Аргумент `args.path` (за замовчуванням `"/"`), перевіряється `isSafePath()` ще в `resolve()` — небезпечний шлях = `bad args`. Лише читання. Помилка каталогу (`No such directory`/`Not a directory`) приходить як `data:{"ok":false,"message":..}` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `fs-read` | `WebFilesModule::readJson()` — один шматок файла LittleFS (`args.path`, `args.offset`, до 3072 байт) у base64: `data:{ok,path,size,offset,length,eof,data}`. Клієнт добирає файл послідовними запитами до `eof` (Preview вкладки Files). Шлях — як у `fs-list`, але ≤123 символів. Лише читання | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `nvs-list` | `WebNvsModule::listJson()` (той самий, що `/api/nvs/list` порталу) — записи одного namespace (`args.ns`, порожнє = власний; ≤15 символів), до 128 записів. **Значення — як є, разом із секретами** (`nm_conn`, `ap.passwd`): див. застереження нижче | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
+| `nvs-blob` | `WebNvsModule::blobJson()` — hex одного блоба (`args.key`, `args.ns`), до 1 КБ показу | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `ecoflow-status` | `WebEcoflowModule::mqttStatusJson()` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `ecoflow-journal` | `WebEcoflowModule::journalJson()` (той самий провайдер, що `/api/ecoflow/journal` порталу, `EcoflowJournalView.hpp`) — окремий запит, не розширення `ecoflow-status` | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL && HAS_ECOFLOW_CLIENT` |
 | `mqtt-status` | `WebMqttModule::statusJson()` (те саме, що й `/api/mqtt/status`) | `HAS_MQTT_CLIENT && HAS_WEB_PORTAL` |
 | `commands-list` | перелік зареєстрованих serial-команд (`commandHandler.commandName()`/`commandDescription()`), те саме, що й `/api/commands/list` порталу | `HAS_MQTT_CLIENT && !ESP8266` |
+
+**`nvs-list`/`nvs-blob` віддають секрети.** NVS на порталі — привілейований
+розділ (захист — пароль порталу), а тут ті самі дані їдуть у топік
+`devices/<id>/api/nvs-list/reply`, який читає кожен клієнт із правом `read` на
+`devices/<id>/#` (SAPI-акаунт, моніторинг). Хто має таке право — бачить паролі
+WiFi/MQTT. Не retained, але й не закрито: див. `docs/tech_debt.md`.
 
 **`commands-list` — статичний перелік, не статус.** На відміну від решти
 шести (`system-info`/`wifi-status`/`wifi-connections`/`ecoflow-status`/
@@ -129,7 +137,7 @@ topic-per-device (як `ecoflow-params/<sn>` вище): запит рідкіс�
   рядок — буквальне ім'я макроса (`"BOARD_HAS_DISPLAY"`, не перейменований
   варіант).
 - `commands` — масив імен зареєстрованих JSON API команд (`"system-info"`,
-  `"wifi-status"`, `"wifi-connections"`, `"fs-list"`, `"fs-read"`, `"ecoflow-status"`, `"ecoflow-journal"`,
+  `"wifi-status"`, `"wifi-connections"`, `"fs-list"`, `"fs-read"`, `"nvs-list"`, `"nvs-blob"`, `"ecoflow-status"`, `"ecoflow-journal"`,
   `"mqtt-status"`, `"commands-list"` — залежно від env), джерело —
   `registerJsonApiEntry()` (`src/main.cpp`): той самий виклик, що підписує
   `devices/<client-id>/api/<cmd>` (розділ 1), кладе ім'я в малий fixed-size

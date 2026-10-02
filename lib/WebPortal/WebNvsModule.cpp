@@ -38,7 +38,7 @@ bool WebNvsModule::_isOwn(const String& ns) const {
   return ns.length() == 0 || ns == _storage.namespaceName();
 }
 
-String WebNvsModule::_listJob(const String& ns) {
+String WebNvsModule::listJson(const String& ns) {
   const bool own = _isOwn(ns);
   const char* target = own ? nullptr : ns.c_str();
 
@@ -84,7 +84,7 @@ String WebNvsModule::_listJob(const String& ns) {
   return json;
 }
 
-String WebNvsModule::_blobJob(const String& key, const String& ns) {
+String WebNvsModule::blobJson(const String& key, const String& ns) {
   const char* target = _isOwn(ns) ? nullptr : ns.c_str();
 
   const size_t stored = _storage.blobLength(key.c_str(), target);
@@ -175,7 +175,7 @@ void WebNvsModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
       return;
     }
 
-    const uint32_t jobId = portal.jobs().submit([this, ns]() { return _listJob(ns); });
+    const uint32_t jobId = portal.jobs().submit([this, ns]() { return listJson(ns); });
     if (jobId == 0) {
       request->send(503, "application/json", webjson::error("Job queue is full, try again"));
       return;
@@ -202,7 +202,7 @@ void WebNvsModule::registerRoutes(AsyncWebServer& server, WebPortal& portal) {
       return;
     }
 
-    const uint32_t jobId = portal.jobs().submit([this, key, ns]() { return _blobJob(key, ns); });
+    const uint32_t jobId = portal.jobs().submit([this, key, ns]() { return blobJson(key, ns); });
     if (jobId == 0) {
       request->send(503, "application/json", webjson::error("Job queue is full, try again"));
       return;

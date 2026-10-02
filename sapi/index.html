@@ -384,6 +384,15 @@ tr.active > td:first-child { box-shadow: inset 2px 0 0 var(--ok); font-weight: 6
   cursor: pointer; padding: 2px 3px; border-radius: 4px; overflow-wrap: anywhere; }
 .fs-crumbs button:hover { background: #ffffff12; }
 .fs-crumbs .sep { color: var(--muted); }
+#nvs-table td { vertical-align: baseline; }
+#nvs-table td.val { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#nvs-table tbody tr[data-nvs-view] { cursor: pointer; }
+#nvs-table tbody tr[data-nvs-view]:hover > td { background: #ffffff0a; }
+#nvs-value { margin-top: 10px; }
+#nvs-view { background: #0e1116; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+  margin-top: 8px; white-space: pre; max-height: 50vh; overflow: auto;
+  font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 #fs-table td.n { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: var(--font-size-small)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 textarea { background: var(--bg); border: 1px solid var(--line); color: var(--text);
@@ -593,6 +602,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
   <button data-tab="ecoflow-status">EcoFlow</button>
   <button data-tab="mqtt-status">MQTT</button>
   <button data-tab="files">Files</button>
+  <button data-tab="nvs">NVS</button>
   <button data-tab="commands">Commands</button>
   <button data-tab="log">Log</button>
 </nav>
@@ -636,6 +646,13 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       <button id="btn-fs-refresh" class="act ghost" disabled>Refresh</button>
     </h2>
     <div id="fs-out"><p class="muted">-</p></div>
+  </section>
+
+  <section data-tab="nvs">
+    <h2 class="hrow">nvs-list <span class="spacer"></span>
+      <button id="btn-nvs-refresh" class="act ghost" disabled>Refresh</button>
+    </h2>
+    <div id="nvs-out"><p class="muted">-</p></div>
   </section>
 
   <section data-tab="commands">
@@ -1362,6 +1379,93 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     else requestFsList(el.dataset.fsCd || el.dataset.fsOpen);
   });
 
+  // NVS ('nvs-list' + 'nvs-blob') - той самий одноразовий запит поза COMMANDS.
+  // Namespace (nvsNs) і фільтр (nvsFilter) - стан сторінки: фільтр локальний,
+  // по останньому знімку (як на порталі), namespace міняє запит.
+  let nvsNs = '';
+  let nvsFilter = '';
+  let lastNvsList = null;
+  let nvsView = null; // { meta, text } - переглядач Value, поза DOM (див. fsPreview)
+  let nvsPendingId = null;
+  let nvsTimeoutTimer = null;
+  let nvsBlobPendingId = null;
+  let nvsBlobTimeoutTimer = null;
+
+  function requestNvsList(ns) {
+    if (!client || !client.connected) return;
+    if (ns !== undefined) nvsNs = ns;
+    const id = Math.floor(Math.random() * 1e9);
+    if (nvsTimeoutTimer) clearTimeout(nvsTimeoutTimer);
+    nvsTimeoutTimer = setTimeout(() => {
+      nvsPendingId = null;
+      logEvent('err', reqTopic('nvs-list'), null, `timeout ${CMD_REQUEST_TIMEOUT_MS / 1000}s - no reply`);
+    }, CMD_REQUEST_TIMEOUT_MS);
+    nvsPendingId = id;
+    const topic = reqTopic('nvs-list');
+    const payload = JSON.stringify({ id, args: { ns: nvsNs } });
+    client.publish(topic, payload);
+    logEvent('out', topic, payload);
+  }
+
+  function paintNvsView() {
+    const box = $('#nvs-view');
+    if (!box) return;
+    $('#nvs-view-meta').textContent = nvsView ? nvsView.meta : '';
+    box.textContent = nvsView ? nvsView.text : 'Nothing selected.';
+  }
+
+  function renderNvsPanel() {
+    $('#nvs-out').innerHTML = renderNvsList(lastNvsList, nvsFilter);
+    paintNvsView();
+  }
+
+  // Як showNvsView() порталу: не-блоб уже є в списку, блоб довантажується.
+  function showNvsView(key) {
+    const entry = lastNvsList && lastNvsList.entries.find((e) => e.key === key);
+    if (!entry) return;
+    if (entry.type !== 'blob') {
+      const parsed = nvsAsJson(entry.value);
+      nvsView = { meta: `${key} · ${entry.type}`,
+        text: entry.value.length === 0 ? '(empty)' : (parsed === null ? entry.value : JSON.stringify(parsed, null, 2)) };
+      paintNvsView();
+      return;
+    }
+    nvsView = { meta: `${key} · blob`, text: 'reading…' };
+    paintNvsView();
+    if (!client || !client.connected) return;
+    const id = Math.floor(Math.random() * 1e9);
+    if (nvsBlobTimeoutTimer) clearTimeout(nvsBlobTimeoutTimer);
+    nvsBlobTimeoutTimer = setTimeout(() => {
+      nvsBlobPendingId = null;
+      nvsView = { meta: `${key} · blob`, text: `timeout ${CMD_REQUEST_TIMEOUT_MS / 1000}s - no reply` };
+      paintNvsView();
+    }, CMD_REQUEST_TIMEOUT_MS);
+    nvsBlobPendingId = id;
+    const topic = reqTopic('nvs-blob');
+    const payload = JSON.stringify({ id, args: { key, ns: lastNvsList.namespace } });
+    client.publish(topic, payload);
+    logEvent('out', topic, payload);
+  }
+
+  $('#btn-nvs-refresh').addEventListener('click', () => requestNvsList());
+  $('#nvs-out').addEventListener('click', (ev) => {
+    const el = ev.target.closest('[data-nvs-view]');
+    if (el) showNvsView(el.dataset.nvsView);
+  });
+  $('#nvs-out').addEventListener('change', (ev) => {
+    if (ev.target.id !== 'nvs-ns') return;
+    nvsView = null;
+    nvsFilter = '';
+    requestNvsList(ev.target.value);
+  });
+  $('#nvs-out').addEventListener('input', (ev) => {
+    if (ev.target.id !== 'nvs-filter' || !lastNvsList || !lastNvsList.ok) return;
+    nvsFilter = ev.target.value;
+    const parts = nvsTableParts(lastNvsList, nvsFilter);
+    $('#nvs-count').textContent = parts.count;
+    $('#nvs-table tbody').innerHTML = parts.rows;
+  });
+
   // Preview файла ('fs-read'): байти приходять шматками base64, по одному
   // запиту на шматок (послідовно - наступний лише після відповіді на попередній).
   // Стан Preview (fsPreview) лежить поза DOM: renderFsList() перемальовує всю
@@ -2039,6 +2143,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
     label.textContent = { off: 'disconnected', connecting: 'connecting...', on: 'connected' }[state];
     for (const cmd of COMMANDS) panels[cmd].refreshBtn.disabled = state !== 'on';
     $('#btn-fs-refresh').disabled = state !== 'on';
+    $('#btn-nvs-refresh').disabled = state !== 'on';
 
     // Вкладки System/Wi-Fi/EcoFlow/Log мають сенс лише з живими даними -
     // поки не connected, показувати їх порожніми ("-" у кожній) створює
@@ -2135,6 +2240,7 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
       for (const cmd of COMMANDS) requestCmd(cmd);
       requestWifiConnections(); // saved profiles - поза COMMANDS, той самий безумовний перший запит
       requestFsList(); // Files - так само поза COMMANDS
+      requestNvsList();
       requestCommandsList();
     });
 
@@ -2250,6 +2356,39 @@ details.raw pre { margin: 6px 0 0; font-size: var(--font-size-small); line-heigh
           paintFsPreview();
         } else {
           logEvent('err', topic, null, `fs-list error: ${msg.error || 'unknown'}`);
+        }
+        return;
+      }
+
+      // 'nvs-list' / 'nvs-blob' - одноразові запити поза COMMANDS.
+      if (topic === replyTopic('nvs-list') || topic === replyTopic('nvs-blob')) {
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch (e) {
+          return;
+        }
+        const isList = topic === replyTopic('nvs-list');
+        if (msg.id !== (isList ? nvsPendingId : nvsBlobPendingId)) return; // застаріла відповідь
+        if (isList) { clearTimeout(nvsTimeoutTimer); nvsPendingId = null; }
+        else { clearTimeout(nvsBlobTimeoutTimer); nvsBlobPendingId = null; }
+        if (!msg.ok) {
+          logEvent('err', topic, null, `${isList ? 'nvs-list' : 'nvs-blob'} error: ${msg.error || 'unknown'}`);
+          return;
+        }
+        if (isList) {
+          lastNvsList = msg.data;
+          if (msg.data.ok) nvsNs = msg.data.namespace;
+          renderNvsPanel();
+        } else if (!msg.data.ok) {
+          nvsView = { meta: nvsView ? nvsView.meta : '', text: msg.data.message || 'Cannot read blob' };
+          paintNvsView();
+        } else {
+          const base = nvsView ? nvsView.meta.replace(/ · blob.*$/, '') : '';
+          nvsView = { meta: `${base} · blob · ${msg.data.size} bytes`
+              + (msg.data.truncated ? ` (first ${msg.data.hex.length / 2} shown)` : ''),
+            text: hexDump(hexToBytes(msg.data.hex)) };
+          paintNvsView();
         }
         return;
       }
