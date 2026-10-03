@@ -69,6 +69,7 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 | IMU (`BOARD_HAS_IMU`) | — | — | — | — | **QMI8658A** ⁵ | — | — | — |
 | I²C (`I2C_SDA`/`I2C_SCL`) | 19 / 45 | — | — | — | **18 / 19** | — | — | — |
 | Light sensor (`LIGHT_SENSOR_PIN`) | — | — | GPIO34 | — | — | — | — | — |
+| Акумулятор (`BOARD_HAS_BATTERY_ADC`) | — | — | — | — | **GPIO0**, дільник 1:3 | — | — | — |
 | Кнопки (`PRIMARY_BUTTON_PIN` / `SECONDARY_BUTTON_PIN`) | — | GPIO0 | GPIO0 | GPIO0 / GPIO35 | **GPIO9** ⁶ | **GPIO9** | — ¹⁰ | GPIO0 |
 | LED (`BLINK_LED_PIN`) ¹⁶ | — | — | — | — | — | — | **GPIO8** | GPIO2 |
 | MQTT-бекенд ⁷ | PicoMQTT | PicoMQTT | PicoMQTT | PicoMQTT | PicoMQTT | PicoMQTT | PicoMQTT | **PubSubClient** |
@@ -192,8 +193,7 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 
 ¹⁰ `esp32-c3` (SuperMini) — **єдина плата проєкту без екрана**. `BOARD_HAS_DISPLAY=0` перемикає
   `lib/Display/DisplayDriver.hpp` на заглушку `include/Setup_Headless.h`: клас із API `TFT_eSPI`, у якого всі
-  методи порожні й inline. Прикладний код (`src/main.cpp`, `lib/Display/*`, `src/ntp.h`,
-  `src/setup.h`) лишається спільним з рештою плат — обвішувати `#if BOARD_HAS_DISPLAY` кілька
+  методи порожні й inline. Прикладний код (`src/Screen/*`, `lib/Display/*`) лишається спільним з рештою плат — обвішувати `#if BOARD_HAS_DISPLAY` кілька
   сотень викликів `display.*` у файлі на 4000+ рядків означало б тримати дві гілки одного файлу.
   Замість цього компілятор викидає ці виклики цілком: у прошивці немає ні графічної бібліотеки,
   ні буферів кадру (`display` — 168 байт, майже все з них — `TLogger`; `displayDriver` — 20 байт).
@@ -351,6 +351,7 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 | `BOARD_HAS_TOUCHSCREEN` | явний | `lib/TouchScreen`, драйвер у `src-<board>/`, жести | 12.8 КБ | 0.6 КБ |
 | `HAS_DINO_GAME` | явний | `lib/DinoGame` + `src/Dino/`: гра, спрайти, команда `dino` | 9.7 КБ | 0.5 КБ |
 | `BOARD_HAS_IMU` | явний | `lib/Imu` + реалізація плати; автофліп екрана | 2.2 КБ | 16 Б |
+| `BOARD_HAS_BATTERY_ADC` | явний (не від піна: на `esp32-c6` це GPIO0) | `src/System/Battery.cpp`: команда `battery` (напруга Li-Po через дільник BAT_ADC) | не міряно | — |
 | `HAS_MQTT_CLIENT` | від `lib_deps` (PicoMQTT / PubSubClient) | `lib/MqttClient`: підписки, heartbeat, LWT, команди по MQTT | не ізолюється, див. нижче | |
 | `HAS_PING_LIB` | від `lib_deps` (`ESPping` / `ESP8266Ping`) | `doPing()` у `loop()`; без бібліотеки — порожня заглушка | 0 (не встановлена) | 0 |
 | `BOARD_HAS_DISPLAY` | явний | графічний бекенд, `Display`, годинник, фони; `=0` тягне за собою `DISPLAY_SPLIT_COUNT=0`, `HAS_DINO_GAME=0` | не міряний (немає env, де вимикається окремо) | |
@@ -391,7 +392,7 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 **`HAS_PING_LIB` = 0 на чотирьох env.** `ESPping` є в `lib_deps` лише в
 `esp32-4848s040`, `esp32-s3-lcd147`, `esp32-st7789`, `ttgo-t1`. На обох C6, C3
 і ESP8266 бібліотеки немає, тому `doPing()` там — порожня заглушка
-(`src/ping.h`), хоч виклик у `loop()` і стоїть.
+(`src/Net/Ping.cpp`), хоч виклик у `loop()` і стоїть.
 
 #### Веб-портал на ESP8266: технічно можливий, практично — ні
 
@@ -541,7 +542,7 @@ MQTT — навпаки, lossy: краще пропустити рядок, ні
 ### `Serial.flush()` на USB CDC ВИКИДАЄ буфер, а не дочікує його
 
 Не наша вигадка, а заміряна поведінка платформи, і вона ламає рівно те, що мала
-б рятувати. На платах із native USB CDC у `src/setup.h` стоїть
+б рятувати. На платах із native USB CDC у `setupSerial()` (`src/System/SerialSetup.cpp`) стоїть
 `Serial.setTxTimeoutMs(0)` (без нього `print()` вішається, коли хост не читає —
 див. коментар там). Побічний ефект: `Serial.flush()` у цьому режимі **скидає**
 ще не відправлений TX замість того, щоб дочекатись його відправлення.
@@ -1194,7 +1195,7 @@ EcoFlow-блок і показувалась не та конфігурація 
   `routerApi`) лишається в самому модулі (`src/Screen/ScreenControl.cpp`, `src/Router/RouterTest.cpp` тощо). Ключі NVS
   `CFG_*` і дефолт `WATCHDOG_ENABLED` — `src/App/ConfigKeys.hpp`.
 - **`NetworkSupervisor::_connections`** — FSM, arduino events, `loop()`
-  (`src/netcli.h`, `WebWifiModule`). `connections()` і `getConnection()`
+  (`src/Net/NetCli.cpp`, `WebWifiModule`). `connections()` і `getConnection()`
   віддають посилання/вказівник **без замка**; ⚠ записи через них з `loop()`
   і FSM, що тримає вказівники під час `_connectTo()`, — відома гонка.
   Новий код — через методи NS.
@@ -1217,8 +1218,8 @@ EcoFlow-блок і показувалась не та конфігурація 
 
 ### Модулі `src/`: де що лежить
 
-`src/main.cpp` поступово розноситься по модулях за фічею (план —
-рефакторинг `main.cpp`, кроки 2–4). Модуль = фіча: її `setupXxx()`,
+`src/main.cpp` — лише `setup()`/`loop()` і `setupSerialCommander()`
+(список `register*Commands()` і підключення `CommandQueue`). Модуль = фіча: її `setupXxx()`,
 `registerXxxCommands(SerialCommander&)` і власний стан разом, а `#if` фічі
 обгортає файл один раз, а не кожен виклик.
 
@@ -1230,8 +1231,8 @@ EcoFlow-блок і показувалась не та конфігурація 
 | `src/BackgroundImages.{hpp,cpp}` | малювання фону (`drawBackgroundImage()`), вшиті/PROGMEM-зображення | `loop()` |
 | `src/Screen/Screen.hpp` | інтерфейс режиму екрана: `drawStrip()`, `update()`, `enter()`/`leave()`, `realtime()` (без `doPing()`/`ecoflow.loop()`), `overlays()` (іконка WiFi, debug-рамка), кнопка й тач; довге утримання кнопки за замовчуванням → `main` | — |
 | `src/Screen/ScreenManager.{hpp,cpp}` | `screens`: один активний екран, перший доданий — основний. `request()` лише запам'ятовує (малювати з команди — дедлок SPI), перемикання й очищення смуг — у `loop()`. Реєстр екранів плати й маршрутизація тачу — `setupScreens()`; команда `screen` | `loop()` → `screens.loop()`; кнопки — cron `setupButtons()` (`src/Input/Buttons.cpp`) |
-| `src/Screen/MainScreen.*`, `DinoScreen.*`, `DinoSpritesScreen.hpp`, `TestGfxScreen.*` | екрани `main` (фон + інфо + годинник; `drawSystemInfo()`/`drawTime()` поки в `main.cpp`), `dino` (рендерер, `setupDinoGame()`, команда `dino`), `dino-sprites`, `test-gfx` (команда `test-gfx`) | `screens` |
-| `src/Screen/ScreenControl.{hpp,cpp}` | `showClock`, `isAutoBrightness`, `display_brightness()`/`_apply()`, `display_flip()`, `show_clock()`; `loadScreenSettings()` (годинник/яскравість з NVS), `setupLightSensor()` (автояскравість, `BOARD_HAS_LIGHT_SENSOR`); команди `flip`, `clock`, `brightness` | будь-який екран, `setup()` |
+| `src/Screen/MainScreen.*`, `DinoScreen.*`, `DinoSpritesScreen.hpp`, `TestGfxScreen.*` | екрани `main` (фон + `drawSystemInfo()` + `drawTime()`, обидві в `MainScreen.cpp`), `dino` (рендерер, `setupDinoGame()`, команда `dino`), `dino-sprites`, `test-gfx` (команда `test-gfx`) | `screens` |
+| `src/Screen/ScreenControl.{hpp,cpp}` | `setupDisplay()`, `showClock`, `isAutoBrightness`, `display_brightness()`/`_apply()`, `display_flip()`, `show_clock()`; `loadScreenSettings()` (годинник/яскравість з NVS), `setupLightSensor()` (автояскравість, `BOARD_HAS_LIGHT_SENSOR`); команди `flip`, `clock`, `brightness` | будь-який екран, `setup()` |
 | `src/Screen/WifiIcon.{hpp,cpp}` | `setupWiFiIcon()`: іконка стану WiFi поверх екрана | `setup()` |
 | `src/Mqtt/MqttSetup.{hpp,cpp}` | `setupMqttClient()`: колбеки конекту (discovery), runtime-префікс, heartbeat, `command/<id>` → `CommandQueue` (`mqttReplyTarget()`), LWT інших плат, light-sensor, SAPI; команди `dump-mqtt`/`publish`/`mqtt-prefix`/`console-mqtt` | `setup()` |
 | `src/Input/*` | `Input.hpp`: `setupI2C()`/`i2cScan()` (`I2cBus.cpp`), `setupImu()`/`updateImuFlip()` (`Imu.cpp`), `setupTouchScreen()` + verbose-логи жестів (`Touch.cpp`), `setupButtons()` (`Buttons.cpp`: лише виявлення подій кнопки, дію вирішує екран); команди `i2cscan`, `imu` | `setup()`; `updateImuFlip()` — `loop()` |
@@ -1242,10 +1243,19 @@ EcoFlow-блок і показувалась не та конфігурація 
 | `src/Mqtt/Discovery.{hpp,cpp}` | `publishDiscovery()`: retained `devices/<id>/discovery`, `board` = `BOARD_NAME` з `environment.h` | `onConnect`-колбек у `setupMqttClient()` (таск `mqtt-net`) |
 | `src/System/SystemStatus.{hpp,cpp}` | `dumpSystemInfo()`, `dumpStatus()`; команди `heap`, `heap-watch`, `status sys\|cfg\|sd\|flash\|littlefs` | `setup()`, `setupSerialCommander()` |
 | `src/System/SystemControl.{hpp,cpp}` | `setupWatchdog()` (NVS `watchdog` або `WATCHDOG_ENABLED`); команди `reboot`, `watchdog`, `bootloader` (лише з `HAS_FORCE_DOWNLOAD_BOOT`, детекція в цьому ж файлі) | кінець `setup()` |
+| `src/System/Battery.{hpp,cpp}` | команда `battery`: `analogReadMilliVolts(BATTERY_ADC_PIN)` × `BATTERY_ADC_DIVIDER`, середнє з 16 вимірів; лише з `BOARD_HAS_BATTERY_ADC`. Без акумулятора показує вихід зарядного, а не 0 | `setupSerialCommander()` (таск команд) |
 | `src/System/BlinkLed.{hpp,cpp}` | `setupBlinkLED()`: патерни LED за станом (WiFi/NTP/MQTT/AP) і команда `blink`; лише з `BLINK_LED_PIN` | `setup()` |
 | `src/Mail/MailCommands.{hpp,cpp}` | команди `mailto`, `sendmail`, `smtp-probe`; лише з `HAS_GMAIL_SENDER` | `setupSerialCommander()` |
 | `src/Web/WebPortalSetup.{hpp,cpp}` | `setupWebPortal()` (модулі порталу, `httpServer`); команда `web` | `setup()`, `setupSerialCommander()` |
 | `src/Router/RouterTest.{hpp,cpp}` | `routerApi` (AsusWRT); команди `dump-asuswrt` (живий роутер), `dump-asuswrt2` (парсер на `/asus-get_clientlist.json` з LittleFS, коли роутер недоступний) | `setupSerialCommander()` |
+| `src/Net/NetworkSetup.{hpp,cpp}` | `setupNetworkSupervisor()`: конфіг AP/hostname, профілі з NVS → засів з LittleFS → прошитий перелік (`src/WifiNetworks.hpp`), лог подій FSM (`NetworkEventLogger`) | `setup()` |
+| `src/Net/NetCli.{hpp,cpp}` | команда `net` (nmcli-стиль), псевдонім `scan`; `importNetProfilesFromFs()` | `setupSerialCommander()`, `setupNetworkSupervisor()` |
+| `src/Net/WifiScan.{hpp,cpp}` | `wifiScan()`: таблиця ефіру у форматі `nmcli device wifi list` | `net device wifi`, `scan` |
+| `src/Net/Ping.{hpp,cpp}` | `doPing()` (⚠ блокує `loop()` до ~1 с раз на 5 с), `dumpPingStatsStr()`; без `HAS_PING` — inline-заглушки | `loop()`, `drawSystemInfo()` |
+| `src/Net/Ntp.{hpp,cpp}` | `setupNtpService()`: TZ Europe/Kyiv, сервери, лог синхронізації | `setup()` |
+| `src/System/SerialSetup.{hpp,cpp}` | `setupSerial()`: `Serial`, `setTxTimeoutMs(0)` на native USB CDC, журнал + `SerialSink` | перший крок `setup()` |
+| `src/System/Storage.{hpp,cpp}` | `setupLittleFS()`, `setupConfigStorage()` (NVS, namespace = `PIO_PIOENV`) | `setup()` |
+| `src/System/JournalCli.{hpp,cpp}` | команди `journal`/`log`: приймачі, кільце, `tail`, рівні за тегом | `setupSerialCommander()` |
 
 ### SD-картка: усі команди й місця, що з нею працюють
 
@@ -1486,6 +1496,17 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **Крок 4 рефакторингу: `src/*.h` → модулі `.hpp`+`.cpp`.**
+  `netcli.h` → `src/Net/NetCli.*` (тепер з `scan`, без другої копії
+  `knownSsids`), `wifi.h` → `src/Net/WifiScan.*` (`WiFi_scan()` →
+  `wifiScan()`), `ping.h`/`ntp.h` → `src/Net/Ping.*`/`Ntp.*`, `setup.h` →
+  `src/System/SerialSetup.*` + `setupDisplay()` у `ScreenControl`,
+  `journalcli.h` → `src/System/JournalCli.*`; із `main.cpp` винесено
+  `setupNetworkSupervisor()` (`src/Net/NetworkSetup.*`),
+  `setupLittleFS()`/`setupConfigStorage()` (`src/System/Storage.*`),
+  `drawSystemInfo()`/`drawTime()` (у `MainScreen.cpp`). Прибрано мертві
+  `WiFi_getProtocolName()`, `ntpServer1..3`/`gmtOffset_sec` і закоментований
+  код у NTP-колбеку. `main.cpp`: 730 → ~270 рядків.
 - 2026-10-03 — **Крок 3.4 рефакторингу: `src/System/*`, `src/Mail/*`,
   `src/Web/*`, `src/Router/*`, `src/Screen/WifiIcon.*`.** Із `main.cpp`
   винесено статус/heap, reboot/watchdog/bootloader, blink, пошту, веб-портал,

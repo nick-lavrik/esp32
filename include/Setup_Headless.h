@@ -2,7 +2,7 @@
 // TFT_eSPI-сумісна ЗАГЛУШКА для плат БЕЗ дисплея (BOARD_HAS_DISPLAY=0).
 //
 // НАВІЩО: спільний прикладний код проєкту (src/main.cpp, lib/Display/*,
-// src/ntp.h, src/setup.h, src/BackgroundImages.*) написаний під API
+// src/Screen/*, src/BackgroundImages.*) написаний під API
 // TFT_eSPI і кличе display.*/tft.* у сотнях місць. Обвішувати їх усі
 // "#if BOARD_HAS_DISPLAY" - це кілька сотень правок у файлі на 4000+
 // рядків, з ризиком розсинхронити гілки при кожній наступній зміні.

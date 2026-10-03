@@ -22,7 +22,7 @@
 // ГОЛОВНЕ для цієї плати: дисплея немає взагалі. BOARD_HAS_DISPLAY=0
 // перемикає lib/Display/DisplayDriver.hpp на заглушку include/Setup_Headless.h -
 // клас з API TFT_eSPI, у якого всі методи порожні й inline. Прикладний
-// код (src/main.cpp, lib/Display/*, src/ntp.h, src/setup.h) лишається
+// код (src/Screen/*, lib/Display/*) лишається
 // спільним з іншими платами, але компілятор викидає з нього весь вивід
 // на екран.
 #define BOARD_HAS_DISPLAY 0
@@ -64,7 +64,7 @@
 // бібліотечним дефолтом (4). Замість прямого TLS - MQTT-проксі (розділ 5).
 #define HAS_ECOFLOW_CLIENT 1
 
-// Пінг (src/ping.h) вимкнено - dvarrel/ESPping відсутній у lib_deps цього
+// Пінг (src/Net/Ping.cpp) вимкнено - dvarrel/ESPping відсутній у lib_deps цього
 // env. Опис принципу в env:esp32-4848s040.
 #define HAS_PING 0
 

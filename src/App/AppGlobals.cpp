@@ -189,7 +189,7 @@ HttpServer httpServer(HttpServerConfig{});
 
 // Менеджер WiFi: тримає список мереж у NVS (namespace той самий, що й у
 // configStorage - PIO_PIOENV) і сам веде підключення. Керується командою 'net',
-// див. src/netcli.h.
+// див. src/Net/NetCli.cpp.
 NetworkSupervisor netSupervisor(&configStorage);
 
 #if HAS_WEB_PORTAL

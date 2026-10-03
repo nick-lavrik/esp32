@@ -51,7 +51,7 @@
 
 // HAS_GMAIL_SENDER - явний прапорець з src-<env>/environment.h (розділ 2),
 // не виведений з __has_include(): той самий принцип, що й HAS_WEB_PORTAL/
-// HAS_PING (CLAUDE.md, src/ping.h) - компілятор і IDE-індексатор мають
+// HAS_PING (CLAUDE.md, src/Net/Ping.cpp) - компілятор і IDE-індексатор мають
 // бачити ОДНЕ й те саме значення.
 #ifndef HAS_GMAIL_SENDER
 #error "HAS_GMAIL_SENDER is not defined - add #define HAS_GMAIL_SENDER 0/1 to this env's environment.h"

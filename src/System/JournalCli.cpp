@@ -1,5 +1,3 @@
-#pragma once
-
 // Команда 'journal' - вікно в шину логу: хто читає, чи встигає, і які рівні
 // пропускаються за тегом.
 //
@@ -13,6 +11,8 @@
 // після 'journal level default error' команда мовчатиме. Лікується наосліп -
 // 'journal level journal info'.
 
+#include "JournalCli.hpp"
+
 #include <Arduino.h>
 
 #include <Journal.hpp>
@@ -25,7 +25,7 @@ static const TLogger logger{"journal"};
 
 // Токенайзер тут навмисно свій і мінімальний: аргументи команди - це тег і
 // рівень, тобто слова без пробілів. Повний розбір із лапками живе в
-// src/netcli.h, і тягнути його сюди заради трьох токенів не варто (там він
+// src/Net/NetCli.cpp, і тягнути його сюди заради трьох токенів не варто (там він
 // потрібен через SSID із пробілом).
 static String token(const String& line, int index) {
   int start = 0;
@@ -50,10 +50,9 @@ static void printSinks() {
     // LAG - скільки записів приймач ще не забрав. Ненульовий у момент виводу
     // це норма (сам цей рядок туди щойно ліг); стабільно великий - приймач не
     // встигає, і для lossy це майбутні пропуски.
-    logger.info("%-12s  %-8s  %-7s  %3u  %7u  %s", sink.name,
-                sink.pattern[0] != '\0' ? sink.pattern : "*",
-                journalLevelFullName(sink.level), (unsigned)(head - sink.cursor),
-                (unsigned)sink.dropped, sink.lossless ? "lossless" : "lossy");
+    logger.info("%-12s  %-8s  %-7s  %3u  %7u  %s", sink.name, sink.pattern[0] != '\0' ? sink.pattern : "*",
+                journalLevelFullName(sink.level), (unsigned)(head - sink.cursor), (unsigned)sink.dropped,
+                sink.lossless ? "lossless" : "lossy");
   }
 }
 
@@ -75,10 +74,9 @@ static void printLevels() {
 
 static void printStats() {
   Journal& journal = Journal::instance();
-  logger.info("ring: %u entries x %u bytes = %u bytes; seq head %u, tail %u",
-              (unsigned)Journal::kCapacity, (unsigned)sizeof(JournalEntry),
-              (unsigned)(Journal::kCapacity * sizeof(JournalEntry)), (unsigned)journal.head(),
-              (unsigned)journal.tail());
+  logger.info("ring: %u entries x %u bytes = %u bytes; seq head %u, tail %u", (unsigned)Journal::kCapacity,
+              (unsigned)sizeof(JournalEntry), (unsigned)(Journal::kCapacity * sizeof(JournalEntry)),
+              (unsigned)journal.head(), (unsigned)journal.tail());
   printSinks();
 }
 
@@ -131,8 +129,7 @@ static void printHelp() {
   logger.info("journal level <tag>          show effective level for a tag");
   logger.info("journal level <tag> <lvl>    set level; tag 'default' sets the fallback");
   logger.info("journal level <tag> off      drop the rule for a tag");
-  logger.info("journal tail [n]             last n entries (n <= %u here)",
-              (unsigned)(Journal::kCapacity / 2));
+  logger.info("journal tail [n]             last n entries (n <= %u here)", (unsigned)(Journal::kCapacity / 2));
   logger.info("levels: error warn info debug verbose (or 0..4)");
   logger.info("tags are hierarchical: 'mqtt' also covers 'mqtt.send'");
 }
@@ -159,8 +156,7 @@ static void handleLevel(const String& args) {
   }
 
   if (!isDefault && (value == "off" || value == "clear" || value == "-")) {
-    logger.info(journal.clearLevel(tag.c_str()) ? "rule for '%s' removed" : "no rule for '%s'",
-                tag.c_str());
+    logger.info(journal.clearLevel(tag.c_str()) ? "rule for '%s' removed" : "no rule for '%s'", tag.c_str());
     return;
   }
 
@@ -176,8 +172,7 @@ static void handleLevel(const String& args) {
     return;
   }
   if (!journal.setLevel(tag.c_str(), level)) {
-    logger.error("no room for another rule (max %u) or tag too long",
-                 (unsigned)Journal::kMaxLevelRules);
+    logger.error("no room for another rule (max %u) or tag too long", (unsigned)Journal::kMaxLevelRules);
     return;
   }
   logger.info("%s -> %s", tag.c_str(), journalLevelFullName(level));
@@ -203,7 +198,7 @@ static void dispatch(const String& args) {
 
 }  // namespace journalcli
 
-inline void registerJournalCommand(SerialCommander& commander) {
+void registerJournalCommands(SerialCommander& commander) {
   commander.registerCommand("journal", "log bus: sinks, stats, tail, per-tag levels (journal help)",
                             journalcli::dispatch);
   // Псевдонім: у консолі це набирається щоразу, і довге слово заважає.

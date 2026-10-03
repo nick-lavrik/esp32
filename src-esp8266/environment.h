@@ -46,11 +46,11 @@
 #define HAS_WEB_PORTAL 0
 #define HAS_ECOFLOW_CLIENT 0
 
-// Пінг (src/ping.h) вимкнено - ESP8266Ping.h НЕ вбудований у поточний
+// Пінг (src/Net/Ping.cpp) вимкнено - ESP8266Ping.h НЕ вбудований у поточний
 // ESP8266 Arduino core (перевірено `find` по системі - файла немає
 // ніде) і не доданий у lib_deps цього env: старий коментар у ping.h
 // ("вбудований у core") був неправдивим - HAS_PING=1 тут падав би
-// #error у src/ping.h з першої ж збірки, саме такою й мала бути реакція.
+// #error у src/Net/Ping.cpp з першої ж збірки, саме такою й мала бути реакція.
 #define HAS_PING 0
 
 // Gmail (lib/GmailSender) - опис принципу в env:esp32-4848s040.

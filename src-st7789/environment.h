@@ -60,7 +60,7 @@
 // docs/tech_debt.md, розділ 4.
 #define HAS_ECOFLOW_CLIENT 1
 
-// Пінг (src/ping.h) вимкнено - dvarrel/ESPping закоментовано в lib_deps
+// Пінг (src/Net/Ping.cpp) вимкнено - dvarrel/ESPping закоментовано в lib_deps
 // цього env. Опис принципу в env:esp32-4848s040.
 #define HAS_PING 0
 

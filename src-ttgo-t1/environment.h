@@ -57,7 +57,7 @@
 // docs/tech_debt.md, розділ 4.
 #define HAS_ECOFLOW_CLIENT 1
 
-// Пінг (src/ping.h) - опис принципу в env:esp32-4848s040. dvarrel/ESPping
+// Пінг (src/Net/Ping.cpp) - опис принципу в env:esp32-4848s040. dvarrel/ESPping
 // присутній у lib_deps цього env.
 #define HAS_PING 1
 

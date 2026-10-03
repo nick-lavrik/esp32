@@ -419,7 +419,7 @@ class NetworkSupervisor {
 // Тип шифрування Wi-Fi у людський рядок.
 //
 // Живе тут, а не в src/, бо потрібен щонайменше трьом місцям: команді 'scan'
-// (src/wifi.h), розділу 'net device wifi list' і веб-порталу
+// (src/Net/WifiScan.cpp), розділу 'net device wifi list' і веб-порталу
 // (lib/WebPortal/WebWifiModule.cpp) - тобто і src/, і lib/. Раніше було дві
 // незалежні копії з РІЗНИМИ назвами станів ("OPEN" проти "open", "WPA2_PSK"
 // проти "WPA2"), хоча коментар в одній із них стверджував, що назви ті самі.

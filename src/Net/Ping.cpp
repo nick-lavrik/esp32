@@ -1,20 +1,15 @@
-#pragma once
+#include "Ping.hpp"
 
-// HAS_PING - явний прапорець з src-<env>/environment.h (розділ 2), не
-// виведений з __has_include(): той самий принцип, що й HAS_WEB_PORTAL/
-// HAS_ECOFLOW_CLIENT там (CLAUDE.md) - компілятор і IDE-індексатор мають
-// бачити ОДНЕ й те саме значення.
-#ifndef HAS_PING
-#error "HAS_PING is not defined - add #define HAS_PING 0/1 to this env's environment.h"
-#endif
+#include <Arduino.h>
 
-// Але сама наявність бібліотеки все одно перевіряється - якщо хтось
+// Наявність бібліотеки перевіряється окремо від HAS_PING (Ping.hpp) - якщо хтось
 // виставить HAS_PING=1 без відповідного lib_dep (чи навпаки забуде
 // прибрати HAS_PING=1 при вимкненні lib_dep), збірка провалюється явно
 // (#error) замість мовчазного "ping ніколи не працює" в рантаймі.
 #if defined(BOARD_ESP8266)
 #if HAS_PING && !__has_include(<ESP8266Ping.h>)
-#error "HAS_PING=1, but ESP8266Ping.h is unavailable - add it to this env's lib_deps (not bundled with the current core, checked 2026-09-23)"
+#error \
+    "HAS_PING=1, but ESP8266Ping.h is unavailable - add it to this env's lib_deps (not bundled with the current core, checked 2026-09-23)"
 #endif
 #else
 #if HAS_PING && !__has_include(<ESPping.h>)
@@ -22,24 +17,20 @@
 #endif
 #endif
 
-#if !HAS_PING
-
-void doPing() { ; }
-char* dumpPingStatsStr() { return nullptr; }
-
-#else
+#if HAS_PING
 
 #if defined(BOARD_ESP8266)
-#include <ESP8266WiFi.h>
 #include <ESP8266Ping.h>  // НЕ вбудований у поточний core (перевірено 2026-09-23,
-                          // "find / -iname ESP8266Ping.h" - нуль збігів) - потрібен
-                          // окремий lib_dep, якщо колись HAS_PING=1 тут стане реальним
+#include <ESP8266WiFi.h>
+// "find / -iname ESP8266Ping.h" - нуль збігів) - потрібен
+// окремий lib_dep, якщо колись HAS_PING=1 тут стане реальним
 #else
-#include <WiFi.h>
 #include <ESPping.h>
+#include <WiFi.h>
 #endif
 
-// --- Пінг ---
+namespace {
+
 const char* pingHost = "8.8.8.8";
 
 #define PING_INTERVAL_MS 5000
@@ -52,6 +43,10 @@ int currentPing = -1;  // -1 = timeout/помилка
 int minPing = 0, maxPing = 0;
 long pingSum = 0;
 int pingCount = 0;
+
+char pingDumpStr[48];
+
+}  // namespace
 
 void doPing() {
   static uint32_t lastUpdateMs = 0;
@@ -84,20 +79,19 @@ void doPing() {
   }
 }
 
-char pingDumpStr[48];
 char* dumpPingStatsStr() {
   int avgPing = pingCount > 0 ? (int)(pingSum / pingCount) : 0;
 
   // snprintf, не sprintf: буфер фіксований, а значення пінгу приходять від
   // мережі й теоретично можуть бути чотири- і більше-значними.
   if (currentPing < 0) {
-    snprintf(pingDumpStr, sizeof(pingDumpStr), "PING: FAIL   %3d / %3d / %3d ms\n", minPing, avgPing,
-             maxPing);
+    snprintf(pingDumpStr, sizeof(pingDumpStr), "PING: FAIL   %3d / %3d / %3d ms\n", minPing, avgPing, maxPing);
   } else {
-    snprintf(pingDumpStr, sizeof(pingDumpStr), "PING: %3dms  %3d / %3d / %3d ms\n", currentPing,
-             minPing, avgPing, maxPing);
+    snprintf(pingDumpStr, sizeof(pingDumpStr), "PING: %3dms  %3d / %3d / %3d ms\n", currentPing, minPing, avgPing,
+             maxPing);
   }
 
   return pingDumpStr;
 }
-#endif
+
+#endif  // HAS_PING

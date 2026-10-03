@@ -647,7 +647,7 @@ serial-команди виявиться мало.
 | Метрика | Де зараз | Проблема |
 | :--- | :--- | :--- |
 | loop rate | `Display::loopFrameRate()` (`lib/Display`) | рахує той, хто *питає*: лічильник росте на кожен виклик, тому в грі його доводиться кликати з `loop()` окремо, а команда `dino` (звіт `loop N/s -> game N fps`) сама його накручує; без дисплея (`esp32-c3`) метрики по суті немає |
-| ping | глобали `currentPing`/`minPing`/`maxPing` у `src/ping.h` | блокуючий `Ping.ping()` у `loop()` (до ~1 с раз на 5 с) |
+| ping | глобали `currentPing`/`minPing`/`maxPing` у `src/Net/Ping.cpp` | блокуючий `Ping.ping()` у `loop()` (до ~1 с раз на 5 с) |
 | heap | ~20 прямих `ESP.getFreeHeap()`/`getMaxAllocHeap()` у `src/System/SystemStatus.cpp`, `src/main.cpp` і `WebSystemModule`, cron `heap-watch` | кожен читає «зараз», мінімуму за період ніхто не тримає |
 | WiFi | `WiFi.status()`/`WiFi.RSSI()` за місцем, стан FSM — `NetworkSupervisor` | — |
 | MQTT | `MqttClient::publishedCount()`/`receivedCount()`/`subscribeDeniedCount()` | ок, але окремо від решти |
@@ -665,8 +665,8 @@ serial-команди виявиться мало.
 - heap: free / largest block / мінімум за період (`heap_caps_get_minimum_free_size`
   на ESP32);
 - ping: останній / min / max / середній — сам пінг лишається в
-  `src/ping.h`, монітор лише приймає результат (блокування — окремий борг
-  у коментарі `src/ping.h`);
+  `src/Net/Ping.cpp`, монітор лише приймає результат (блокування — окремий борг
+  у коментарі `src/Net/Ping.cpp`);
 - WiFi: стан, RSSI, IP; MQTT: connected + наявні лічильники; uptime,
   причина ресету.
 
@@ -1545,7 +1545,7 @@ RF cal 16 КБ.
   вкладка MQTT не показувала ACL-проблему там, де її немає.
 - `HttpServer::setTemplateResolver()` — заглушка, `ITemplateResolver` не
   реалізований; або дописати, або прибрати разом із полем.
-- `src/netcli.h:626` — чотири попередження `-Wformat` (`%u` проти
+- `src/Net/NetCli.cpp` — чотири попередження `-Wformat` (`%u` проти
   `long unsigned int`) у `cidrToMask()`. Не наше, але шумить у кожній збірці.
 
 ## 7. Відкриті питання — спершу вирішити, чи робити

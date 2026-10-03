@@ -25,8 +25,3 @@ private:
   uint8_t _savedBrightness = 0;
   bool _savedAutoBrightness = false;
 };
-
-// Малювання основного екрана - поки в src/main.cpp (тягнуть ping.h/wifi.h,
-// що ще не окремі TU; рефакторинг main.cpp, крок 4).
-void drawSystemInfo();
-void drawTime();

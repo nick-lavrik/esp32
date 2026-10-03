@@ -64,7 +64,7 @@
 // (LCD), DC=15, RST=21, підсвітка (через транзисторний ключ) = GPIO3.
 //
 // Підсвітку (analogWrite(TFT_BL,...)) і pinMode(TFT_BL, OUTPUT) робить
-// спільний код (lib/Display/TftEspiDriver.cpp, src/setup.h) — тут лише #define TFT_BL,
+// спільний код (lib/Display/TftEspiDriver.cpp, setupDisplay() у src/Screen/ScreenControl.cpp) — тут лише #define TFT_BL,
 // власного PWM-коду не потрібно.
 //
 // TFT_ROTATION / фінальна орієнтація — НЕ перевірені на реальному

@@ -28,7 +28,7 @@
 
 // HAS_CONSOLE_MQTT - явний прапорець з src-<env>/environment.h (розділ 2), не
 // виведений з __has_include(): той самий принцип, що й HAS_MQTT_CLIENT/
-// HAS_PING/HAS_GMAIL_SENDER (CLAUDE.md, src/ping.h) - компілятор і
+// HAS_PING/HAS_GMAIL_SENDER (CLAUDE.md, src/Net/Ping.cpp) - компілятор і
 // IDE-індексатор мають бачити ОДНЕ й те саме значення.
 #ifndef HAS_CONSOLE_MQTT
 #error "HAS_CONSOLE_MQTT is not defined - add #define HAS_CONSOLE_MQTT 0/1 to this env's environment.h"

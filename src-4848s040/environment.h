@@ -57,8 +57,8 @@
 // Heap не вузьке місце: 8 МБ PSRAM.
 #define HAS_ECOFLOW_CLIENT 1
 
-// Пінг (src/ping.h, команда 'ping'). Явний прапорець, як HAS_WEB_PORTAL/
-// HAS_ECOFLOW_CLIENT вище - src/ping.h провалить збірку #error, якщо
+// Пінг (src/Net/Ping.cpp, команда 'ping'). Явний прапорець, як HAS_WEB_PORTAL/
+// HAS_ECOFLOW_CLIENT вище - src/Net/Ping.cpp провалить збірку #error, якщо
 // значення розійдеться з наявністю dvarrel/ESPping у lib_deps нижче.
 #define HAS_PING 1
 

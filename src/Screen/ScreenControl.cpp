@@ -121,3 +121,13 @@ void setupLightSensor() {
 
 #endif
 }
+
+void setupDisplay() {
+#if defined(BOARD_ST7789)
+  pinMode(TFT_BL, OUTPUT);  // st7789
+#endif
+
+  display.init();
+  // display.autobrightness(true);
+  Logger::info("Display setup done.");
+}

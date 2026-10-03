@@ -28,6 +28,9 @@
 #define BOARD_HAS_TOUCHSCREEN 1
 #define BOARD_HAS_IMU 1
 #define BOARD_HAS_SD 1
+// Вимір напруги Li-Po через дільник BAT_ADC (src/System/Battery.cpp,
+// команда 'battery'). Піни й дільник - розділ 4, "Акумулятор".
+#define BOARD_HAS_BATTERY_ADC 1
 // Важкий SD-інструментарій (sdprobe/sdraw/sdbench/sdmap/sdimg/...) - опис у
 // env:esp32-s3-lcd147. Тут вимкнено: картка лише носій (status sd, System).
 #define HAS_SD_WORKBENCH 0
@@ -60,7 +63,7 @@
 // гілці вони no-op, і REST падав би по heap.
 #define HAS_ECOFLOW_CLIENT 1
 
-// Пінг (src/ping.h) вимкнено - dvarrel/ESPping закоментовано в lib_deps
+// Пінг (src/Net/Ping.cpp) вимкнено - dvarrel/ESPping закоментовано в lib_deps
 // цього env. Опис принципу в env:esp32-4848s040.
 #define HAS_PING 0
 
@@ -246,9 +249,17 @@
 //         "заряджає" вічно) - не несправність.
 // Колір кожного зі схеми не видно; на платі червоний і зелений.
 // Прибрати світіння - лише фізично: випаяти R19 / R17 (зарядка лишиться).
-// BAT_ADC: VBAT через дільник R21 200K / R22 100K (VBAT/3) на GPIO0
-// (XTAL_32K_P, ADC1_CH0) - напругу акумулятора можна міряти, у коді не
-// використовується.
+
+// ---------- Акумулятор (BAT_ADC) ----------
+// Джерело - та сама схема (docs/schematics/ESP32-C6-Touch-LCD-1.47-Schematic.pdf):
+// VBAT -> R21 200K -> BAT_ADC -> R22 100K -> GND, на BAT_ADC ще C20 100nF.
+// BAT_ADC заведено на вивід XTAL_32K_P = GPIO0 (ADC1_CH0); кварцу 32 кГц на
+// платі немає, тож пін вільний. Дільник 1:3 - 4.2 В повного акумулятора
+// дають 1.4 В на АЦП, з запасом у межах діапазону 0..3.3 В.
+// Без акумулятора на VBAT лишається вихід зарядного ETA6098 - показ буде
+// "якась напруга", а не 0: відрізнити "нема акумулятора" вимір не вміє.
+#define BATTERY_ADC_PIN 0
+#define BATTERY_ADC_DIVIDER 3  // (R21 + R22) / R22 = (200K + 100K) / 100K
 
 // ============================================================
 // 5. Налаштування фіч

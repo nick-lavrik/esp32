@@ -1,5 +1,3 @@
-#pragma once
-
 // Команда 'net' - керування NetworkSupervisor із serial/MQTT-консолі.
 //
 // Свідомо дзеркалить nmcli: та сама структура "ОБ'ЄКТ ДІЯ [аргументи]", ті самі
@@ -23,18 +21,21 @@
 //             імпортуються: автоматично на порожній список і будь-коли
 //             вручну через 'net connection reload' / 'load'.
 
+#include "NetCli.hpp"
+
 #include <Arduino.h>
 #include <LittleFS.h>
 
+#include <CommandArgs.hpp>
 #include <NetworkSupervisor.hpp>
 #include <NmConnectionIni.hpp>
-#include <CommandArgs.hpp>
 #include <SerialCommander.hpp>
 #include <TLogger.hpp>
 #include <string>
 #include <vector>
 
-#include "wifi.h"
+#include "App/AppGlobals.hpp"
+#include "WifiScan.hpp"
 
 namespace netcli {
 
@@ -88,8 +89,7 @@ static int match(const String& token, const char* const* candidates, size_t coun
   return found;
 }
 
-static void reportMatch(int result, const String& token, const char* const* candidates,
-                        size_t count) {
+static void reportMatch(int result, const String& token, const char* const* candidates, size_t count) {
   if (result == -2) {
     String variants;
     for (size_t i = 0; i < count; ++i) {
@@ -171,8 +171,7 @@ static int matchSetting(const String& token, const char* const* candidates, size
 
 // Іменований аргумент у стилі nmcli: "... password secret priority 5".
 // Повертає порожній рядок, якщо ключа немає.
-static String namedArg(const std::vector<String>& args, size_t from, const char* key,
-                       bool* present = nullptr) {
+static String namedArg(const std::vector<String>& args, size_t from, const char* key, bool* present = nullptr) {
   if (present) *present = false;
   for (size_t i = from; i + 1 < args.size(); ++i) {
     if (args[i].equalsIgnoreCase(key)) {
@@ -189,14 +188,22 @@ static String namedArg(const std::vector<String>& args, size_t from, const char*
 
 static const char* stateName(NetworkSupervisorState s) {
   switch (s) {
-    case NetworkSupervisorState::IDLE:         return "unmanaged";
-    case NetworkSupervisorState::SCANNING:     return "scanning";
-    case NetworkSupervisorState::CONNECTING:   return "connecting";
-    case NetworkSupervisorState::CONNECTED:    return "connected";
-    case NetworkSupervisorState::RECONNECTING: return "reconnecting";
-    case NetworkSupervisorState::WPS_WAITING:  return "wps-waiting";
-    case NetworkSupervisorState::STARTING_AP:  return "starting-ap";
-    case NetworkSupervisorState::AP_MODE:      return "hotspot";
+    case NetworkSupervisorState::IDLE:
+      return "unmanaged";
+    case NetworkSupervisorState::SCANNING:
+      return "scanning";
+    case NetworkSupervisorState::CONNECTING:
+      return "connecting";
+    case NetworkSupervisorState::CONNECTED:
+      return "connected";
+    case NetworkSupervisorState::RECONNECTING:
+      return "reconnecting";
+    case NetworkSupervisorState::WPS_WAITING:
+      return "wps-waiting";
+    case NetworkSupervisorState::STARTING_AP:
+      return "starting-ap";
+    case NetworkSupervisorState::AP_MODE:
+      return "hotspot";
   }
   return "unknown";
 }
@@ -327,8 +334,7 @@ static String exportOne(const WifiConnection& conn) {
   f.close();
 
   if (written != text.size()) {
-    logger.warn("%s: short write (%u of %u B)", path.c_str(), (unsigned)written,
-                (unsigned)text.size());
+    logger.warn("%s: short write (%u of %u B)", path.c_str(), (unsigned)written, (unsigned)text.size());
     return String();
   }
   return path;
@@ -372,14 +378,13 @@ static void printHelp() {
 static void generalStatus(NetworkSupervisor& ns) {
   const bool up = ns.isConnected();
   logger.info("STATE       CONNECTION            IP                SIGNAL  AUTOCONNECT");
-  logger.info("%-10s  %-20s  %-16s  %6s  %s", stateName(ns.state()),
-              up ? ns.currentSsid().c_str() : "--", up ? ns.localIp().c_str() : "--",
-              up ? String(WiFi.RSSI()).c_str() : "--", ns.autoReconnect() ? "yes" : "no");
+  logger.info("%-10s  %-20s  %-16s  %6s  %s", stateName(ns.state()), up ? ns.currentSsid().c_str() : "--",
+              up ? ns.localIp().c_str() : "--", up ? String(WiFi.RSSI()).c_str() : "--",
+              ns.autoReconnect() ? "yes" : "no");
   if (up) {
     // Шлюз і DNS окремим рядком, як IP4.GATEWAY / IP4.DNS у nmcli: без них
     // "IP є, а нічого не працює" неможливо діагностувати з консолі.
-    logger.info("IP4.GATEWAY %s   IP4.DNS %s", WiFi.gatewayIP().toString().c_str(),
-                WiFi.dnsIP().toString().c_str());
+    logger.info("IP4.GATEWAY %s   IP4.DNS %s", WiFi.gatewayIP().toString().c_str(), WiFi.dnsIP().toString().c_str());
   }
   logger.info("%u saved profile(s)", (unsigned)ns.connections().size());
 }
@@ -393,9 +398,10 @@ static void generalHostname(NetworkSupervisor& ns, const std::vector<String>& ar
   cfg.hostname = args[2].c_str();
   ns.setConfig(cfg);
   ns.saveConfig();
-  logger.info("hostname: %s (applies on next reconnect - 'net device disconnect' + 'up',"
-              " or reboot)",
-              cfg.hostname.c_str());
+  logger.info(
+      "hostname: %s (applies on next reconnect - 'net device disconnect' + 'up',"
+      " or reboot)",
+      cfg.hostname.c_str());
 }
 
 static void objectGeneral(NetworkSupervisor& ns, const std::vector<String>& args) {
@@ -465,15 +471,14 @@ static void objectRadio(NetworkSupervisor& ns, const std::vector<String>& args) 
 
 static void deviceStatus(NetworkSupervisor& ns) {
   logger.info("DEVICE  TYPE  STATE       CONNECTION");
-  logger.info("wlan0   wifi  %-10s  %s", stateName(ns.state()),
-              ns.isConnected() ? ns.currentSsid().c_str() : "--");
+  logger.info("wlan0   wifi  %-10s  %s", stateName(ns.state()), ns.isConnected() ? ns.currentSsid().c_str() : "--");
   logger.info("MAC %s", WiFi.macAddress().c_str());
 }
 
 static void deviceWifi(NetworkSupervisor& ns, const std::vector<String>& args) {
   static const char* const verbs[] = {"list", "connect", "hotspot", "rescan", "help"};
   if (args.size() < 3) {
-    WiFi_scan(knownSsids(ns));  // 'net device wifi' == list, як у nmcli
+    wifiScan(knownSsids(ns));  // 'net device wifi' == list, як у nmcli
     return;
   }
   const int v = match(args[2], verbs, 5);
@@ -489,7 +494,7 @@ static void deviceWifi(NetworkSupervisor& ns, const std::vector<String>& args) {
         logger.warn("supervisor is scanning right now, try again in a moment");
         return;
       }
-      WiFi_scan(knownSsids(ns));
+      wifiScan(knownSsids(ns));
       return;
     }
     case 1: {  // connect
@@ -599,9 +604,8 @@ static void connectionShowAll(NetworkSupervisor& ns) {
   const String active = ns.isConnected() ? String(ns.currentSsid().c_str()) : String("");
   logger.info("ID  SSID                              PRIO  AUTOCONNECT  SIGNAL  ACTIVE");
   for (const auto& c : list) {
-    logger.info("%-2u  %-32s  %4d  %-11s  %6s  %s", (unsigned)c.connectionId, c.ssid.c_str(),
-                (int)c.priority, c.isEnabled ? "yes" : "no",
-                c.rssi ? String((int)c.rssi).c_str() : "--",
+    logger.info("%-2u  %-32s  %4d  %-11s  %6s  %s", (unsigned)c.connectionId, c.ssid.c_str(), (int)c.priority,
+                c.isEnabled ? "yes" : "no", c.rssi ? String((int)c.rssi).c_str() : "--",
                 (active.length() && active == c.ssid.c_str()) ? "yes" : "no");
   }
 }
@@ -629,25 +633,23 @@ static String cidrToMask(int bits) {
   if (bits < 0 || bits > 32) bits = 24;
   const uint32_t mask = bits == 0 ? 0u : (0xFFFFFFFFu << (32 - bits));
   char buf[16];
-  snprintf(buf, sizeof(buf), "%u.%u.%u.%u", (mask >> 24) & 0xFF, (mask >> 16) & 0xFF,
-           (mask >> 8) & 0xFF, mask & 0xFF);
+  snprintf(buf, sizeof(buf), "%u.%u.%u.%u", (mask >> 24) & 0xFF, (mask >> 16) & 0xFF, (mask >> 8) & 0xFF, mask & 0xFF);
   return String(buf);
 }
 
-static void connectionModify(NetworkSupervisor& ns, WifiConnection& c, const String& setting,
-                             const String& value) {
+static void connectionModify(NetworkSupervisor& ns, WifiConnection& c, const String& setting, const String& value) {
   // Повні nmcli-івські імена. Скорочення секції ('wifi-sec.psk', 'con.auto...')
   // ловляться тим самим match() - воно працює по префіксу.
   static const char* const settings[] = {
-    "wifi.ssid",
-    "wifi-security.psk",
-    "connection.autoconnect",
-    "connection.autoconnect-priority",
-    "connection.autoconnect-retries",
-    "ipv4.method",
-    "ipv4.addresses",
-    "ipv4.gateway",
-    "ipv4.dns",
+      "wifi.ssid",
+      "wifi-security.psk",
+      "connection.autoconnect",
+      "connection.autoconnect-priority",
+      "connection.autoconnect-retries",
+      "ipv4.method",
+      "ipv4.addresses",
+      "ipv4.gateway",
+      "ipv4.dns",
   };
   const size_t count = sizeof(settings) / sizeof(settings[0]);
 
@@ -839,8 +841,8 @@ static void objectConnection(NetworkSupervisor& ns, const std::vector<String>& a
         return;
       }
       ns.saveConfig();
-      logger.info("%u profile(s) read from %s (%u new, %u updated)", (unsigned)read, kProfileDir,
-                  (unsigned)added, (unsigned)(read - added));
+      logger.info("%u profile(s) read from %s (%u new, %u updated)", (unsigned)read, kProfileDir, (unsigned)added,
+                  (unsigned)(read - added));
       return;
     }
     case 7: {  // load <file>
@@ -870,8 +872,8 @@ static void objectConnection(NetworkSupervisor& ns, const std::vector<String>& a
       for (const auto& c : ns.connections()) {
         if (exportOne(c).length()) ++written;
       }
-      logger.info("%u of %u profile(s) written to %s", (unsigned)written,
-                  (unsigned)ns.connections().size(), kProfileDir);
+      logger.info("%u of %u profile(s) written to %s", (unsigned)written, (unsigned)ns.connections().size(),
+                  kProfileDir);
       return;
     }
     default:
@@ -901,26 +903,36 @@ static void dispatch(NetworkSupervisor& ns, const String& rawArgs) {
   }
 
   switch (o) {
-    case 0: objectGeneral(ns, args); return;
-    case 1: objectRadio(ns, args); return;
-    case 2: objectDevice(ns, args); return;
-    case 3: objectConnection(ns, args); return;
-    default: printHelp(); return;
+    case 0:
+      objectGeneral(ns, args);
+      return;
+    case 1:
+      objectRadio(ns, args);
+      return;
+    case 2:
+      objectDevice(ns, args);
+      return;
+    case 3:
+      objectConnection(ns, args);
+      return;
+    default:
+      printHelp();
+      return;
   }
 }
 
 }  // namespace netcli
 
-// Засів списку профілів файлами з LittleFS. Викликати ПІСЛЯ ns.loadConfig().
-// Повертає кількість прочитаних профілів (0 — каталогу немає або він порожній).
-inline size_t importNetProfilesFromFs(NetworkSupervisor& ns) {
+size_t importNetProfilesFromFs(NetworkSupervisor& ns) {
   const size_t read = netcli::importDir(ns);
   if (read) ns.saveConfig();
   return read;
 }
 
-inline void registerNetCommand(SerialCommander& commander, NetworkSupervisor& ns) {
-  commander.registerCommand(
-    "net", "nmcli-style wifi manager: net {general|radio|device|connection} ... ('net help')",
-    [&ns](const String& args) { netcli::dispatch(ns, args); });
+void registerNetCommands(SerialCommander& commander) {
+  commander.registerCommand("net", "nmcli-style wifi manager: net {general|radio|device|connection} ... ('net help')",
+                            [](const String& args) { netcli::dispatch(netSupervisor, args); });
+  // 'scan' лишається як коротший псевдонім 'net device wifi list'
+  commander.registerCommand("scan", "scan WiFi networks (alias of 'net device wifi list')",
+                            [](const String&) { wifiScan(netcli::knownSsids(netSupervisor)); });
 }

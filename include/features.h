@@ -12,7 +12,7 @@
 // __has_include() у власному бібліотечному заголовку - на цей момент таких
 // не лишилось (HAS_PING, HAS_GMAIL_SENDER, HAS_MQTT_CLIENT і
 // HAS_CONSOLE_MQTT переведені на явний прапорець у `src-<env>/environment.h`,
-// розділ 2, + build-fail у `src/ping.h`/`lib/GmailSender/GmailSender.hpp`/
+// розділ 2, + build-fail у `src/Net/Ping.cpp`/`lib/GmailSender/GmailSender.hpp`/
 // `lib/MqttClient/MqttClient.hpp`/`lib/ConsoleMqtt/ConsoleMqtt.hpp`, якщо
 // значення розійдеться з наявністю бібліотеки/платформи). Абзац лишається на
 // випадок, якщо такий прапорець з'явиться знову: показати його тут було б
@@ -48,6 +48,11 @@
 #endif
 #ifndef BOARD_HAS_PSRAM
 #define BOARD_HAS_PSRAM 0
+#endif
+// Явний, а не похідний від піна (як BOARD_HAS_LIGHT_SENSOR нижче): на
+// esp32-c6 BAT_ADC сидить на GPIO0, і трюк "PIN > 0" його б загубив.
+#ifndef BOARD_HAS_BATTERY_ADC
+#define BOARD_HAS_BATTERY_ADC 0
 #endif
 #ifndef HAS_DINO_GAME
 #define HAS_DINO_GAME 0
@@ -121,6 +126,7 @@
   X(BOARD_HAS_IMU)       \
   X(BOARD_HAS_PSRAM)     \
   X(BOARD_HAS_LIGHT_SENSOR) \
+  X(BOARD_HAS_BATTERY_ADC) \
   X(HAS_DINO_GAME)       \
   X(HAS_ECOFLOW_CLIENT)  \
   X(HAS_WEB_PORTAL)      \
@@ -142,7 +148,7 @@ struct Entry {
 // Назва рядка - буквальне ім'я макроса (не перейменований варіант): друге
 // джерело назви того самого прапорця розходиться саме так, як розійшлись
 // "OPEN"/"open" у encryptionName() (CLAUDE.md, DRY). Дрібний, fixed-size
-// масив (16 записів) - PROGMEM тут не потрібен, розмір на порядки менший за
+// масив (17 записів) - PROGMEM тут не потрібен, розмір на порядки менший за
 // поріг, коли розміщення в RAM/DRAM (esp8266) взагалі помітне.
 #define FEATURE_ENTRY(flag) {#flag, static_cast<bool>(flag)},
 static const Entry kAll[] = {FEATURE_LIST(FEATURE_ENTRY)};

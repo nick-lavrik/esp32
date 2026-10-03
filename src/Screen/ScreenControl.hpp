@@ -26,6 +26,10 @@ void show_clock(bool show);
 // Прочитати з NVS годинник/яскравість/автояскравість - наприкінці setup().
 // Ігровий режим свідомо НЕ відновлюється (див. коментар у ScreenControl.cpp).
 void loadScreenSettings();
+
+// Ініціалізація панелі (і підсвітки на st7789). Після setupSD(): SD-картка
+// має першою відпустити спільну шину.
+void setupDisplay();
 // Датчик освітленості (BOARD_HAS_LIGHT_SENSOR): опитування й автояскравість.
 void setupLightSensor();
 
