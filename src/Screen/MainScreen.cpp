@@ -339,19 +339,17 @@ void MainScreen::drawStrip(bool frameStart) {
   if (showClock) drawTime();
 }
 
-void MainScreen::onButtonRelease(uint32_t nowMs, uint32_t heldMs) {
-  (void)nowMs;
-  if (heldMs < 1000UL) show_clock(!showClock);
-}
-
-void MainScreen::onButtonLongPress(uint32_t nowMs) {
-  (void)nowMs;
-  if (display.brightness() == 0) {
+void MainScreen::onButton(ButtonId id, ButtonEvent event, uint32_t nowMs, uint32_t heldMs) {
+  if (event == ButtonEvent::Click) {
+    show_clock(!showClock);
+  } else if (event == ButtonEvent::LongPress && display.brightness() == 0) {
     display_brightness(max(_savedBrightness, (uint8_t)1), _savedAutoBrightness);
-  } else {
+  } else if (event == ButtonEvent::LongPress) {
     _savedBrightness = display.brightness();
     _savedAutoBrightness = isAutoBrightness;
     display_brightness(0, false);
+  } else {
+    Screen::onButton(id, event, nowMs, heldMs);
   }
 }
 

@@ -4,11 +4,12 @@
 // src/Dino/DinoRenderer.
 //
 // Кнопка/тач: натиск - стрибок, відпускання обрізає підйом (керована висота),
-// кнопка 3 с - вихід на основний екран. realtime(): без doPing()/ecoflow.loop(),
+// кнопка 3 с - вихід на основний екран. Double-click тут НЕ перемикає екран:
+// два швидкі стрибки - звичайна гра, а не жест. realtime(): без doPing()/ecoflow.loop(),
 // інакше кадр рветься (кактус "телепортується" крізь діно).
 //
-// Режим після ресету НЕ відновлюється - див. коментар у loadConfig()
-// (src/main.cpp); рекорд зберігається (CFG_DINO_HIGHSCORE).
+// Режим після ресету НЕ відновлюється - див. коментар у loadScreenSettings()
+// (src/Screen/ScreenControl.cpp); рекорд зберігається (CFG_DINO_HIGHSCORE).
 
 #include <SerialCommander.hpp>
 
@@ -27,8 +28,7 @@ public:
   void drawStrip(bool frameStart) override;
   bool realtime() const override { return true; }
 
-  void onButtonPress(uint32_t nowMs) override;
-  void onButtonRelease(uint32_t nowMs, uint32_t heldMs) override;
+  void onButton(ButtonId id, ButtonEvent event, uint32_t nowMs, uint32_t heldMs) override;
   // onTouch/onRelease, а НЕ onClick: onClick спрацьовує на відпусканні (і то
   // лише якщо не було hold чи свайпу), тобто стрибок або запізнювався б, або
   // не зараховувався взагалі при довгому натисканні.

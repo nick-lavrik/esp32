@@ -965,6 +965,8 @@ TFT_eSPI і LovyanGFX, і Arduino_GFX, і SSD1306. Власний драйвер
 
 Власні внутрішні бібліотеки в `lib/`: `EventDispatcher`, `TaskController` (cron/job scheduler),
 `ConfigStorage` (NVS-конфіг), `TouchScreen` (events/swipe/hold + point mapping),
+`ButtonEvents` (press/release/click/double-click/long press однієї кнопки; без Arduino,
+тести на хості — `test/button_events/run.sh`),
 `JpegImage`, `Pixel` (value-type для пер-піксельних обчислень), `ImageEffects`
 (ефекти над буфером `JpegImage`: desaturate/lighten/darken/tint/contrast/sepia/hue-rotate/
 thermal/invert/threshold/dithering/box-blur — усе in-place, без копії буфера на весь кадр),
@@ -1229,13 +1231,13 @@ EcoFlow-блок і показувалась не та конфігурація 
 | `src/App/ConfigKeys.hpp` | ключі NVS `CFG_*`, дефолт `WATCHDOG_ENABLED` | — |
 | `src/Screen/Background.{hpp,cpp}` | `setupBackgroundImage()`; `registerBackgroundCommands()` — ефекти фону (`blur`…`dither`), `background`, `bg-dump`; без `LITTLEFS_BACKGROUND_IMAGE` команд немає | `setup()`, `setupSerialCommander()` |
 | `src/BackgroundImages.{hpp,cpp}` | малювання фону (`drawBackgroundImage()`), вшиті/PROGMEM-зображення | `loop()` |
-| `src/Screen/Screen.hpp` | інтерфейс режиму екрана: `drawStrip()`, `update()`, `enter()`/`leave()`, `realtime()` (без `doPing()`/`ecoflow.loop()`), `overlays()` (іконка WiFi, debug-рамка), кнопка й тач; довге утримання кнопки за замовчуванням → `main` | — |
+| `src/Screen/Screen.hpp` | інтерфейс режиму екрана: `drawStrip()`, `update()`, `enter()`/`leave()`, `realtime()` (без `doPing()`/`ecoflow.loop()`), `overlays()` (іконка WiFi, debug-рамка), кнопка (`onButton(ButtonId, ButtonEvent, …)`; за замовчуванням double-click → наступний екран, утримання 3 с → `main`) і тач | — |
 | `src/Screen/ScreenManager.{hpp,cpp}` | `screens`: один активний екран, перший доданий — основний. `request()` лише запам'ятовує (малювати з команди — дедлок SPI), перемикання й очищення смуг — у `loop()`. Реєстр екранів плати й маршрутизація тачу — `setupScreens()`; команда `screen` | `loop()` → `screens.loop()`; кнопки — cron `setupButtons()` (`src/Input/Buttons.cpp`) |
 | `src/Screen/MainScreen.*`, `DinoScreen.*`, `DinoSpritesScreen.hpp`, `TestGfxScreen.*` | екрани `main` (фон + `drawSystemInfo()` + `drawTime()`, обидві в `MainScreen.cpp`), `dino` (рендерер, `setupDinoGame()`, команда `dino`), `dino-sprites`, `test-gfx` (команда `test-gfx`) | `screens` |
 | `src/Screen/ScreenControl.{hpp,cpp}` | `setupDisplay()`, `showClock`, `isAutoBrightness`, `display_brightness()`/`_apply()`, `display_flip()`, `show_clock()`; `loadScreenSettings()` (годинник/яскравість з NVS), `setupLightSensor()` (автояскравість, `BOARD_HAS_LIGHT_SENSOR`); команди `flip`, `clock`, `brightness` | будь-який екран, `setup()` |
 | `src/Screen/WifiIcon.{hpp,cpp}` | `setupWiFiIcon()`: іконка стану WiFi поверх екрана | `setup()` |
 | `src/Mqtt/MqttSetup.{hpp,cpp}` | `setupMqttClient()`: колбеки конекту (discovery), runtime-префікс, heartbeat, `command/<id>` → `CommandQueue` (`mqttReplyTarget()`), LWT інших плат, light-sensor, SAPI; команди `dump-mqtt`/`publish`/`mqtt-prefix`/`console-mqtt` | `setup()` |
-| `src/Input/*` | `Input.hpp`: `setupI2C()`/`i2cScan()` (`I2cBus.cpp`), `setupImu()`/`updateImuFlip()` (`Imu.cpp`), `setupTouchScreen()` + verbose-логи жестів (`Touch.cpp`), `setupButtons()` (`Buttons.cpp`: лише виявлення подій кнопки, дію вирішує екран); команди `i2cscan`, `imu` | `setup()`; `updateImuFlip()` — `loop()` |
+| `src/Input/*` | `Input.hpp`: `setupI2C()`/`i2cScan()` (`I2cBus.cpp`), `setupImu()`/`updateImuFlip()` (`Imu.cpp`), `setupTouchScreen()` + verbose-логи жестів (`Touch.cpp`), `setupButtons()` (`Buttons.cpp`: по `ButtonEvents` на `PRIMARY_BUTTON_PIN`/`SECONDARY_BUTTON_PIN`, одна cron-задача опитує всі, події → `screens.active().onButton()`; GPIO34–39 класичного ESP32 — `INPUT` без підтяжки); команди `i2cscan`, `imu` | `setup()`; `updateImuFlip()` — `loop()` |
 | `src/Sd/*` | SD-картка: `Sd.hpp` (публічний API), `SdBus.hpp` (шина, `activeSd()`), `SdCard`/`SdProbe`/`SdReader`/`SdImage`/`SdMsc` — див. «SD-картка: усі команди й місця» нижче | `setup()`, `setupSerialCommander()`, `loop()` (`sdimg`, MSC-remount) |
 | `src/Screen/DisplayBusYield.hpp` | `YIELD_DISPLAY_BUS()` — тимчасово віддати SPI-шину дисплея з-під кадру | SD, `display_flip()` |
 | `src/Ecoflow/EcoflowSetup.{hpp,cpp}` | `setupEcoflow()`: колбеки `EcoflowClient`/`EcoflowDeviceRegistry` (лог, retained `devices/<id>/ecoflow/<sn>/grid`), cron-задачі (live-чекпоінт, `expireStale()`, REST → MQTT на старті, `ecoflow` раз на хвилину), команди `ecoflow*` | `setup()`, після `setupMqttClient()` |
@@ -1496,6 +1498,18 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **`ButtonEvents`: click / double-click / long press для обох
+  кнопок.** `lib/ButtonEvents` — лише логіка (рівень і час на вході), з
+  антибрязкотом за переднім фронтом (затримки на натиск немає) і тестами на
+  хості (`test/button_events/run.sh`, 10 перевірок). П'ять віртуальних
+  `Screen::onButton*()` → один `Screen::onButton(ButtonId, ButtonEvent, …)`,
+  за замовчуванням double-click — `screens.requestNext()`, 3 с —
+  `requestHome()`. Зміни поведінки: на `main` годинник перемикає click, тобто
+  із затримкою ~300 мс і для будь-якого натиску коротшого за 3 с (раніше —
+  лише < 1 с, одразу на відпусканні); double-click перемикає екран всюди,
+  крім `dino` (два швидкі стрибки — гра). `ttgo-t1` читає другу кнопку
+  (GPIO35). Лог `Button pressed!`/`released!` → `[D][button ] primary
+  click …`. Вартість на `esp32-c6`: RAM +24 Б, Flash +1.4 КБ.
 - 2026-10-03 — **Крок 4 рефакторингу: `src/*.h` → модулі `.hpp`+`.cpp`.**
   `netcli.h` → `src/Net/NetCli.*` (тепер з `scan`, без другої копії
   `knownSsids`), `wifi.h` → `src/Net/WifiScan.*` (`WiFi_scan()` →

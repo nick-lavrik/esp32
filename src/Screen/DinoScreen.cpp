@@ -36,11 +36,14 @@ void DinoScreen::drawStrip(bool frameStart) {
   display.loopFrameRate();
 }
 
-void DinoScreen::onButtonPress(uint32_t nowMs) { dinoRenderer().game().pressJump(nowMs); }
-
-void DinoScreen::onButtonRelease(uint32_t nowMs, uint32_t heldMs) {
-  (void)heldMs;
-  dinoRenderer().game().releaseJump(nowMs);
+void DinoScreen::onButton(ButtonId id, ButtonEvent event, uint32_t nowMs, uint32_t heldMs) {
+  if (event == ButtonEvent::Press) {
+    dinoRenderer().game().pressJump(nowMs);
+  } else if (event == ButtonEvent::Release) {
+    dinoRenderer().game().releaseJump(nowMs);
+  } else if (event == ButtonEvent::LongPress) {
+    Screen::onButton(id, event, nowMs, heldMs);
+  }
 }
 
 void DinoScreen::onTouch(TouchPoint p) {

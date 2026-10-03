@@ -17,9 +17,16 @@
 // тач - TouchController::update()). Малювати можна лише з drawStrip().
 
 #include <Arduino.h>
+#include <ButtonEvents.hpp>
 #include <TouchPoint.h>
 
 enum class SwipeDirection : uint8_t { Up, Down, Left, Right };
+
+// Primary - PRIMARY_BUTTON_PIN (усі плати з кнопкою), Secondary -
+// SECONDARY_BUTTON_PIN (лише ttgo-t1).
+enum class ButtonId : uint8_t { Primary, Secondary };
+
+const char* buttonIdName(ButtonId id);
 
 class Screen {
 public:
@@ -53,11 +60,13 @@ public:
   // debug-рамка дотику).
   virtual bool overlays() const { return false; }
 
-  // Головна кнопка (PRIMARY_BUTTON_PIN). Довге утримання (3 с) за замовчуванням повертає
-  // на основний екран - щоб з будь-якого режиму був вихід без консолі.
-  virtual void onButtonPress(uint32_t nowMs) {}
-  virtual void onButtonRelease(uint32_t nowMs, uint32_t heldMs) {}
-  virtual void onButtonLongPress(uint32_t nowMs);
+  // Кнопки (lib/ButtonEvents: порядок подій і затримка Click - там). За
+  // замовчуванням, для будь-якої кнопки: DoubleClick - наступний екран,
+  // LongPress (3 с) - основний екран, тобто з будь-якого режиму є вихід без
+  // консолі. Екран обробляє свої події й віддає решту сюди:
+  //   switch (event) { case ButtonEvent::Click: ...; return; default: break; }
+  //   Screen::onButton(id, event, nowMs, heldMs);
+  virtual void onButton(ButtonId id, ButtonEvent event, uint32_t nowMs, uint32_t heldMs);
 
   // Тач (лише BOARD_HAS_TOUCHSCREEN).
   virtual void onTouch(TouchPoint p) {}

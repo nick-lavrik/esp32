@@ -137,12 +137,13 @@
 #define TOUCH_CS 0
 
 // ---------- Кнопка ----------
-// Дві кнопки. Primary - головна: на ній уся поведінка за замовчуванням
-// (src/Screen/Screen.hpp, onButton*()); secondary - додаткова, кодом поки не
-// читається (з'явиться разом із ButtonEvents, docs/tech_debt.md).
+// Дві кнопки, обидві через lib/ButtonEvents (src/Input/Buttons.cpp). Поки
+// поводяться однаково (Screen::onButton(), src/Screen/Screen.hpp: клік,
+// double-click - наступний екран, 3 с - основний); екран може розрізнити їх
+// за ButtonId.
 #define PRIMARY_BUTTON_PIN 0     // BOOT, зверху
 // GPIO35 - input-only: INPUT_PULLUP на GPIO34..39 не діє, підтяжка має бути на
-// самій платі. На залізі ще не перевірено - звірити разом із ButtonEvents.
+// самій платі (Buttons.cpp ставить для нього INPUT). На залізі ще не перевірено.
 #define SECONDARY_BUTTON_PIN 35  // збоку від USB type-C, знизу
 
 // ============================================================

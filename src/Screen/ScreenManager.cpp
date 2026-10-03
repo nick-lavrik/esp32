@@ -23,9 +23,17 @@ DinoSpritesScreen dinoSpritesScreen;
 #endif
 }  // namespace
 
-void Screen::onButtonLongPress(uint32_t nowMs) {
+const char* buttonIdName(ButtonId id) { return id == ButtonId::Primary ? "primary" : "secondary"; }
+
+void Screen::onButton(ButtonId id, ButtonEvent event, uint32_t nowMs, uint32_t heldMs) {
+  (void)id;
   (void)nowMs;
-  screens.requestHome();
+  (void)heldMs;
+  if (event == ButtonEvent::DoubleClick) {
+    screens.requestNext();
+  } else if (event == ButtonEvent::LongPress) {
+    screens.requestHome();
+  }
 }
 
 bool ScreenManager::add(Screen& screen) {
