@@ -23,4 +23,10 @@ void display_brightness(uint8_t percent, bool _auto);
 void display_flip();
 void show_clock(bool show);
 
+// Прочитати з NVS годинник/яскравість/автояскравість - наприкінці setup().
+// Ігровий режим свідомо НЕ відновлюється (див. коментар у ScreenControl.cpp).
+void loadScreenSettings();
+// Датчик освітленості (BOARD_HAS_LIGHT_SENSOR): опитування й автояскравість.
+void setupLightSensor();
+
 void registerScreenControlCommands(SerialCommander& commander);

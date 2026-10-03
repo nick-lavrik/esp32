@@ -69,7 +69,7 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
 | IMU (`BOARD_HAS_IMU`) | — | — | — | — | **QMI8658A** ⁵ | — | — | — |
 | I²C (`I2C_SDA`/`I2C_SCL`) | 19 / 45 | — | — | — | **18 / 19** | — | — | — |
 | Light sensor (`LIGHT_SENSOR_PIN`) | — | — | GPIO34 | — | — | — | — | — |
-| Кнопка (`FLIP_BUTTON_PIN`) | — | GPIO0 | GPIO0 | GPIO0 | **GPIO9** ⁶ | **GPIO9** | — ¹⁰ | GPIO0 |
+| Кнопки (`PRIMARY_BUTTON_PIN` / `SECONDARY_BUTTON_PIN`) | — | GPIO0 | GPIO0 | GPIO0 / GPIO35 | **GPIO9** ⁶ | **GPIO9** | — ¹⁰ | GPIO0 |
 | LED (`BLINK_LED_PIN`) ¹⁶ | — | — | — | — | — | — | **GPIO8** | GPIO2 |
 | MQTT-бекенд ⁷ | PicoMQTT | PicoMQTT | PicoMQTT | PicoMQTT | PicoMQTT | PicoMQTT | PicoMQTT | **PubSubClient** |
 | EcoFlow (`HAS_ECOFLOW_CLIENT`) ⁸ | ✅ | ✅ | **—** ⁸ | **—** ⁸ | ✅ | ✅ | ✅ | — |
@@ -141,7 +141,7 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
   *зміну* орієнтації відносно стартової, тому працює правильно за будь-якого знака.
 
 ⁶ `esp32-c6`: кнопка **BOOT фізично є на GPIO9** (перевірено на залізі; документація Waveshare
-  помилково називає GPIO8) — і `FLIP_BUTTON_PIN=9` тепер заданий. Тобто орієнтацію на цій платі
+  помилково називає GPIO8) — і `PRIMARY_BUTTON_PIN=9` тепер заданий. Тобто орієнтацію на цій платі
   перемикають **двома** шляхами: кнопкою і поворотом плати через IMU (виноска ⁵); обидва йдуть
   в одну й ту саму `display_flip()`.
 
@@ -204,7 +204,7 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
   не задані (блоки годинника й дати стоять під `#if CLOCK_TEXT_FONT && …`, а незаданий макрос у
   `#if` дає 0), `LOAD_FONT*`/`U8G2_FONT_SUPPORT` не задані. `TFT_CS`/`TFT_DC`/`TFT_RST`/`TFT_BL`
   теж НЕ визначені — `main.cpp` і `TftEspiDriver.cpp` перевіряють їх через `#if defined(…)`, тож робота
-  з пінами дисплея зникає зі збірки сама. `FLIP_BUTTON_PIN` не заданий навмисно: уся логіка тієї
+  з пінами дисплея зникає зі збірки сама. `PRIMARY_BUTTON_PIN` не заданий навмисно: уся логіка тієї
   кнопки суто дисплейна (flip, яскравість підсвітки, показ годинника) — на безекранній платі це
   була б cron-задача, що щотика читає GPIO заради no-op. Індикація лишається одна — вбудований
   LED на GPIO8 (інверсна логіка, `BLINK_LED_PIN=8`).
@@ -305,7 +305,7 @@ Arduino-framework для ESP32-середовищ (не "чистий" ESP-IDF).
   на платах із порталом її не варто опускати нижче 32. На `esp8266` 8 записів — не вибір, а межа:
   статика там і без того займає 80.8% RAM. Заміри й розбір — `docs/journal_plan.md` §16.2.
 
-¹⁶ **Статусні патерни `BLINK_LED_PIN`** (`setupBlinkLED()`, `src/main.cpp`) — п'ять станів,
+¹⁶ **Статусні патерни `BLINK_LED_PIN`** (`setupBlinkLED()`, `src/System/BlinkLed.cpp`) — п'ять станів,
   пріоритетна драбинка (перший, що виконується, і визначає патерн): AP-режим
   (`netSupervisor.state()` — `STARTING_AP`/`AP_MODE`) → пошук WiFi (`!isConnected()`) →
   синхронізація часу (`!ntp.isSynced()`, **лише перша спроба при завантаженні** — подальший
@@ -1191,7 +1191,7 @@ EcoFlow-блок і показувалась не та конфігурація 
   `displayDriver`, `EcoflowClient` ← `mqtt`, `TouchEvents` ← `displayConfig`),
   тому новий глобал з такою залежністю означається там само, після своїх
   залежностей. Стан одного модуля (`showClock`, режими dino/test-gfx,
-  `routerApi`) лишається в самому модулі (поки — `src/main.cpp`). Ключі NVS
+  `routerApi`) лишається в самому модулі (`src/Screen/ScreenControl.cpp`, `src/Router/RouterTest.cpp` тощо). Ключі NVS
   `CFG_*` і дефолт `WATCHDOG_ENABLED` — `src/App/ConfigKeys.hpp`.
 - **`NetworkSupervisor::_connections`** — FSM, arduino events, `loop()`
   (`src/netcli.h`, `WebWifiModule`). `connections()` і `getConnection()`
@@ -1229,14 +1229,23 @@ EcoFlow-блок і показувалась не та конфігурація 
 | `src/Screen/Background.{hpp,cpp}` | `setupBackgroundImage()`; `registerBackgroundCommands()` — ефекти фону (`blur`…`dither`), `background`, `bg-dump`; без `LITTLEFS_BACKGROUND_IMAGE` команд немає | `setup()`, `setupSerialCommander()` |
 | `src/BackgroundImages.{hpp,cpp}` | малювання фону (`drawBackgroundImage()`), вшиті/PROGMEM-зображення | `loop()` |
 | `src/Screen/Screen.hpp` | інтерфейс режиму екрана: `drawStrip()`, `update()`, `enter()`/`leave()`, `realtime()` (без `doPing()`/`ecoflow.loop()`), `overlays()` (іконка WiFi, debug-рамка), кнопка й тач; довге утримання кнопки за замовчуванням → `main` | — |
-| `src/Screen/ScreenManager.{hpp,cpp}` | `screens`: один активний екран, перший доданий — основний. `request()` лише запам'ятовує (малювати з команди — дедлок SPI), перемикання й очищення смуг — у `loop()`. Реєстр екранів плати й маршрутизація тачу — `setupScreens()`; команда `screen` | `loop()` → `screens.loop()`; кнопка — cron `setupFlipButton()` |
+| `src/Screen/ScreenManager.{hpp,cpp}` | `screens`: один активний екран, перший доданий — основний. `request()` лише запам'ятовує (малювати з команди — дедлок SPI), перемикання й очищення смуг — у `loop()`. Реєстр екранів плати й маршрутизація тачу — `setupScreens()`; команда `screen` | `loop()` → `screens.loop()`; кнопки — cron `setupButtons()` (`src/Input/Buttons.cpp`) |
 | `src/Screen/MainScreen.*`, `DinoScreen.*`, `DinoSpritesScreen.hpp`, `TestGfxScreen.*` | екрани `main` (фон + інфо + годинник; `drawSystemInfo()`/`drawTime()` поки в `main.cpp`), `dino` (рендерер, `setupDinoGame()`, команда `dino`), `dino-sprites`, `test-gfx` (команда `test-gfx`) | `screens` |
-| `src/Screen/ScreenControl.{hpp,cpp}` | `showClock`, `isAutoBrightness`, `display_brightness()`/`_apply()`, `display_flip()`, `show_clock()`; команди `flip`, `clock`, `brightness` | будь-який екран, `loadConfig()` |
+| `src/Screen/ScreenControl.{hpp,cpp}` | `showClock`, `isAutoBrightness`, `display_brightness()`/`_apply()`, `display_flip()`, `show_clock()`; `loadScreenSettings()` (годинник/яскравість з NVS), `setupLightSensor()` (автояскравість, `BOARD_HAS_LIGHT_SENSOR`); команди `flip`, `clock`, `brightness` | будь-який екран, `setup()` |
+| `src/Screen/WifiIcon.{hpp,cpp}` | `setupWiFiIcon()`: іконка стану WiFi поверх екрана | `setup()` |
+| `src/Mqtt/MqttSetup.{hpp,cpp}` | `setupMqttClient()`: колбеки конекту (discovery), runtime-префікс, heartbeat, `command/<id>` → `CommandQueue` (`mqttReplyTarget()`), LWT інших плат, light-sensor, SAPI; команди `dump-mqtt`/`publish`/`mqtt-prefix`/`console-mqtt` | `setup()` |
+| `src/Input/*` | `Input.hpp`: `setupI2C()`/`i2cScan()` (`I2cBus.cpp`), `setupImu()`/`updateImuFlip()` (`Imu.cpp`), `setupTouchScreen()` + verbose-логи жестів (`Touch.cpp`), `setupButtons()` (`Buttons.cpp`: лише виявлення подій кнопки, дію вирішує екран); команди `i2cscan`, `imu` | `setup()`; `updateImuFlip()` — `loop()` |
 | `src/Sd/*` | SD-картка: `Sd.hpp` (публічний API), `SdBus.hpp` (шина, `activeSd()`), `SdCard`/`SdProbe`/`SdReader`/`SdImage`/`SdMsc` — див. «SD-картка: усі команди й місця» нижче | `setup()`, `setupSerialCommander()`, `loop()` (`sdimg`, MSC-remount) |
 | `src/Screen/DisplayBusYield.hpp` | `YIELD_DISPLAY_BUS()` — тимчасово віддати SPI-шину дисплея з-під кадру | SD, `display_flip()` |
 | `src/Ecoflow/EcoflowSetup.{hpp,cpp}` | `setupEcoflow()`: колбеки `EcoflowClient`/`EcoflowDeviceRegistry` (лог, retained `devices/<id>/ecoflow/<sn>/grid`), cron-задачі (live-чекпоінт, `expireStale()`, REST → MQTT на старті, `ecoflow` раз на хвилину), команди `ecoflow*` | `setup()`, після `setupMqttClient()` |
 | `src/Mqtt/JsonApi.{hpp,cpp}` | SAPI: реєстр і диспетчеризація `devices/<id>/api/<cmd>`, усі записи (`commands-list` завжди; решта — лише з `HAS_WEB_PORTAL`); `jsonApiCommandName()` для discovery | `setupMqttClient()` → `registerJsonApiCommands()` |
 | `src/Mqtt/Discovery.{hpp,cpp}` | `publishDiscovery()`: retained `devices/<id>/discovery`, `board` = `BOARD_NAME` з `environment.h` | `onConnect`-колбек у `setupMqttClient()` (таск `mqtt-net`) |
+| `src/System/SystemStatus.{hpp,cpp}` | `dumpSystemInfo()`, `dumpStatus()`; команди `heap`, `heap-watch`, `status sys\|cfg\|sd\|flash\|littlefs` | `setup()`, `setupSerialCommander()` |
+| `src/System/SystemControl.{hpp,cpp}` | `setupWatchdog()` (NVS `watchdog` або `WATCHDOG_ENABLED`); команди `reboot`, `watchdog`, `bootloader` (лише з `HAS_FORCE_DOWNLOAD_BOOT`, детекція в цьому ж файлі) | кінець `setup()` |
+| `src/System/BlinkLed.{hpp,cpp}` | `setupBlinkLED()`: патерни LED за станом (WiFi/NTP/MQTT/AP) і команда `blink`; лише з `BLINK_LED_PIN` | `setup()` |
+| `src/Mail/MailCommands.{hpp,cpp}` | команди `mailto`, `sendmail`, `smtp-probe`; лише з `HAS_GMAIL_SENDER` | `setupSerialCommander()` |
+| `src/Web/WebPortalSetup.{hpp,cpp}` | `setupWebPortal()` (модулі порталу, `httpServer`); команда `web` | `setup()`, `setupSerialCommander()` |
+| `src/Router/RouterTest.{hpp,cpp}` | `routerApi` (AsusWRT); команди `dump-asuswrt` (живий роутер), `dump-asuswrt2` (парсер на `/asus-get_clientlist.json` з LittleFS, коли роутер недоступний) | `setupSerialCommander()` |
 
 ### SD-картка: усі команди й місця, що з нею працюють
 
@@ -1305,6 +1314,14 @@ SPI на частині плат спільна з дисплеєм.
   компілюватись і на ESP8266 — невикликане лінкер викине. Після правки
   `lib/` — `pio run -e esp8266`. (Пропущений крок коштував зламаного
   `env:esp8266` від `73129b1`; полагоджено в `dbbb084`.)
+- **Буквальний `#include` у `src/` тягне бібліотеку в прошивку навіть під
+  `#if`** — і не лише компіляцію: у `Wire` глобальний `TwoWire Wire` з
+  конструктором, тож лінкер лишає весь драйвер I2C (+35 КБ на `esp32-c3`/
+  `s3-lcd147`, де I2C немає). `src/Input/I2cBus.cpp` тому включає `<Wire.h>`
+  через макрос (`#include I2C_BUS_WIRE_HEADER`) — LDF макроси не
+  розгортає; на платах з I2C `Wire` приходить через їхній драйвер
+  (`src-esp32-c6/Axs5106lTouch.h`, `TAMC_GT911`). Новий `src/`-файл з
+  бібліотекою, потрібною не всім env, — звірити розмір на env без фічі.
 - **`include/` бібліотекам не видно сам по собі.** PlatformIO кладе його в
   include path лише для `src/`; для `lib/*` — тільки через `-I include` у
   `[common] build_flags`. І навіть так LDF шукає залежності бібліотеки
@@ -1469,6 +1486,26 @@ ColumnLimit: 120
 
 ## Changelog
 
+- 2026-10-03 — **Крок 3.4 рефакторингу: `src/System/*`, `src/Mail/*`,
+  `src/Web/*`, `src/Router/*`, `src/Screen/WifiIcon.*`.** Із `main.cpp`
+  винесено статус/heap, reboot/watchdog/bootloader, blink, пошту, веб-портал,
+  тест роутера, іконку WiFi; `loadConfig()` → `loadScreenSettings()` і
+  датчик світла — у `ScreenControl`. `setupConfigStorage()` лишив лише
+  `begin()`, watchdog вмикається `setupWatchdog()` наприкінці `setup()`.
+  Поведінка без змін (перевірено на `esp32-c6`: `status`, `heap`,
+  `watchdog`, `web status`, `screen`, `dump-asuswrt2`). Flash ≈ +0.8 КБ,
+  RAM +8 Б (функції більше не інлайняться в один TU). `main.cpp`: 2197 →
+  730 рядків.
+- 2026-10-03 — **Кроки 3.2–3.3 рефакторингу: `src/Mqtt/MqttSetup.*`,
+  `src/Input/*`; кнопка `FLIP_BUTTON_PIN` → `PRIMARY_BUTTON_PIN`.** Кнопка
+  давно не перевертає екран (дію вирішує активний екран), тож назва — за
+  роллю: `PRIMARY_BUTTON_PIN` на всіх платах з кнопкою, `SECONDARY_BUTTON_PIN`
+  (GPIO35) — на `ttgo-t1`, поки не читається (`ButtonEvents`,
+  `docs/tech_debt.md`). `setupFlipButton()` → `setupButtons()`, лог
+  `buttons: primary=GPIO%d`. Прибрано мертві закоментовані блоки
+  `setupMqttClient()` і завжди істинний `#if !BOARD_ESP32_C6 || true`.
+  Знайдено й виправлено +35 КБ Flash на `esp32-c3`/`s3-lcd147` від
+  буквального `#include <Wire.h>` (див. «Збірка: неочевидне»).
 - 2026-10-03 — **Режими екрана: `Screen` + `ScreenManager` (крок 3.1
   рефакторингу).** Чотири прапорці (`dinoActive`, `dinoTestMode`,
   `testGfxActive` з пріоритетом, зашитим у `loop()`) і шість перевірок

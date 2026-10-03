@@ -243,7 +243,7 @@ web auth off                # вимкнути автентифікацію
 
 **Паспорт чипа (18-20.09.2026).** `ESP.getChipModel()`/`getChipRevision()`/
 `getChipCores()`/`getCpuFreqMHz()`/PSRAM — та сама інформація, що вже друкує
-серійна команда `sysinfo` (`dumpSystemInfo()`, `src/main.cpp`), тепер і в
+серійна команда `status sys` (`dumpSystemInfo()`, `src/System/SystemStatus.cpp`), тепер і в
 JSON (`chipInfoJson()`, `WebSystemModule.cpp`), у тому ж `dl`, що й
 розмір/швидкість флеша (`#sys-device-flash`) — обидва описують один фізичний
 модуль. На ESP8266 (без `getChipModel()`/`getChipRevision()`) — лише назва

@@ -4,7 +4,7 @@
 
 namespace {
 // ESP8266 не має getMaxAllocHeap() - там найбільший вільний блок звуть
-// getMaxFreeBlockSize(). Той самий #if, що в команді "heap" у src/main.cpp.
+// getMaxFreeBlockSize(). Той самий #if, що в команді "heap" у src/System/SystemStatus.cpp.
 inline unsigned largestFreeBlock() {
 #if defined(ESP32)
   return (unsigned)ESP.getMaxAllocHeap();

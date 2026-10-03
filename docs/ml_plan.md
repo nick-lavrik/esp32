@@ -567,7 +567,7 @@ CSI знімається з кожного прийнятого кадру, то
 
 ## 4. Датчик світла на `esp32-st7789`
 
-**Що вже є** (`src/main.cpp`, `setupLightSensor()`): `AnalogSensor` на
+**Що вже є** (`src/Screen/ScreenControl.cpp`, `setupLightSensor()`): `AnalogSensor` на
 GPIO34, `update()` з cron-таска з інтервалом 0 (тобто щоітерації `loop()`),
 сирий діапазон 0–1855 → 0–100%, колбек при зміні ≥ 5%. Значення
 публікується в MQTT `devices/<client-id>/light-sensor` (інші плати на нього

@@ -54,7 +54,7 @@
 #define HAS_CONSOLE_MQTT 1
 
 // Chrome Dino на екрані: команда "dino on|off" (src/Dino/, lib/DinoGame).
-// Тач тут відсутній - стрибок лише кнопкою FLIP_BUTTON_PIN (розділ 4).
+// Тач тут відсутній - стрибок лише кнопкою PRIMARY_BUTTON_PIN (розділ 4).
 #define HAS_DINO_GAME 1
 
 // Веб-портал (lib/WebPortal) - опис механізму в env:esp32-c6. PSRAM 8 МБ і
@@ -156,7 +156,7 @@
 #define SD_CMD 15
 
 // ---------- Кнопка ----------
-#define FLIP_BUTTON_PIN 0
+#define PRIMARY_BUTTON_PIN 0
 
 // ============================================================
 // 5. Налаштування фіч

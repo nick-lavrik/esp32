@@ -78,3 +78,46 @@ void registerScreenControlCommands(SerialCommander& commander) {
     }
   });
 }
+
+void loadScreenSettings() {
+  showClock = configStorage.getBool(CFG_SHOW_CLOCK, true);
+  isAutoBrightness = configStorage.getBool(CFG_SYS_AUTOBRIGHTNESS, false);
+  // Ігровий режим НЕ відновлюється після ресету свідомо. По-перше, у гру,
+  // яку ніхто не почав, грати нема кому - після перезавантаження доречніше
+  // показати годинник. По-друге, це запобіжник: якби гра колись падала на
+  // старті, збережений прапорець дав би boot-loop, з якого пристрій не
+  // вийшов би сам. Рекорд при цьому зберігається (CFG_DINO_HIGHSCORE).
+  // _apply: на старті ми лише ЧИТАЄМО збережене значення, тому писати його
+  // назад у NVS (як робив display_brightness()) не потрібно.
+  display_brightness_apply(configStorage.getInt(CFG_DISPLAY_BRIGHTNESS, 100), isAutoBrightness);
+  Logger::info("ConfigStorage load done");
+
+  Logger::info("\t- %s = %s", CFG_SHOW_CLOCK, showClock ? "ON" : "OFF");
+  Logger::info("\t- %s = %s", CFG_SYS_AUTOBRIGHTNESS, isAutoBrightness ? "true" : "false");
+  Logger::info("\t- %s = %d", CFG_DISPLAY_BRIGHTNESS, display.brightness());
+  Logger::info("");
+}
+
+void setupLightSensor() {
+#if BOARD_HAS_LIGHT_SENSOR
+  lightSensor.begin();
+  scheduler.addCronTask(0, []() { lightSensor.update(); });
+
+  lightSensor.addListener([]() {
+    Logger::info("lightSensor.value() = %4d (%3d%%)", lightSensor.read(), lightSensor.value());
+    if (isAutoBrightness) {
+      // _apply, а не display_brightness(): без запису в NVS на кожну зміну
+      // показань сенсора (див. коментар біля display_brightness()).
+      display_brightness_apply(lightSensor.value(), isAutoBrightness);
+    }
+  });
+
+  /* scheduler.addCronTask(0, []() {
+    display.setTextSize(1);
+    display.setTextColor(TFT_DARKGREY);
+    display.setCursor(10, display.height() - 1 * (5 + display.fontHeight()));
+    display.printf("LightSensor: %4d (%3d%%)", lightSensor.read(), lightSensor.value());
+  }); */
+
+#endif
+}

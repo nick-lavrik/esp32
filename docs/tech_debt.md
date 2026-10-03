@@ -156,7 +156,7 @@ Commands, знайти в списку `reboot`, виконати. Це та д�
 - **Дія незворотна і рве сесію.** Тому не рівноцінна кнопка в ряду, а
   прихована під `▾` (`.menu-wrap`, як у NVS і Files) та/або з підтвердженням.
   Головні дії ряду лишаються `Scan networks` і `Reconnect`.
-- **Не дублювати логіку перезавантаження.** Команда `reboot` у `src/main.cpp`
+- **Не дублювати логіку перезавантаження.** Команда `reboot` у `src/System/SystemControl.cpp`
   вже робить усе, що треба (EVT_REBOOT → `mqtt.flushOutgoing()` → журнал →
   `SystemReset::reboot()`); роут має вести туди ж, а не викликати
   `ESP.restart()` самотужки. Найдешевше — `POST` через той самий шлях, що й
@@ -184,15 +184,15 @@ Commands, знайти в списку `reboot`, виконати. Це та д�
 чіпати доведеться `NetworkSupervisor`, формат профілю в NVS (`nm_conn`),
 `.nmconnection` (там це `[wifi] bssid=`) і serial-команду `net`.
 
-### FLIP_BUTTON у порталі (емуляція натискання)
+### Кнопка PRIMARY_BUTTON у порталі (емуляція натискання)
 
 Поруч із дзеркалом екрана (вкладка Screen) не вистачає кнопки, яка робить те
-саме, що фізична `FLIP_BUTTON_PIN`: **натиснути** й **відпустити**. Зараз
+саме, що фізична `PRIMARY_BUTTON_PIN`: **натиснути** й **відпустити**. Зараз
 дзеркало показує екран, але керувати пристроєм через нього неможливо — щоб
 сховати годинник чи стрибнути в `dino`, треба простягнути руку до плати.
 
 Важливо, що потрібні саме дві окремі дії, а не один «клік»: уся логіка кнопки
-побудована на **тривалості утримання** (`src/main.cpp`, `setupFlipButton()`):
+побудована на **тривалості утримання** (`src/Input/Buttons.cpp`, `setupButtons()`):
 
 - коротке (< 1 с) відпускання — `show_clock(!showClock)`;
 - утримання > 3 с — гасить/вмикає підсвітку (`display_brightness(0)`);
@@ -208,14 +208,14 @@ Commands, знайти в списку `reboot`, виконати. Це та д�
 Що врахувати перед роботою:
 
 - **Джерело стану кнопки має стати одним.** Зараз cron-задача читає
-  `digitalRead(FLIP_BUTTON_PIN)` напряму. Емуляція — це не другий обробник
+  `digitalRead(PRIMARY_BUTTON_PIN)` напряму. Емуляція — це не другий обробник
   (два фронти на одному пі́ні вже описані в коментарі там же), а те, що
   задача читає `digitalRead(...) == LOW || _virtualPressed`. Тобто зміна
   в `src/main.cpp`, а портал лише виставляє прапорець.
 - **Захист від «залипання».** Якщо браузер закрили з затиснутою кнопкою,
   пристрій лишиться з натиснутою кнопкою назавжди — потрібен таймаут
   автовідпускання (кілька секунд), інакше підсвітка згасне і не повернеться.
-- **`FLIP_BUTTON_PIN` є не на всіх env.** На `esp32-c6-lcd-1.47` його свідомо
+- **`PRIMARY_BUTTON_PIN` є не на всіх env.** На `esp32-c6-lcd-1.47` його свідомо
   не задано (`platformio.ini`), тож розділ має ховатись так само, як ховається
   дзеркало на платі без буфера кадру (`available: false` у
   `/api/screen/info`) — а не малювати мертву кнопку.
@@ -617,6 +617,24 @@ Wi-Fi): образ розділу з CSV через `nvs_partition_gen.py` з ES
 WiFi-профілі), тож лише для першого налаштування; робити, тільки якщо
 serial-команди виявиться мало.
 
+### `ButtonEvents`: click / double-click / long press для обох кнопок
+
+Дата: 03.10.2026. Наступна задача одразу після рефакторингу `main.cpp`.
+Зараз `setupButtons()` (`src/Input/Buttons.cpp`) у cron-таску сам відрізняє
+натиск / утримання 3 с / відпускання лише для `PRIMARY_BUTTON_PIN`;
+`SECONDARY_BUTTON_PIN` (є лише на `ttgo-t1`, GPIO35) описаний, але не читається.
+
+**Що зробити.** Клас `ButtonEvents` за зразком `TouchEvents`
+(`lib/TouchScreen`): `onPress`/`onRelease`/`onClick`/`onDoubleClick`/
+`onLongPress`, по екземпляру на кнопку; у `Screen` — події з `ButtonId`
+(`Primary`/`Secondary`). Бажані дії: double-click — наступний екран
+(`screens.requestNext()`), click+double — ще одна дія (визначити).
+
+**Застереження.** Якщо на екрані є і click, і double-click, одиночний click
+спрацьовує із затримкою на вікно double-click (~300 мс). Стрибок у грі висить
+на `press`, його це не зачіпає. GPIO35 на `ttgo-t1` — input-only, без
+внутрішньої підтяжки: перевірити на залізі.
+
 ### Єдиний монітор стану системи (loop rate, RAM, ping, WiFi, …)
 
 Дата: 03.10.2026. Назва ще не вибрана: `SystemHealth`, `HealthMonitor`,
@@ -630,7 +648,7 @@ serial-команди виявиться мало.
 | :--- | :--- | :--- |
 | loop rate | `Display::loopFrameRate()` (`lib/Display`) | рахує той, хто *питає*: лічильник росте на кожен виклик, тому в грі його доводиться кликати з `loop()` окремо, а команда `dino` (звіт `loop N/s -> game N fps`) сама його накручує; без дисплея (`esp32-c3`) метрики по суті немає |
 | ping | глобали `currentPing`/`minPing`/`maxPing` у `src/ping.h` | блокуючий `Ping.ping()` у `loop()` (до ~1 с раз на 5 с) |
-| heap | ~20 прямих `ESP.getFreeHeap()`/`getMaxAllocHeap()` у `src/main.cpp` і `WebSystemModule`, cron `heap-watch` | кожен читає «зараз», мінімуму за період ніхто не тримає |
+| heap | ~20 прямих `ESP.getFreeHeap()`/`getMaxAllocHeap()` у `src/System/SystemStatus.cpp`, `src/main.cpp` і `WebSystemModule`, cron `heap-watch` | кожен читає «зараз», мінімуму за період ніхто не тримає |
 | WiFi | `WiFi.status()`/`WiFi.RSSI()` за місцем, стан FSM — `NetworkSupervisor` | — |
 | MQTT | `MqttClient::publishedCount()`/`receivedCount()`/`subscribeDeniedCount()` | ок, але окремо від решти |
 
@@ -848,7 +866,7 @@ console/stream")` (`assets/www/index.html:2192`) відкритим ПОСТІЙ
 **Лишається спробувати:** визнати, що портал і EcoFlow тут так само не
 вміщаються разом одночасно, і вимкнути один з них.
 
-`heap-watch`/`console-mqtt` (`main.cpp`, команди `heap-watch`,
+`heap-watch`/`console-mqtt` (`src/System/SystemStatus.cpp`, `src/Mqtt/MqttSetup.cpp`, команди `heap-watch`,
 `console-mqtt`) лишаються в прошивці як постійний інструмент - знадобляться
 знову, щоб перевірити, чи справді допомагає обраний варіант.
 
@@ -1241,7 +1259,7 @@ publish/subscribe, та сама пастка, що й [[ecoflow-acl-tilky-tochn
 | `EcoflowAuthClient`/`EcoflowAppAuthClient` (`src/Ecoflow/`) | REST login/certification при старті чи протермінуванні токена | разова, рідко |
 | `ecoflowAuditTaskId` (REST-знімок, 30с після NTP) | вже виміряний разовий провал `min free` до ~8 КБ (див. таблицю вище) | разова, раз на завантаження |
 | `GmailSender` (`lib/GmailSender`) | SMTP over TLS | разова, короткий сеанс, закривається одразу (`GmailSender.cpp:132`) |
-| `smtp-probe` (команда, `src/main.cpp`) | діагностичний TLS-конект до SMTP - лише за ручним викликом | разова, за запитом |
+| `smtp-probe` (команда, `src/Mail/MailCommands.cpp`) | діагностичний TLS-конект до SMTP - лише за ручним викликом | разова, за запитом |
 
 Усі чотири вже позначені в `docs/tech_debt.md` як нижчий пріоритет саме тому,
 що НЕ тримають `largest block` постійно зайнятим, як TLS-MQTT-сесія
@@ -1349,7 +1367,7 @@ NTP - поверх уже зайнятого порталом+MQTT heap'а. Зр
 - **Не лише MQTT.** Той самий принцип — TLS не на слабкій платі — стосується
   будь-якого TLS-трафіку з ESP32, не тільки EcoFlow-MQTT:
   - `GmailSender` (`lib/GmailSender`) — SMTP over TLS через ReadyMail;
-  - команда `smtp-probe` (`src/main.cpp:3526`) — діагностичний TLS-конект до
+  - команда `smtp-probe` (`src/Mail/MailCommands.cpp`) — діагностичний TLS-конект до
     SMTP-хоста саме для перевірки mbedTLS-ядра.
   Обидва — кандидати на той самий хаб-механізм, але нижчого пріоритету за
   EcoFlow: обидві сесії й так короткі й закриваються одразу після використання
@@ -1615,7 +1633,7 @@ I2C, «дрижання» дотику (0 переходів «відпусти�
 
 **1. Дзеркало стає інтерактивним** (дешеве продовження). Канва приймає кліки
 й передає їх у `TouchScreen` як координати дотику, кнопка з борга вище дає
-`FLIP_BUTTON`. Пристрій лишається той самий, з панеллю; портал просто
+`PRIMARY_BUTTON`. Пристрій лишається той самий, з панеллю; портал просто
 перестає бути «вітриною». Ціна невелика, користь очевидна — з дивана видно і
 екран, і керування.
 
@@ -2418,7 +2436,7 @@ setupEcoflow     delta= -3112   (було  -3108)
 разу не поворухнулось). Причина - `WebEcoflowModule.cpp:109` рахував
 `ESP.getMaxAllocHeap()` = `heap_caps_get_largest_free_block(MALLOC_CAP_
 INTERNAL)` (`Esp.cpp:173`), а не `MALLOC_CAP_8BIT`, як serial-команда
-`heap` (`main.cpp:3653`). `MALLOC_CAP_INTERNAL` не вимагає байт-
+`heap` (`src/System/SystemStatus.cpp`, `registerSystemStatusCommands()`). `MALLOC_CAP_INTERNAL` не вимагає байт-
 адресованості - рахує зокрема IRAM-регіони, яких `String`/JSON-буфер
 узагалі не може зайняти, тож число не мало стосунку до реальної
 спроможності побудувати відповідь. **Виправлено** - те саме

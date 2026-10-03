@@ -146,7 +146,7 @@
 #define SD_FREQ 400000
 
 // ---------- Кнопка ----------
-#define FLIP_BUTTON_PIN 0  // The BOOT button is tied to GPIO 0
+#define PRIMARY_BUTTON_PIN 0  // The BOOT button is tied to GPIO 0
 
 // ============================================================
 // 5. Налаштування фіч

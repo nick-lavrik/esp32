@@ -97,7 +97,7 @@
 // #define LITTLEFS_BACKGROUND_IMAGE "/space-240x135.jpg"  // у дісплея кришу зносить...
 
 // ---------- Кнопка ----------
-#define FLIP_BUTTON_PIN 0  // The BOOT button is tied to GPIO 0
+#define PRIMARY_BUTTON_PIN 0  // The BOOT button is tied to GPIO 0
 
 // ---------- LED ----------
 #define BLINK_LED_PIN 2  // D4, вбудований LED

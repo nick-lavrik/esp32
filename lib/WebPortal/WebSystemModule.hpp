@@ -31,7 +31,7 @@ struct WebSystemSdInfo {
 
 class WebSystemModule : public IWebModule {
 public:
-  // Той самий колбек, що йде у WebFilesModule (main.cpp, setupWebPortal()) -
+  // Той самий колбек, що йде у WebFilesModule (src/Web/WebPortalSetup.cpp, setupWebPortal()) -
   // формула used/total для LittleFS одна на весь портал.
   using FsUsageFn = std::function<bool(size_t& used, size_t& total)>;
 

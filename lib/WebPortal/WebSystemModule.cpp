@@ -10,7 +10,7 @@
 #include <nvs.h>
 #endif
 
-// Той самий набір показників, що серійна команда 'heap' (src/main.cpp):
+// Той самий набір показників, що серійна команда 'heap' (src/System/SystemStatus.cpp):
 // фрагментація важливіша за сам обсяг вільного heap - алокація падає, коли
 // немає ОДНОГО суцільного блоку потрібного розміру, а не коли вільного мало
 // сумарно.
@@ -52,7 +52,7 @@ String WebSystemModule::heapStatsJson() {
 
 // Паспорт самого чипа (модель, ревізія, ядра, частота, PSRAM) - статичні дані,
 // які ніде на порталі ще не показано; та сама інформація вже друкує серійна
-// команда 'sysinfo' (dumpSystemInfo(), src/main.cpp), тут лише її JSON-зріз.
+// команда 'status sys' (dumpSystemInfo(), src/System/SystemStatus.cpp), тут лише її JSON-зріз.
 String WebSystemModule::chipInfoJson() {
 #if defined(ESP32)
   String json = "{\"model\":";

@@ -53,7 +53,7 @@ public:
   // debug-рамка дотику).
   virtual bool overlays() const { return false; }
 
-  // Кнопка FLIP_BUTTON_PIN. Довге утримання (3 с) за замовчуванням повертає
+  // Головна кнопка (PRIMARY_BUTTON_PIN). Довге утримання (3 с) за замовчуванням повертає
   // на основний екран - щоб з будь-якого режиму був вихід без консолі.
   virtual void onButtonPress(uint32_t nowMs) {}
   virtual void onButtonRelease(uint32_t nowMs, uint32_t heldMs) {}
